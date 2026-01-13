@@ -5,25 +5,33 @@ services:
     build: .
     container_name: parkinson_api
     ports:
-      - "5000:5000"
+      - "${API_PORT:-5000}:5000"
     volumes:
-      - ./results.json:/app/results.json
-      - ./results:/app/results
+      - ./data/results.json:/app/results.json
+      - ./data/results:/app/results
     environment:
       - PORT=5000
+      - FLASK_ENV=production
+      - DEBUG=False
+      - HOST=0.0.0.0
     restart: unless-stopped
     networks:
       - parkinson_network
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:5000/api/stats"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
 
   bot:
     build: .
     container_name: parkinson_bot
     command: python start_bot.py
     volumes:
-      - ./results.json:/app/results.json
-      - ./results:/app/results
+      - ./data/results.json:/app/results.json
+      - ./data/results:/app/results
     environment:
-      - TELEGRAM_BOT_TOKEN=${TELEGRAM_BOT_TOKEN:-8365860763:AAEPKawMwP4KC_qYE1qcSvi2v2cg2SpUXg8}
+      - TELEGRAM_BOT_TOKEN=${TELEGRAM_BOT_TOKEN}
       - API_URL=${API_URL:-http://api:5000}
     depends_on:
       - api

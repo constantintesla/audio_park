@@ -523,6 +523,10 @@ def serve_static(path):
 
 if __name__ == '__main__':
     port = int(os.getenv('PORT', 5000))
+    host = os.getenv('HOST', '0.0.0.0')
     # В production отключить debug
     debug = os.getenv('DEBUG', 'False').lower() == 'true'
-    app.run(host='0.0.0.0', port=port, debug=debug)
+    flask_env = os.getenv('FLASK_ENV', 'development')
+    
+    logger.info(f"Запуск API сервера на {host}:{port} (env: {flask_env}, debug: {debug})")
+    app.run(host=host, port=port, debug=debug)

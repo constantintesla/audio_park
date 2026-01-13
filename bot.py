@@ -341,6 +341,9 @@ def main():
     """Главная функция для запуска бота"""
     # Получение токена из переменной окружения или использование дефолтного
     token = os.getenv("TELEGRAM_BOT_TOKEN", "8365860763:AAEPKawMwP4KC_qYE1qcSvi2v2cg2SpUXg8")
+    # API_URL должен быть внешним URL для production
+    # Для Docker: http://api:5000 (внутренний)
+    # Для внешнего доступа: https://yourdomain.com или http://your-ip:5000
     api_url = os.getenv("API_URL", "http://localhost:5000")
     
     if not token:

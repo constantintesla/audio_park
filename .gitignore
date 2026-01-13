@@ -12,6 +12,7 @@ ENV/
 # Результаты и данные
 results.json
 results/
+data/
 temp_voice_*.ogg
 *.wav
 *.mp3
@@ -31,6 +32,8 @@ Thumbs.db
 .env
 .env.local
 .docker-compose.env
+.env.production
+.env.prod
 
 # Логи
 *.log
