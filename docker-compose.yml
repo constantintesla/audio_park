@@ -5,12 +5,16 @@ services:
     build: .
     container_name: parkinson_api
     ports:
-      - "5000:5000"
+      - "${API_PORT:-5000}:5000"
     volumes:
       - ./results.json:/app/results.json
       - ./results:/app/results
+    env_file:
+      - .env
     environment:
       - PORT=5000
+      - FLASK_ENV=${FLASK_ENV:-development}
+      - DEBUG=${DEBUG:-True}
     restart: unless-stopped
     networks:
       - parkinson_network
@@ -22,6 +26,8 @@ services:
     volumes:
       - ./results.json:/app/results.json
       - ./results:/app/results
+    env_file:
+      - .env
     environment:
       - TELEGRAM_BOT_TOKEN=${TELEGRAM_BOT_TOKEN}
       - API_URL=${API_URL:-http://api:5000}

@@ -16,6 +16,20 @@ if ! command -v docker-compose &> /dev/null; then
     exit 1
 fi
 
+# Проверка наличия .env файла
+if [ ! -f .env ]; then
+    echo "📝 Создание .env файла из примера..."
+    if [ -f env.example ]; then
+        cp env.example .env
+        echo "⚠️  ВАЖНО: Отредактируйте .env и укажите TELEGRAM_BOT_TOKEN"
+        echo ""
+        read -p "Нажмите Enter после редактирования .env файла..."
+    else
+        echo "❌ Файл env.example не найден!"
+        exit 1
+    fi
+fi
+
 echo "📦 Сборка и запуск контейнеров..."
 docker-compose up -d --build
 

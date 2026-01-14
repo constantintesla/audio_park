@@ -9,10 +9,12 @@ services:
     volumes:
       - ./data/results.json:/app/results.json
       - ./data/results:/app/results
+    env_file:
+      - .env
     environment:
       - PORT=5000
-      - FLASK_ENV=production
-      - DEBUG=False
+      - FLASK_ENV=${FLASK_ENV:-production}
+      - DEBUG=${DEBUG:-False}
       - HOST=0.0.0.0
     restart: unless-stopped
     networks:
@@ -30,6 +32,8 @@ services:
     volumes:
       - ./data/results.json:/app/results.json
       - ./data/results:/app/results
+    env_file:
+      - .env
     environment:
       - TELEGRAM_BOT_TOKEN=${TELEGRAM_BOT_TOKEN}
       - API_URL=${API_URL:-http://api:5000}

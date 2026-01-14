@@ -20,6 +20,21 @@ if %ERRORLEVEL% NEQ 0 (
     exit /b 1
 )
 
+REM Проверка наличия .env файла
+if not exist .env (
+    echo 📝 Создание .env файла из примера...
+    if exist env.example (
+        copy env.example .env >nul
+        echo ⚠️  ВАЖНО: Отредактируйте .env и укажите TELEGRAM_BOT_TOKEN
+        echo.
+        pause
+    ) else (
+        echo ❌ Файл env.example не найден!
+        pause
+        exit /b 1
+    )
+)
+
 echo 📦 Сборка и запуск контейнеров...
 docker-compose up -d --build
 

@@ -3,12 +3,11 @@
 
 # Telegram Bot Token (ОБЯЗАТЕЛЬНО)
 # Получите токен у @BotFather в Telegram
-TELEGRAM_BOT_TOKEN=your_bot_token_here
-
+TELEGRAM_BOT_TOKEN=8365860763:AAEPKawMwP4KC_qYE1qcSvi2v2cg2SpUXg8
 # API URL (внешний URL вашего сервера)
 # Для Docker: используйте внутренний URL http://api:5000
 # Для внешнего доступа: https://yourdomain.com или http://your-ip:5000
-API_URL=http://api:5000
+API_URL=http://10.53.16.53:5000
 
 # Порт для API (опционально, по умолчанию 5000)
 API_PORT=5000
@@ -26,4 +25,4 @@ USE_SSL=true
 # IP-адрес сервера для добавления в SSL сертификат (опционально)
 # Если сервер доступен по IP (например, 10.53.16.53), укажите его здесь
 # Сертификат будет автоматически пересоздан с этим IP при следующем запуске
-# SERVER_IP=10.53.16.53
+SERVER_IP=10.53.16.53

@@ -4,11 +4,19 @@
 """
 import numpy as np
 import librosa
-import parselmouth
-from parselmouth.praat import call
 from typing import Dict, List, Optional
 import warnings
 warnings.filterwarnings('ignore')
+
+# Импорт parselmouth (praat-parselmouth) для точного анализа голоса
+# Используется для извлечения F0, jitter, shimmer и параметров DSI
+try:
+    import parselmouth
+    from parselmouth.praat import call
+    HAS_PARSELMOUTH = True
+except (ImportError, ModuleNotFoundError) as e:
+    HAS_PARSELMOUTH = False
+    print(f"Предупреждение: parselmouth недоступен ({e}). Некоторые функции будут ограничены.")
 
 
 class FeatureExtractor:
@@ -29,29 +37,33 @@ class FeatureExtractor:
         """
         features = {}
         
-        # Конвертация в формат parselmouth для анализа F0
-        try:
-            # Нормализация для parselmouth (требует float в диапазоне [-1, 1])
-            audio_normalized = audio / (np.max(np.abs(audio)) + 1e-10)
-            sound = parselmouth.Sound(audio_normalized, sampling_frequency=self.sample_rate)
-            
-            # Извлечение основных признаков
-            features.update(self._extract_pitch_features(sound, audio))
-            features.update(self._extract_amplitude_features(audio))
-            features.update(self._extract_articulation_features(audio))
-            features.update(self._extract_spectral_features(audio))
-            
-            # Извлечение параметров для DSI
-            features.update(self._extract_dsi_parameters(sound, audio))
-            
-        except Exception as e:
-            print(f"Предупреждение при извлечении признаков: {str(e)}")
-            # Fallback на librosa
+        # Конвертация в формат parselmouth для анализа F0 (если доступен)
+        if HAS_PARSELMOUTH:
+            try:
+                # Нормализация для parselmouth (требует float в диапазоне [-1, 1])
+                audio_normalized = audio / (np.max(np.abs(audio)) + 1e-10)
+                sound = parselmouth.Sound(audio_normalized, sampling_frequency=self.sample_rate)
+                
+                # Извлечение основных признаков
+                features.update(self._extract_pitch_features(sound, audio))
+                features.update(self._extract_amplitude_features(audio))
+                features.update(self._extract_articulation_features(audio))
+                features.update(self._extract_spectral_features(audio))
+                
+                # Извлечение параметров для DSI
+                features.update(self._extract_dsi_parameters(sound, audio))
+                
+            except Exception as e:
+                print(f"Предупреждение при извлечении признаков через parselmouth: {str(e)}")
+                # Fallback на librosa
+                features.update(self._extract_features_librosa(audio))
+        else:
+            # Используем только librosa
             features.update(self._extract_features_librosa(audio))
         
         return features
     
-    def _extract_pitch_features(self, sound: parselmouth.Sound, 
+    def _extract_pitch_features(self, sound, 
                                 audio: np.ndarray) -> Dict[str, float]:
         """Извлечение признаков высоты тона (pitch)"""
         features = {}
@@ -71,8 +83,8 @@ class FeatureExtractor:
                 # Jitter (вариация периода)
                 features['jitter_percent'] = self._calculate_jitter(f0_values)
                 
-                # Shimmer (вариация амплитуды)
-                features['shimmer_percent'] = self._calculate_shimmer(sound, f0_values)
+                # Shimmer (вариация амплитуды) - передаем pitch объект для точной синхронизации
+                features['shimmer_percent'] = self._calculate_shimmer(sound, f0_values, pitch)
                 
                 # RAP (Relative Average Perturbation)
                 if len(f0_values) > 2:
@@ -90,7 +102,7 @@ class FeatureExtractor:
                 
                 # APQ (Amplitude Perturbation Quotient) для shimmer
                 if len(f0_values) > 2:
-                    apq = self._calculate_apq(sound, f0_values)
+                    apq = self._calculate_apq(sound, f0_values, pitch)
                     features['shimmer_apq'] = float(apq)
             else:
                 # Нет вокализации
@@ -118,44 +130,73 @@ class FeatureExtractor:
         jitter = (np.mean(period_diff) / np.mean(periods)) * 100
         return float(jitter)
     
-    def _calculate_shimmer(self, sound: parselmouth.Sound, 
-                          f0_values: np.ndarray) -> float:
-        """Расчет shimmer как процент вариации амплитуды"""
+    def _calculate_shimmer(self, sound, 
+                          f0_values: np.ndarray,
+                          pitch=None) -> float:
+        """
+        Расчет shimmer как процент вариации амплитуды
+        
+        Shimmer измеряет вариацию амплитуды между соседними периодами F0
+        Норма: 2-4%, патология: >6-12%
+        """
         if len(f0_values) < 2:
             return 0.0
         
         try:
-            # Получение амплитуд для каждого периода
-            amplitudes = []
-            duration = sound.get_total_duration()
-            time_step = duration / len(f0_values)
+            # Если pitch объект не передан, получаем его
+            if pitch is None:
+                pitch = sound.to_pitch_ac(time_step=0.01)
             
-            for i, f0 in enumerate(f0_values):
-                if f0 > 0:
-                    time_point = i * time_step
-                    if time_point < duration:
-                        # Извлечение RMS амплитуды в окне вокруг точки
-                        start_time = max(0, time_point - 0.01)
-                        end_time = min(duration, time_point + 0.01)
-                        segment = sound.extract_part(start_time, end_time, 
-                                                    preserve_times=False)
-                        rms = segment.values.std()  # Используем std как меру амплитуды
-                        amplitudes.append(rms)
+            # Получаем все F0 значения с временными метками из pitch объекта
+            pitch_times = pitch.xs()  # Временные метки для каждого F0 значения
+            pitch_freqs = pitch.selected_array['frequency']  # Все F0 значения (включая 0)
+            
+            # Получаем интенсивность с тем же временным шагом
+            intensity = sound.to_intensity(time_step=0.01)
+            intensity_times = intensity.xs()
+            intensity_values = intensity.values[0]
+            
+            # Собираем амплитуды только для валидных F0 значений (f0 > 0)
+            amplitudes = []
+            for i, f0_freq in enumerate(pitch_freqs):
+                if f0_freq > 0 and i < len(pitch_times):
+                    time_point = pitch_times[i]
+                    
+                    # Находим ближайший индекс в массиве интенсивности
+                    # Интенсивность и pitch имеют одинаковый time_step (0.01)
+                    if len(intensity_times) > 0:
+                        intensity_idx = int(round((time_point - intensity_times[0]) / 0.01))
+                        
+                        if 0 <= intensity_idx < len(intensity_values):
+                            amp = intensity_values[intensity_idx]
+                            if amp > 0:
+                                amplitudes.append(amp)
             
             if len(amplitudes) >= 2:
+                # Shimmer = средняя абсолютная разница амплитуд / средняя амплитуда * 100
+                # Это стандартная формула shimmer (local, shimmer %)
                 amp_diff = np.abs(np.diff(amplitudes))
-                shimmer = (np.mean(amp_diff) / (np.mean(amplitudes) + 1e-10)) * 100
-                return float(shimmer)
-        except:
-            pass
+                mean_amp = np.mean(amplitudes)
+                
+                if mean_amp > 0:
+                    shimmer = (np.mean(amp_diff) / mean_amp) * 100
+                    # Ограничиваем разумными значениями (shimmer обычно <50% для патологии)
+                    # Значения >50% обычно указывают на ошибку расчета
+                    shimmer = min(shimmer, 50.0)
+                    return float(shimmer)
+        except Exception as e:
+            print(f"Ошибка расчета shimmer: {str(e)}")
+            import traceback
+            traceback.print_exc()
         
         return 0.0
     
-    def _calculate_apq(self, sound: parselmouth.Sound, 
-                      f0_values: np.ndarray) -> float:
+    def _calculate_apq(self, sound, 
+                      f0_values: np.ndarray,
+                      pitch=None) -> float:
         """Расчет APQ (Amplitude Perturbation Quotient)"""
-        # Упрощенная версия
-        return self._calculate_shimmer(sound, f0_values)
+        # Упрощенная версия - используем тот же метод, что и shimmer
+        return self._calculate_shimmer(sound, f0_values, pitch)
     
     def _extract_amplitude_features(self, audio: np.ndarray) -> Dict[str, float]:
         """Извлечение признаков амплитуды"""
@@ -364,12 +405,18 @@ class FeatureExtractor:
         features['shimmer_percent'] = 0.0  # Сложно без parselmouth
         features['hnr_db'] = self._calculate_hnr(audio)
         
-        # Базовые параметры DSI через librosa
-        try:
-            audio_normalized = audio / (np.max(np.abs(audio)) + 1e-10)
-            sound = parselmouth.Sound(audio_normalized, sampling_frequency=self.sample_rate)
-            features.update(self._extract_dsi_parameters(sound, audio))
-        except:
+        # Базовые параметры DSI через librosa (если parselmouth доступен)
+        if HAS_PARSELMOUTH:
+            try:
+                audio_normalized = audio / (np.max(np.abs(audio)) + 1e-10)
+                sound = parselmouth.Sound(audio_normalized, sampling_frequency=self.sample_rate)
+                features.update(self._extract_dsi_parameters(sound, audio))
+            except:
+                # Fallback значения для DSI параметров
+                features['mpt_sec'] = 0.0
+                features['f0_high_hz'] = 0.0
+                features['i_low_db'] = 0.0
+        else:
             # Fallback значения для DSI параметров
             features['mpt_sec'] = 0.0
             features['f0_high_hz'] = 0.0
@@ -377,7 +424,7 @@ class FeatureExtractor:
         
         return features
     
-    def _extract_dsi_parameters(self, sound: parselmouth.Sound, 
+    def _extract_dsi_parameters(self, sound, 
                                audio: np.ndarray) -> Dict[str, float]:
         """
         Извлечение параметров для расчета DSI (Dysphonia Severity Index)
@@ -411,7 +458,7 @@ class FeatureExtractor:
         
         return features
     
-    def _calculate_max_phonation(self, sound: parselmouth.Sound, 
+    def _calculate_max_phonation(self, sound, 
                                 audio: np.ndarray) -> float:
         """
         Расчет максимального времени фонации (MPT)
@@ -424,8 +471,16 @@ class FeatureExtractor:
             intensity = sound.to_intensity(time_step=0.01)
             intensity_values = intensity.values[0]
             
-            # Порог для обнаружения вокализации (50% от максимума)
-            threshold = np.max(intensity_values) * 0.5
+            # Более низкий порог для обнаружения вокализации (20% от максимума)
+            # Это позволяет лучше обнаруживать речь с естественными паузами
+            max_intensity = np.max(intensity_values)
+            if max_intensity <= 0:
+                return len(audio) / self.sample_rate
+            
+            # Используем адаптивный порог: 20% от максимума или медиану, что больше
+            threshold_relative = max_intensity * 0.20
+            threshold_median = np.median(intensity_values[intensity_values > 0])
+            threshold = max(threshold_relative, threshold_median * 0.5)
             
             # Находим непрерывные сегменты вокализации
             vocal_segments = intensity_values >= threshold
@@ -441,13 +496,19 @@ class FeatureExtractor:
                 else:
                     current_duration = 0.0
             
-            return max_duration if max_duration > 0 else len(audio) / self.sample_rate
+            # Если не нашли вокализацию, используем общую длительность
+            if max_duration > 0:
+                return max_duration
+            else:
+                # Fallback: используем общую длительность аудио
+                return len(audio) / self.sample_rate
             
         except Exception as e:
+            print(f"Ошибка расчета MPT: {str(e)}")
             # Fallback: используем общую длительность аудио
             return len(audio) / self.sample_rate
     
-    def _calculate_highest_f0(self, sound: parselmouth.Sound) -> float:
+    def _calculate_highest_f0(self, sound) -> float:
         """
         Расчет высшей частоты F0 (F0-High)
         
@@ -468,29 +529,50 @@ class FeatureExtractor:
         except Exception as e:
             return 0.0
     
-    def _calculate_lowest_intensity(self, sound: parselmouth.Sound) -> float:
+    def _calculate_lowest_intensity(self, sound) -> float:
         """
         Расчет низшей интенсивности в дБ (I-Low)
         
         Норма: <45 дБ, при ПД: повышена (>55 дБ, тихий голос)
         Примечание: I-Low - это минимальная интенсивность во время вокализации
+        
+        Parselmouth возвращает интенсивность в Паскалях, нужно конвертировать в дБ
+        Формула: I_dB = 20 * log10(I_Pa / I_ref), где I_ref = 2e-5 Па (порог слышимости)
         """
         try:
             intensity = sound.to_intensity(time_step=0.01)
             intensity_values = intensity.values[0]
             
             # Фильтруем только вокализацию (исключаем тишину)
-            # Порог для вокализации (30% от максимума)
-            threshold = np.max(intensity_values) * 0.3
+            # Порог для вокализации (20% от максимума)
+            max_intensity = np.max(intensity_values)
+            if max_intensity <= 0:
+                return 0.0
+            
+            threshold = max_intensity * 0.20
             vocal_intensities = intensity_values[intensity_values >= threshold]
             
             if len(vocal_intensities) > 0:
                 # Берем 5-й перцентиль как I-Low (самая тихая часть вокализации)
-                i_low = np.percentile(vocal_intensities, 5)
-                return float(i_low)
+                i_low_pa = np.percentile(vocal_intensities, 5)
+                
+                # Конвертируем из Паскалей в дБ
+                # I_ref = 2e-5 Па (порог слышимости человека)
+                I_ref = 2e-5
+                if i_low_pa > 0:
+                    i_low_db = 20 * np.log10(i_low_pa / I_ref)
+                    return float(i_low_db)
+                else:
+                    return 0.0
             else:
-                # Если нет вокализации, возвращаем минимальное значение
-                return float(np.min(intensity_values))
+                # Если нет вокализации, возвращаем минимальное значение в дБ
+                min_intensity = np.min(intensity_values[intensity_values > 0])
+                if min_intensity > 0:
+                    I_ref = 2e-5
+                    return float(20 * np.log10(min_intensity / I_ref))
+                else:
+                    return 0.0
                 
         except Exception as e:
+            print(f"Ошибка расчета I-Low: {str(e)}")
             return 0.0

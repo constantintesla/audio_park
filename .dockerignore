@@ -33,11 +33,11 @@ Thumbs.db
 .git/
 .gitignore
 
-# Docker
-Dockerfile
-docker-compose.yml
-.dockerignore
-
 # Документация (опционально, можно оставить)
 # README.md
 # SETUP.md
+
+# Переменные окружения (будут переданы через docker-compose)
+.env
+.env.local
+.env.production

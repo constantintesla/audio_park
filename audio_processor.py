@@ -109,9 +109,12 @@ class AudioProcessor:
         Returns:
             Словарь с данными волновой формы
         """
+        duration = len(audio) / self.target_sr
+        time_axis = np.linspace(0, duration, len(audio))
         return {
-            "amplitude": audio.tolist(),
-            "duration": len(audio) / self.target_sr
+            "amplitude": audio,
+            "time": time_axis,
+            "duration": duration
         }
     
     def get_spectrogram(self, audio: np.ndarray, sr: int) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:

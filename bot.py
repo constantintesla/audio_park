@@ -5,6 +5,7 @@ import os
 import sys
 import asyncio
 import logging
+import shutil
 from datetime import datetime
 from typing import Optional
 import json
@@ -44,7 +45,9 @@ class ParkinsonBot:
         self.bot = Bot(token=token)
         self.dp = Dispatcher(storage=MemoryStorage())
         self.api_url = api_url
-        self.analyzer = ParkinsonAnalyzer()
+        # Создаем analyzer с сохранением сырых данных (по умолчанию)
+        self.analyzer = ParkinsonAnalyzer(save_raw_data=True, raw_data_dir="results")
+        logger.info("ParkinsonAnalyzer инициализирован с сохранением сырых данных")
         
         # Регистрация handlers
         self.register_handlers()
@@ -104,26 +107,49 @@ class ParkinsonBot:
                 # Скачивание файла
                 file_data = await self.bot.download_file(file_path)
                 
+                # Получение информации о пользователе для генерации ID
+                username = message.from_user.username or f"user_{message.from_user.id}"
+                user_id = message.from_user.id
+                timestamp = datetime.now()
+                timestamp_str = timestamp.isoformat()
+                
+                # Генерация уникального ID для результата
+                result_id = f"{user_id}_{timestamp.strftime('%Y%m%d_%H%M%S_%f')[:-3]}"
+                
                 # Сохранение во временный файл
-                temp_file = f"temp_voice_{message.from_user.id}_{datetime.now().timestamp()}.ogg"
+                temp_file = f"temp_voice_{result_id}.ogg"
                 with open(temp_file, 'wb') as f:
                     f.write(file_data.read())
                 
-                # Анализ аудио
-                result = self.analyzer.analyze_audio_file(temp_file)
-                
-                # Получение информации о пользователе
-                username = message.from_user.username or f"user_{message.from_user.id}"
-                user_id = message.from_user.id
-                timestamp = datetime.now().isoformat()
+                # Анализ аудио с сохранением сырых данных
+                logger.info(f"Начало анализа с сохранением сырых данных, result_id={result_id}")
+                result = self.analyzer.analyze_audio_file(temp_file, save_raw=True, result_id=result_id)
                 
                 # Добавление информации о пользователе в результат
                 result['user_info'] = {
                     'tg_username': username,
                     'tg_user_id': user_id,
-                    'timestamp': timestamp,
+                    'timestamp': timestamp_str,
                     'reading_text': READING_TEXT
                 }
+                
+                # Проверка сохранения сырых данных
+                if 'raw_data' in result and result.get('raw_data'):
+                    raw_data_dir = result['raw_data']['data_directory']
+                    logger.info(f"✅ Сырые данные сохранены в: {raw_data_dir}")
+                    logger.info(f"   Файлы: {list(result['raw_data']['files'].keys())}")
+                    
+                    # Сохранение исходного файла в директорию сырых данных (если еще не сохранен)
+                    original_path = os.path.join(raw_data_dir, "original.ogg")
+                    if not os.path.exists(original_path):
+                        shutil.copy2(temp_file, original_path)
+                        result['raw_data']['files']['original_audio'] = original_path
+                        logger.info(f"   Исходный файл скопирован: {original_path}")
+                else:
+                    logger.warning(f"⚠️  Сырые данные не были сохранены! result_id={result_id}")
+                    logger.warning(f"   raw_data в результате: {'raw_data' in result}")
+                    if 'raw_data' in result:
+                        logger.warning(f"   raw_data значение: {result.get('raw_data')}")
                 
                 # Сохранение результата через API
                 try:
@@ -143,11 +169,13 @@ class ParkinsonBot:
                 await processing_msg.delete()
                 await self._send_report_to_user(message, result)
                 
-                # Удаление временного файла
-                try:
-                    os.remove(temp_file)
-                except:
-                    pass
+                # НЕ удаляем временный файл, если сырые данные сохранены
+                # (файл уже скопирован в директорию сырых данных)
+                if 'raw_data' not in result or not result.get('raw_data'):
+                    try:
+                        os.remove(temp_file)
+                    except:
+                        pass
                 
                 await state.clear()
                 

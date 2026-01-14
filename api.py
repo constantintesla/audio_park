@@ -14,7 +14,8 @@ logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 app = Flask(__name__)
-CORS(app)  # Разрешить CORS для веб-интерфейса
+# Разрешить CORS для веб-интерфейса со всех источников
+CORS(app, resources={r"/api/*": {"origins": "*"}})
 
 # Путь к файлу для хранения результатов
 RESULTS_FILE = "results.json"
@@ -29,20 +30,116 @@ def load_results() -> List[Dict]:
     if os.path.exists(RESULTS_FILE):
         try:
             with open(RESULTS_FILE, 'r', encoding='utf-8') as f:
-                return json.load(f)
+                data = json.load(f)
+                # Убеждаемся, что это список
+                if isinstance(data, list):
+                    return data
+                else:
+                    logger.warning("Файл results.json не содержит список, инициализируем пустым списком")
+                    return []
+        except json.JSONDecodeError as e:
+            logger.error(f"Ошибка парсинга JSON: {e}")
+            # Создаем новый файл с пустым списком
+            save_results([])
+            return []
         except Exception as e:
             logger.error(f"Ошибка загрузки результатов: {e}")
             return []
-    return []
+    else:
+        # Файл не существует, создаем пустой список
+        logger.info(f"Файл {RESULTS_FILE} не найден, создаем новый")
+        save_results([])
+        return []
 
 
 def save_results(results: List[Dict]):
     """Сохранение результатов в файл"""
     try:
+        # Получаем абсолютный путь к файлу
+        file_path = os.path.abspath(RESULTS_FILE)
+        logger.info(f"Сохранение результатов в файл: {file_path} (количество записей: {len(results)})")
+        
         with open(RESULTS_FILE, 'w', encoding='utf-8') as f:
             json.dump(results, f, ensure_ascii=False, indent=2)
+        
+        # Проверяем, что файл создан
+        if os.path.exists(RESULTS_FILE):
+            file_size = os.path.getsize(RESULTS_FILE)
+            logger.info(f"Файл успешно сохранен. Размер: {file_size} байт")
+        else:
+            logger.error(f"Файл не был создан: {file_path}")
     except Exception as e:
-        logger.error(f"Ошибка сохранения результатов: {e}")
+        logger.error(f"Ошибка сохранения результатов: {e}", exc_info=True)
+
+
+@app.route('/api/analyze', methods=['POST'])
+def analyze_audio():
+    """Анализ аудиофайла с сохранением сырых данных"""
+    try:
+        from parkinson_analyzer import ParkinsonAnalyzer
+        from datetime import datetime
+        
+        # Проверка наличия файла
+        if 'file' not in request.files:
+            return jsonify({"error": "Файл не предоставлен"}), 400
+        
+        file = request.files['file']
+        if file.filename == '':
+            return jsonify({"error": "Файл не выбран"}), 400
+        
+        # Сохранение временного файла
+        import tempfile
+        import uuid
+        result_id = f"web_{datetime.now().strftime('%Y%m%d_%H%M%S_%f')[:-3]}_{uuid.uuid4().hex[:8]}"
+        
+        temp_dir = tempfile.gettempdir()
+        temp_file = os.path.join(temp_dir, f"temp_{result_id}_{file.filename}")
+        file.save(temp_file)
+        
+        try:
+            # Анализ с сохранением сырых данных
+            # Используем абсолютный путь для RESULTS_DIR
+            results_dir_abs = os.path.abspath(RESULTS_DIR)
+            logger.info(f"📁 Сохранение сырых данных в: {results_dir_abs}")
+            analyzer = ParkinsonAnalyzer(save_raw_data=True, raw_data_dir=results_dir_abs)
+            result = analyzer.analyze_audio_file(temp_file, save_raw=True, result_id=result_id)
+            
+            # Добавление информации о пользователе
+            result['user_info'] = {
+                'tg_username': request.form.get('username', 'web_user'),
+                'tg_user_id': request.form.get('user_id', 0),
+                'timestamp': datetime.now().isoformat(),
+                'source': 'web_interface',
+                'filename': file.filename
+            }
+            
+            # Сохранение результата
+            results = load_results()
+            results.append(result)
+            save_results(results)
+            
+            # Проверяем наличие сырых данных в результате
+            if 'raw_data' in result:
+                logger.info(f"✅ Сырые данные сохранены для {result_id}: {result['raw_data'].get('data_directory', 'N/A')}")
+                logger.info(f"   Файлы: {list(result['raw_data'].get('files', {}).keys())}")
+            else:
+                logger.warning(f"⚠️  Сырые данные НЕ сохранены для {result_id}")
+            
+            logger.info(f"Анализ выполнен и сохранен: {result_id}")
+            
+            return jsonify(result), 200
+            
+        finally:
+            # Удаление временного файла
+            try:
+                if os.path.exists(temp_file):
+                    os.remove(temp_file)
+            except:
+                pass
+        
+    except Exception as e:
+        logger.error(f"Ошибка анализа аудио: {e}", exc_info=True)
+        return jsonify({"error": str(e)}), 500
 
 
 @app.route('/api/results', methods=['POST'])
@@ -52,23 +149,33 @@ def save_result():
         data = request.json
         
         if not data:
+            logger.warning("Попытка сохранить результат без данных")
             return jsonify({"error": "Нет данных"}), 400
+        
+        logger.info(f"Получен запрос на сохранение результата от пользователя {data.get('user_info', {}).get('tg_username', 'unknown')}")
         
         # Загрузка существующих результатов
         results = load_results()
+        logger.info(f"Загружено существующих результатов: {len(results)}")
         
         # Добавление нового результата
         results.append(data)
+        logger.info(f"Добавлен новый результат. Всего результатов: {len(results)}")
         
         # Сохранение
         save_results(results)
         
-        logger.info(f"Результат сохранен для пользователя {data.get('user_info', {}).get('tg_username', 'unknown')}")
+        # Проверяем, что результат действительно сохранен
+        saved_results = load_results()
+        if len(saved_results) != len(results):
+            logger.error(f"ОШИБКА: Количество результатов не совпадает! Ожидалось: {len(results)}, сохранено: {len(saved_results)}")
+        else:
+            logger.info(f"Результат успешно сохранен. Всего в файле: {len(saved_results)}")
         
-        return jsonify({"status": "success", "message": "Результат сохранен"}), 200
+        return jsonify({"status": "success", "message": "Результат сохранен", "total": len(saved_results)}), 200
         
     except Exception as e:
-        logger.error(f"Ошибка сохранения результата: {e}")
+        logger.error(f"Ошибка сохранения результата: {e}", exc_info=True)
         return jsonify({"error": str(e)}), 500
 
 
