@@ -51,18 +51,23 @@ docker-compose up -d --build
 
 ## Переменные окружения
 
-Токен бота уже настроен в `docker-compose.yml`. Для изменения:
+Токен бота должен быть указан в переменной окружения `TELEGRAM_BOT_TOKEN`. 
 
-1. Отредактируйте `docker-compose.yml`:
-```yaml
-environment:
-  - TELEGRAM_BOT_TOKEN=ваш_новый_токен
+1. Создайте файл `.env` на основе `env.example`:
+```bash
+cp env.example .env
+nano .env  # Укажите ваш TELEGRAM_BOT_TOKEN
 ```
 
-2. Или создайте файл `.env` и используйте:
-```yaml
-environment:
-  - TELEGRAM_BOT_TOKEN=${TELEGRAM_BOT_TOKEN}
+2. Запустите с использованием .env файла:
+```bash
+docker-compose --env-file .env up -d
+```
+
+Или установите переменную окружения напрямую:
+```bash
+export TELEGRAM_BOT_TOKEN="ваш_токен"
+docker-compose up -d
 ```
 
 ## Резервное копирование данных

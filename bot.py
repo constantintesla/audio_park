@@ -2,6 +2,7 @@
 Telegram бот для анализа голоса на симптомы болезни Паркинсона
 """
 import os
+import sys
 import asyncio
 import logging
 from datetime import datetime
@@ -339,17 +340,19 @@ class ParkinsonBot:
 
 def main():
     """Главная функция для запуска бота"""
-    # Получение токена из переменной окружения или использование дефолтного
-    token = os.getenv("TELEGRAM_BOT_TOKEN", "8365860763:AAEPKawMwP4KC_qYE1qcSvi2v2cg2SpUXg8")
+    # Получение токена из переменной окружения (обязательно)
+    token = os.getenv("TELEGRAM_BOT_TOKEN")
     # API_URL должен быть внешним URL для production
     # Для Docker: http://api:5000 (внутренний)
     # Для внешнего доступа: https://yourdomain.com или http://your-ip:5000
     api_url = os.getenv("API_URL", "http://localhost:5000")
     
     if not token:
-        print("Ошибка: не указан TELEGRAM_BOT_TOKEN")
-        print("Установите токен: export TELEGRAM_BOT_TOKEN='ваш_токен'")
-        return
+        print("ОШИБКА: не указан TELEGRAM_BOT_TOKEN")
+        print("Установите токен через переменную окружения:")
+        print("  export TELEGRAM_BOT_TOKEN='ваш_токен'")
+        print("Или создайте файл .env с переменной TELEGRAM_BOT_TOKEN")
+        sys.exit(1)
     
     try:
         bot = ParkinsonBot(token, api_url)
