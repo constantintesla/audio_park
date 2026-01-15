@@ -1,0 +1,2625 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Анализ голоса на болезнь Паркинсона</title>
+    
+    <!-- Bootstrap 5 CSS -->
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+    
+    <!-- Wavesurfer.js CSS -->
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/wavesurfer.js@6/dist/wavesurfer.min.css">
+    
+    <style>
+        :root {
+            --medical-blue: #2c5f8d;
+            --medical-light-blue: #4a90c2;
+            --medical-grey: #6c757d;
+            --medical-light-grey: #e9ecef;
+            --risk-high: #dc3545;
+            --risk-medium: #ffc107;
+            --risk-low: #28a745;
+        }
+        
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background: linear-gradient(135deg, #f5f7fa 0%, #e9ecef 100%);
+            min-height: 100vh;
+            padding: 20px 0;
+        }
+        
+        .container {
+            max-width: 1200px;
+        }
+        
+        .header {
+            background: linear-gradient(135deg, var(--medical-blue) 0%, var(--medical-light-blue) 100%);
+            color: white;
+            padding: 30px;
+            border-radius: 15px;
+            margin-bottom: 30px;
+            box-shadow: 0 4px 6px rgba(0,0,0,0.1);
+        }
+        
+        .header h1 {
+            margin: 0;
+            font-size: 2rem;
+            font-weight: 600;
+        }
+        
+        .header p {
+            margin: 10px 0 0 0;
+            opacity: 0.9;
+        }
+        
+        .card {
+            border: none;
+            border-radius: 15px;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+            margin-bottom: 20px;
+        }
+        
+        .card-header {
+            background: var(--medical-light-grey);
+            border-bottom: 2px solid var(--medical-blue);
+            font-weight: 600;
+            padding: 15px 20px;
+        }
+        
+        #upload-zone {
+            border: 3px dashed var(--medical-blue);
+            border-radius: 10px;
+            padding: 40px;
+            text-align: center;
+            background: white;
+            cursor: pointer;
+            transition: all 0.3s;
+            margin-bottom: 20px;
+        }
+        
+        #upload-zone:hover {
+            background: var(--medical-light-grey);
+            border-color: var(--medical-light-blue);
+        }
+        
+        #upload-zone.dragover {
+            background: #d4edda;
+            border-color: var(--risk-low);
+        }
+        
+        #file-input {
+            display: none;
+        }
+        
+        .btn-primary {
+            background: var(--medical-blue);
+            border: none;
+            padding: 12px 30px;
+            font-size: 1.1rem;
+            border-radius: 8px;
+            transition: all 0.3s;
+        }
+        
+        .btn-primary:hover {
+            background: var(--medical-light-blue);
+            transform: translateY(-2px);
+            box-shadow: 0 4px 8px rgba(0,0,0,0.2);
+        }
+        
+        .btn-primary:disabled {
+            background: var(--medical-grey);
+            cursor: not-allowed;
+        }
+        
+        .btn-record {
+            background: var(--risk-high);
+            color: white;
+            border: none;
+            padding: 12px 30px;
+            font-size: 1.1rem;
+            border-radius: 8px;
+            margin-right: 10px;
+        }
+        
+        .btn-record:hover {
+            background: #c82333;
+        }
+        
+        .btn-record.recording {
+            animation: pulse 1.5s infinite;
+        }
+        
+        @keyframes pulse {
+            0%, 100% { opacity: 1; }
+            50% { opacity: 0.6; }
+        }
+        
+        #waveform {
+            margin: 20px 0;
+            border-radius: 10px;
+            overflow: hidden;
+        }
+        
+        .progress-container {
+            display: none;
+            margin: 20px 0;
+        }
+        
+        .progress {
+            height: 30px;
+            border-radius: 15px;
+            background: var(--medical-light-grey);
+        }
+        
+        .progress-bar {
+            background: linear-gradient(90deg, var(--medical-blue), var(--medical-light-blue));
+            transition: width 0.3s;
+        }
+        
+        #results {
+            display: none;
+        }
+        
+        .feature-table {
+            width: 100%;
+            margin: 20px 0;
+        }
+        
+        .feature-table th {
+            background: var(--medical-blue);
+            color: white;
+            padding: 12px;
+            text-align: left;
+        }
+        
+        .feature-table td {
+            padding: 10px 12px;
+            border-bottom: 1px solid #dee2e6;
+        }
+        
+        .feature-table tr:hover {
+            background: var(--medical-light-grey);
+        }
+        
+        .risk-badge {
+            display: inline-block;
+            padding: 8px 16px;
+            border-radius: 20px;
+            font-weight: 600;
+            font-size: 1.1rem;
+        }
+        
+        .risk-high {
+            background: var(--risk-high);
+            color: white;
+        }
+        
+        .risk-medium {
+            background: var(--risk-medium);
+            color: #333;
+        }
+        
+        .risk-low {
+            background: var(--risk-low);
+            color: white;
+        }
+        
+        .symptom-score {
+            display: inline-block;
+            padding: 4px 12px;
+            border-radius: 15px;
+            font-weight: 600;
+            margin: 2px;
+        }
+        
+        .score-0 { background: #d4edda; color: #155724; }
+        .score-1 { background: #fff3cd; color: #856404; }
+        .score-2 { background: #ffeaa7; color: #856404; }
+        .score-3 { background: #f8d7da; color: #721c24; }
+        
+        .report-list {
+            background: white;
+            padding: 20px;
+            border-radius: 10px;
+            margin: 20px 0;
+        }
+        
+        .report-list ul {
+            list-style: none;
+            padding: 0;
+        }
+        
+        .report-list li {
+            padding: 10px;
+            margin: 5px 0;
+            border-left: 4px solid var(--medical-blue);
+            background: var(--medical-light-grey);
+        }
+        
+        .footer {
+            text-align: center;
+            padding: 20px;
+            color: var(--medical-grey);
+            font-size: 0.9rem;
+            margin-top: 40px;
+        }
+        
+        .chart-container {
+            position: relative;
+            height: 300px;
+            margin: 20px 0;
+        }
+        
+        .audio-info {
+            background: white;
+            padding: 15px;
+            border-radius: 10px;
+            margin: 15px 0;
+        }
+        
+        #summary-table-container {
+            margin-bottom: 30px;
+        }
+        
+        #summary-table {
+            font-size: 0.9rem;
+        }
+        
+        #summary-table th {
+            background: var(--medical-blue);
+            color: white;
+            font-weight: 600;
+            white-space: nowrap;
+            position: sticky;
+            top: 0;
+            z-index: 10;
+        }
+        
+        #summary-table th:hover {
+            background: var(--medical-light-blue);
+        }
+        
+        #summary-table td {
+            vertical-align: middle;
+        }
+        
+        #summary-table tbody tr:hover {
+            background-color: #f0f8ff;
+            cursor: pointer;
+        }
+        
+        #table-search {
+            max-width: 400px;
+            margin: 0 auto 15px auto;
+        }
+        
+        .table-badge {
+            padding: 4px 8px;
+            border-radius: 4px;
+            font-size: 0.85rem;
+            font-weight: 600;
+        }
+        
+        .table-badge-high {
+            background: var(--risk-high);
+            color: white;
+        }
+        
+        .table-badge-medium {
+            background: var(--risk-medium);
+            color: #333;
+        }
+        
+        .table-badge-low {
+            background: var(--risk-low);
+            color: white;
+        }
+        
+        .table-badge-minimal {
+            background: #e9ecef;
+            color: #333;
+        }
+        
+        @media (max-width: 768px) {
+            .header h1 {
+                font-size: 1.5rem;
+            }
+            
+            #upload-zone {
+                padding: 20px;
+            }
+            
+            .btn-primary, .btn-record {
+                width: 100%;
+                margin-bottom: 10px;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h1>🎤 Анализ голоса на болезнь Паркинсона</h1>
+            <p>Результаты анализа голосовых сообщений из Telegram бота</p>
+        </div>
+        
+        <!-- Stats Section -->
+        <div class="card mb-3">
+            <div class="card-body">
+                <div class="row text-center">
+                    <div class="col-md-4">
+                        <h3 id="total-analyses">-</h3>
+                        <p class="text-muted">Всего анализов</p>
+                    </div>
+                    <div class="col-md-4">
+                        <h3 id="users-count">-</h3>
+                        <p class="text-muted">Пользователей</p>
+                    </div>
+                    <div class="col-md-4">
+                        <h3 id="recent-analyses">-</h3>
+                        <p class="text-muted">За последние 7 дней</p>
+                    </div>
+                </div>
+            </div>
+        </div>
+        
+        <!-- Local Analysis Section (Collapsible) -->
+        <div class="card mb-3">
+            <div class="card-header" style="cursor: pointer;" id="local-analysis-header">
+                <h5 class="mb-0">📤 Локальный анализ (развернуть)</h5>
+            </div>
+            <div class="card-body" id="local-analysis-section" style="display: none;">
+                <div id="upload-zone">
+                    <p style="font-size: 1.2rem; margin-bottom: 10px;">📁 Перетащите аудиофайл сюда</p>
+                    <p style="color: var(--medical-grey);">или</p>
+                    <input type="file" id="file-input" accept="audio/wav,audio/mp3,audio/mpeg,audio/ogg,audio/oga,audio/*">
+                    <button class="btn btn-primary mt-3" onclick="document.getElementById('file-input').click()">
+                        Выбрать файл (WAV/MP3/OGG, макс. 60 сек)
+                    </button>
+                </div>
+                
+                <div class="text-center">
+                    <button id="record-btn" class="btn btn-record">🎤 Записать с микрофона</button>
+                    <button id="analyze-btn" class="btn btn-primary" disabled>Анализировать</button>
+                </div>
+                
+                <div id="audio-info" class="audio-info" style="display: none;">
+                    <strong>Загружено:</strong> <span id="audio-name"></span><br>
+                    <strong>Длительность:</strong> <span id="audio-duration"></span> сек<br>
+                    <strong>Частота дискретизации:</strong> <span id="audio-sr"></span> Hz
+                </div>
+            </div>
+        </div>
+        
+        <!-- Results List -->
+        <div class="card mb-3" id="results-list-container">
+            <div class="card-header d-flex justify-content-between align-items-center">
+                <h4 class="mb-0">📋 Результаты анализов</h4>
+                <small class="text-muted" id="results-count">Загрузка...</small>
+            </div>
+            <div class="card-body">
+                <div class="text-center mb-3">
+                    <button id="refresh-btn" class="btn btn-primary">🔄 Обновить список</button>
+                    <button id="export-csv-btn" class="btn btn-success">📊 Экспорт CSV</button>
+                    <button id="export-json-btn" class="btn btn-info">📄 Экспорт JSON</button>
+                    <button id="export-html-btn" class="btn btn-warning">🌐 Экспорт HTML</button>
+                </div>
+                
+                <!-- Сводная таблица -->
+                <div id="summary-table-container" style="display: none;">
+                    <h5 class="mb-3">📊 Сводная таблица результатов</h5>
+                    <div class="mb-3">
+                        <input type="text" id="table-search" class="form-control" placeholder="🔍 Поиск по имени пользователя, риску, DSI...">
+                    </div>
+                    <div class="table-responsive">
+                        <table class="table table-striped table-hover" id="summary-table">
+                            <thead class="table-dark">
+                                <tr>
+                                    <th style="cursor: pointer;" onclick="sortTable(0)">Дата/Время ↕️</th>
+                                    <th style="cursor: pointer;" onclick="sortTable(1)">Пользователь ↕️</th>
+                                    <th style="cursor: pointer;" onclick="sortTable(2)">DSI Score ↕️</th>
+                                    <th style="cursor: pointer;" onclick="sortTable(3)">DSI Range ↕️</th>
+                                    <th style="cursor: pointer;" onclick="sortTable(4)">Риск ПД ↕️</th>
+                                    <th style="cursor: pointer;" onclick="sortTable(5)">Jitter (%) ↕️</th>
+                                    <th style="cursor: pointer;" onclick="sortTable(6)">Shimmer (%) ↕️</th>
+                                    <th style="cursor: pointer;" onclick="sortTable(7)">HNR (dB) ↕️</th>
+                                    <th style="cursor: pointer;" onclick="sortTable(8)">F0 SD (Hz) ↕️</th>
+                                    <th>Действия</th>
+                                </tr>
+                            </thead>
+                            <tbody id="summary-table-body">
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+                
+                <hr class="my-4" id="results-divider" style="display: none;">
+                
+                <div id="results-list"></div>
+            </div>
+        </div>
+        
+        <!-- Waveform (for local analysis) -->
+        <div class="card" id="waveform-card" style="display: none;">
+            <div class="card-header">Волновая форма</div>
+            <div class="card-body">
+                <div id="waveform"></div>
+            </div>
+        </div>
+        
+        <!-- Progress (for local analysis) -->
+        <div class="progress-container">
+            <div class="progress">
+                <div class="progress-bar progress-bar-striped progress-bar-animated" 
+                     role="progressbar" style="width: 0%"></div>
+            </div>
+            <p class="text-center mt-2" id="progress-text">Обработка...</p>
+        </div>
+        
+        <!-- Local Results Panel (for local analysis) -->
+        <div id="local-results" class="card" style="display: none;">
+            <div class="card-header">Результаты локального анализа</div>
+            <div class="card-body">
+                <!-- Risk Assessment -->
+                <div class="text-center mb-4">
+                    <h3>Оценка риска</h3>
+                    <div id="risk-badge" class="risk-badge"></div>
+                </div>
+                
+                <!-- Features Table -->
+                <h4>Акустические признаки</h4>
+                <table class="feature-table table">
+                    <thead>
+                        <tr>
+                            <th>Признак</th>
+                            <th>Значение</th>
+                            <th>Порог</th>
+                            <th>Статус</th>
+                        </tr>
+                    </thead>
+                    <tbody id="features-table"></tbody>
+                </table>
+                
+                <!-- DSI Section -->
+                <div class="card mt-4 mb-4" id="dsi-card" style="display: none;">
+                    <div class="card-header bg-primary text-white">
+                        <h4 class="mb-0">📊 DSI (Dysphonia Severity Index)</h4>
+                    </div>
+                    <div class="card-body">
+                        <div class="text-center mb-3">
+                            <h2 id="dsi-score" class="display-4"></h2>
+                            <p id="dsi-range" class="lead"></p>
+                        </div>
+                        <div class="row">
+                            <div class="col-md-6">
+                                <h5>Параметры DSI:</h5>
+                                <table class="table table-sm">
+                                    <tbody id="dsi-breakdown"></tbody>
+                                </table>
+                            </div>
+                            <div class="col-md-6">
+                                <h5>Интерпретация:</h5>
+                                <div id="dsi-interpretation"></div>
+                                <div class="alert alert-info mt-3" role="alert">
+                                    <small>
+                                        <strong>Формула:</strong> DSI = 0.13 × MPT + 0.0053 × F0-High - 0.26 × I-Low - 1.18 × Jitter(%) + 12.4<br>
+                                        DSI коррелирует с Voice Handicap Index и идеален для мониторинга терапии (LSVT LOUD).
+                                    </small>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                
+                <!-- Symptom Scores -->
+                <h4 class="mt-4">Оценка симптомов (0-3)</h4>
+                <div id="symptom-scores" class="mb-4"></div>
+                
+                <!-- Charts -->
+                <div class="row">
+                    <div class="col-md-6">
+                        <div class="chart-container">
+                            <canvas id="features-chart"></canvas>
+                        </div>
+                    </div>
+                    <div class="col-md-6">
+                        <div class="chart-container">
+                            <canvas id="symptoms-chart"></canvas>
+                        </div>
+                    </div>
+                </div>
+                
+                <!-- Report -->
+                <h4 class="mt-4">Отчет</h4>
+                <div class="report-list">
+                    <ul id="report-list"></ul>
+                </div>
+                
+                <!-- Export -->
+                <div class="text-center mt-4">
+                    <button id="export-btn" class="btn btn-primary">📥 Экспорт JSON</button>
+                </div>
+            </div>
+        </div>
+        
+        <!-- Loading indicator -->
+        <div id="loading-indicator" class="text-center" style="display: none;">
+            <div class="spinner-border text-primary" role="status">
+                <span class="visually-hidden">Загрузка...</span>
+            </div>
+            <p class="mt-2">Загрузка результатов...</p>
+        </div>
+        
+        <!-- Footer -->
+        <div class="footer">
+            <p>
+                Основано на исследованиях: 
+                <strong>Little et al. 2004</strong> (104 акустических признака), 
+                <strong>Daoudi 2022</strong> (monopitch/phonatory instability), 
+                <strong>NIH 2025</strong> (12 вокальных биомаркеров)
+            </p>
+            <p style="margin-top: 10px; font-size: 0.85rem;">
+                ⚠️ Система предназначена для исследовательских целей и не заменяет медицинскую диагностику
+            </p>
+        </div>
+    </div>
+    
+    <!-- Scripts -->
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/wavesurfer.js@6/dist/wavesurfer.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.js"></script>
+    
+    <script>
+        // Global variables
+        let audioContext = null;
+        let audioBuffer = null;
+        let wavesurfer = null;
+        let mediaRecorder = null;
+        let recordedChunks = [];
+        let isRecording = false;
+        let featuresChart = null;
+        let symptomsChart = null;
+        
+        // API URL
+        const API_URL = window.location.origin;
+        
+        // Initialize
+        document.addEventListener('DOMContentLoaded', () => {
+            initAudioContext();
+            initUploadZone();
+            initRecordButton();
+            initAnalyzeButton();
+            initExportButton();
+            initResultsList();
+            initRefreshButton();
+            initLocalAnalysisToggle();
+            // Загружаем статистику сразу при загрузке страницы
+            loadStats();
+        });
+        
+        function initLocalAnalysisToggle() {
+            const header = document.getElementById('local-analysis-header');
+            if (header) {
+                header.addEventListener('click', toggleLocalAnalysis);
+            }
+        }
+        
+        function toggleLocalAnalysis(event) {
+            const section = document.getElementById('local-analysis-section');
+            if (!section) return;
+            
+            // Получаем header из события
+            const header = event.currentTarget || event.target.closest('.card-header');
+            if (!header) return;
+            
+            if (section.style.display === 'none' || section.style.display === '') {
+                section.style.display = 'block';
+                const h5 = header.querySelector('h5');
+                if (h5) h5.textContent = '📤 Локальный анализ (свернуть)';
+            } else {
+                section.style.display = 'none';
+                const h5 = header.querySelector('h5');
+                if (h5) h5.textContent = '📤 Локальный анализ (развернуть)';
+            }
+        }
+        
+        function initRefreshButton() {
+            document.getElementById('refresh-btn').addEventListener('click', () => {
+                loadResults();
+            });
+        }
+        
+        async function loadStats() {
+            try {
+                const response = await fetch(`${API_URL}/api/stats`);
+                const data = await response.json();
+                
+                document.getElementById('total-analyses').textContent = data.total_analyses || 0;
+                document.getElementById('users-count').textContent = data.users_count || 0;
+                document.getElementById('recent-analyses').textContent = data.recent_analyses || 0;
+            } catch (e) {
+                console.error('Ошибка загрузки статистики:', e);
+            }
+        }
+        
+        async function loadResults() {
+            const loadingIndicator = document.getElementById('loading-indicator');
+            const resultsList = document.getElementById('results-list');
+            
+            loadingIndicator.style.display = 'block';
+            resultsList.innerHTML = '';
+            
+            try {
+                const response = await fetch(`${API_URL}/api/results`);
+                if (!response.ok) {
+                    throw new Error(`HTTP error! status: ${response.status}`);
+                }
+                const data = await response.json();
+                
+                if (data.results && data.results.length > 0) {
+                    // Обновляем счетчик
+                    const resultsCount = document.getElementById('results-count');
+                    if (resultsCount) {
+                        resultsCount.textContent = `Всего: ${data.results.length}`;
+                    }
+                    
+                    // Сортируем по дате (новые первыми)
+                    const sortedResults = [...data.results].sort((a, b) => {
+                        const dateA = new Date(a.user_info?.timestamp || 0);
+                        const dateB = new Date(b.user_info?.timestamp || 0);
+                        return dateB - dateA;
+                    });
+                    
+                    // Сохраняем результаты для таблицы
+                    window.allResults = sortedResults;
+                    
+                    // Отображаем сводную таблицу
+                    displaySummaryTable(sortedResults);
+                    
+                    // Отображаем детальные карточки
+                    sortedResults.forEach((result, index) => {
+                        const resultCard = createResultCard(result, index);
+                        resultsList.appendChild(resultCard);
+                    });
+                } else {
+                    const resultsCount = document.getElementById('results-count');
+                    if (resultsCount) {
+                        resultsCount.textContent = 'Нет результатов';
+                    }
+                    document.getElementById('summary-table-container').style.display = 'none';
+                    document.getElementById('results-divider').style.display = 'none';
+                    resultsList.innerHTML = `
+                        <div class="alert alert-info text-center">
+                            <h5>📭 Пока нет результатов анализа</h5>
+                            <p class="mb-0">Результаты появятся здесь после анализа голосовых сообщений через Telegram бота или локального анализа.</p>
+                        </div>
+                    `;
+                }
+                
+                await loadStats();
+            } catch (e) {
+                console.error('Ошибка загрузки результатов:', e);
+                resultsList.innerHTML = `
+                    <div class="alert alert-danger">
+                        <h5>❌ Ошибка загрузки результатов</h5>
+                        <p>${e.message}</p>
+                        <p class="mb-0"><small>Проверьте, что API сервер запущен и доступен по адресу ${API_URL}</small></p>
+                    </div>
+                `;
+            } finally {
+                loadingIndicator.style.display = 'none';
+            }
+        }
+        
+        function createResultCard(result, index) {
+            const card = document.createElement('div');
+            card.className = 'card mb-3';
+            
+            const userInfo = result.user_info || {};
+            const username = userInfo.tg_username || 'Неизвестный пользователь';
+            const timestamp = userInfo.timestamp || '';
+            const dsi = result.dsi || {};
+            const dsiScore = dsi.dsi_score;
+            const symptomScores = result.symptom_scores || {};
+            const pdRisk = symptomScores.pd_risk || 'Не определен';
+            
+            // Форматирование даты
+            let dateStr = 'Дата неизвестна';
+            let dateObj = null;
+            if (timestamp) {
+                try {
+                    dateObj = new Date(timestamp);
+                    dateStr = dateObj.toLocaleString('ru-RU', {
+                        year: 'numeric',
+                        month: 'long',
+                        day: 'numeric',
+                        hour: '2-digit',
+                        minute: '2-digit'
+                    });
+                } catch (e) {
+                    dateStr = timestamp;
+                }
+            }
+            
+            // Определение цвета риска
+            let riskClass = 'risk-low';
+            let riskIcon = '🟢';
+            if (pdRisk.includes('Высокий')) {
+                riskClass = 'risk-high';
+                riskIcon = '🔴';
+            } else if (pdRisk.includes('Умеренный')) {
+                riskClass = 'risk-medium';
+                riskIcon = '🟡';
+            }
+            
+            // Краткая информация для заголовка
+            const shortInfo = dsiScore !== null && dsiScore !== undefined 
+                ? `DSI: ${dsiScore.toFixed(2)} | ` 
+                : '';
+            
+            card.innerHTML = `
+                <div class="card-header d-flex justify-content-between align-items-center" style="cursor: pointer;" onclick="toggleResult(${index})">
+                    <div class="flex-grow-1">
+                        <div class="d-flex align-items-center gap-2">
+                            <h5 class="mb-0">👤 ${username}</h5>
+                            <span class="risk-badge ${riskClass}" style="font-size: 0.85rem; padding: 4px 12px;">
+                                ${riskIcon} ${pdRisk.split('(')[0].trim()}
+                            </span>
+                        </div>
+                        <div class="mt-1">
+                            <small class="text-muted">📅 ${dateStr}</small>
+                            ${shortInfo ? `<small class="text-muted ms-2">${shortInfo}</small>` : ''}
+                        </div>
+                    </div>
+                    <button class="btn btn-sm btn-outline-secondary" onclick="event.stopPropagation(); toggleResult(${index})">
+                        <span id="toggle-icon-${index}">▼</span>
+                    </button>
+                </div>
+                <div class="card-body" id="result-content-${index}" style="display: none;">
+                    ${createResultContent(result)}
+                </div>
+            `;
+            
+            // Сохраняем индекс в data-атрибуте для правильной работы toggle
+            card.setAttribute('data-index', index);
+            
+            return card;
+        }
+        
+        function createResultContent(result) {
+            const dsi = result.dsi || {};
+            const dsiScore = dsi.dsi_score;
+            const symptomScores = result.symptom_scores || {};
+            const pdRisk = symptomScores.pd_risk || 'Не определен';
+            const features = result.features || {};
+            
+            let html = `
+                <!-- Risk Assessment -->
+                <div class="text-center mb-4">
+                    <h4>Оценка риска</h4>
+                    <div class="risk-badge ${pdRisk.includes('Высокий') ? 'risk-high' : pdRisk.includes('Умеренный') ? 'risk-medium' : 'risk-low'}">
+                        ${pdRisk}
+                    </div>
+                </div>
+            `;
+            
+            // DSI Section
+            if (dsiScore !== null && dsiScore !== undefined) {
+                const dsiRange = dsi.dsi_range || '';
+                const breakdown = dsi.dsi_breakdown || {};
+                const interpretation = dsi.interpretation || {};
+                
+                const dsiColorClass = dsiScore >= 2.0 ? 'text-success' : 
+                                     dsiScore >= 0.0 ? 'text-warning' : 
+                                     dsiScore >= -2.0 ? 'text-warning' : 'text-danger';
+                
+                html += `
+                    <div class="card mt-3 mb-3">
+                        <div class="card-header bg-primary text-white">
+                            <h5 class="mb-0">📊 DSI (Dysphonia Severity Index)</h5>
+                        </div>
+                        <div class="card-body">
+                            <div class="text-center mb-3">
+                                <h2 class="display-4 ${dsiColorClass}">${dsiScore.toFixed(2)}</h2>
+                                <p class="lead">${dsiRange}</p>
+                                <p class="text-muted"><small>${dsiScore >= 2.0 ? '🟢' : dsiScore >= 0.0 ? '🟡' : dsiScore >= -2.0 ? '🟠' : '🔴'} Референсный диапазон: 2.0-5.0 (нормальный голос)</small></p>
+                            </div>
+                            <div class="row">
+                                <div class="col-md-6">
+                                    <h6>Параметры DSI:</h6>
+                                    <table class="table table-sm table-bordered">
+                                        <thead class="table-light">
+                                            <tr>
+                                                <th>Параметр</th>
+                                                <th>Значение</th>
+                                                <th>Референс</th>
+                                            </tr>
+                                        </thead>
+                                        <tbody>
+                                            <tr>
+                                                <td><strong>MPT (сек)</strong></td>
+                                                <td>${(breakdown.mpt_sec || 0).toFixed(2)}</td>
+                                                <td><small class="${(breakdown.mpt_sec || 0) >= 15 ? 'text-success' : (breakdown.mpt_sec || 0) < 10 ? 'text-danger' : 'text-warning'}">${(breakdown.mpt_sec || 0) >= 15 ? '🟢' : (breakdown.mpt_sec || 0) < 10 ? '🔴' : '🟡'} норма: 15-30 сек</small></td>
+                                            </tr>
+                                            <tr>
+                                                <td><strong>F0-High (Гц)</strong></td>
+                                                <td>${(breakdown.f0_high_hz || 0).toFixed(1)}</td>
+                                                <td><small class="${(breakdown.f0_high_hz || 0) >= 400 ? 'text-success' : (breakdown.f0_high_hz || 0) < 300 ? 'text-danger' : 'text-warning'}">${(breakdown.f0_high_hz || 0) >= 400 ? '🟢' : (breakdown.f0_high_hz || 0) < 300 ? '🔴' : '🟡'} норма: 400-600 Гц</small></td>
+                                            </tr>
+                                            <tr>
+                                                <td><strong>I-Low (дБ)</strong></td>
+                                                <td>${(breakdown.i_low_db || 0).toFixed(1)}</td>
+                                                <td><small class="${(breakdown.i_low_db || 0) <= 45 && (breakdown.i_low_db || 0) >= 25 ? 'text-success' : (breakdown.i_low_db || 0) > 55 ? 'text-danger' : 'text-warning'}">${(breakdown.i_low_db || 0) <= 45 && (breakdown.i_low_db || 0) >= 25 ? '🟢' : (breakdown.i_low_db || 0) > 55 ? '🔴' : '🟡'} норма: 25-45 дБ</small></td>
+                                            </tr>
+                                            <tr>
+                                                <td><strong>Jitter (%)</strong></td>
+                                                <td>${(breakdown.jitter_percent || 0).toFixed(2)}</td>
+                                                <td><small class="${(breakdown.jitter_percent || 0) <= 1.0 ? 'text-success' : (breakdown.jitter_percent || 0) > 1.5 ? 'text-danger' : 'text-warning'}">${(breakdown.jitter_percent || 0) <= 1.0 ? '🟢' : (breakdown.jitter_percent || 0) > 1.5 ? '🔴' : '🟡'} норма: 0.0-1.0 %</small></td>
+                                            </tr>
+                                        </tbody>
+                                    </table>
+                                </div>
+                                <div class="col-md-6">
+                                    <h6>Интерпретация:</h6>
+                                    <p><strong>Оценка риска:</strong> ${interpretation.pd_risk_note || 'N/A'}</p>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                `;
+            }
+            
+            function formatWithReference(value, paramName) {
+                const refRanges = getReferenceRanges();
+                if (!refRanges[paramName]) return value.toFixed(2);
+                
+                const ref = refRanges[paramName];
+                const [normalMin, normalMax] = ref.normal;
+                const unit = ref.unit;
+                
+                let statusIcon = '';
+                let statusClass = '';
+                if (normalMin <= value && value <= normalMax) {
+                    statusIcon = '🟢';
+                    statusClass = 'text-success';
+                } else if (value < normalMin) {
+                    statusIcon = '🔴';
+                    statusClass = 'text-danger';
+                } else {
+                    statusIcon = '🔴';
+                    statusClass = 'text-danger';
+                }
+                
+                return `<span class="${statusClass}">${value.toFixed(2)} ${unit} ${statusIcon}</span> <small class="text-muted">(норма: ${normalMin.toFixed(1)}-${normalMax.toFixed(1)} ${unit})</small>`;
+            }
+            
+            // Features Table
+            html += `
+                <h5>Акустические признаки</h5>
+                <table class="feature-table table table-sm table-bordered">
+                    <thead class="table-light">
+                        <tr>
+                            <th>Признак</th>
+                            <th>Значение</th>
+                            <th>Референсный диапазон</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        <tr>
+                            <td><strong>Jitter</strong></td>
+                            <td>${formatWithReference(features.jitter_percent || 0, 'jitter_percent')}</td>
+                            <td><small class="text-muted">0.0-1.0 %</small></td>
+                        </tr>
+                        <tr>
+                            <td><strong>Shimmer</strong></td>
+                            <td>${formatWithReference(features.shimmer_percent || 0, 'shimmer_percent')}</td>
+                            <td><small class="text-muted">2.0-4.0 %</small></td>
+                        </tr>
+                        <tr>
+                            <td><strong>HNR</strong></td>
+                            <td>${formatWithReference(features.hnr_db || 0, 'hnr_db')}</td>
+                            <td><small class="text-muted">20.0-25.0 дБ</small></td>
+                        </tr>
+                        <tr>
+                            <td><strong>F0 Mean</strong></td>
+                            <td>${formatWithReference(features.f0_mean_hz || 0, 'f0_mean_hz')}</td>
+                            <td><small class="text-muted">100.0-300.0 Гц</small></td>
+                        </tr>
+                        <tr>
+                            <td><strong>F0 SD</strong></td>
+                            <td>${formatWithReference(features.f0_sd_hz || 0, 'f0_sd_hz')}</td>
+                            <td><small class="text-muted">10.0-50.0 Гц</small></td>
+                        </tr>
+                        <tr>
+                            <td><strong>Скорость речи</strong></td>
+                            <td>${formatWithReference(features.rate_syl_sec || 0, 'rate_syl_sec')}</td>
+                            <td><small class="text-muted">4.5-7.0 сл/сек</small></td>
+                        </tr>
+                    </tbody>
+                </table>
+            `;
+            
+            // Symptom Scores
+            html += `
+                <h5 class="mt-4">Оценка симптомов (0-3)</h5>
+                <div class="mb-3">
+            `;
+            
+            const symptomNames = {
+                hypophonia: 'Гипофония',
+                monopitch: 'Monopitch',
+                monoloudness: 'Monoloudness',
+                hoarseness: 'Охриплость',
+                imprecise_articulation: 'Неточная артикуляция'
+            };
+            
+            for (const [key, name] of Object.entries(symptomNames)) {
+                const score = symptomScores[key] || 0;
+                html += `
+                    <div class="mb-2">
+                        <strong>${name}:</strong> 
+                        <span class="symptom-score score-${score}">${score}</span>
+                        <small class="text-muted">(${['Нет', 'Легкий', 'Умеренный', 'Тяжелый'][score]})</small>
+                    </div>
+                `;
+            }
+            
+            html += '</div>';
+            
+            // Report
+            if (result.report && result.report.length > 0) {
+                html += `
+                    <h5 class="mt-4">Отчет</h5>
+                    <div class="report-list">
+                        <ul>
+                `;
+                result.report.forEach(item => {
+                    html += `<li>${item}</li>`;
+                });
+                html += `
+                        </ul>
+                    </div>
+                `;
+            }
+            
+            return html;
+        }
+        
+        function toggleResult(index) {
+            const content = document.getElementById(`result-content-${index}`);
+            const icon = document.getElementById(`toggle-icon-${index}`);
+            
+            if (!content || !icon) return;
+            
+            if (content.style.display === 'none' || content.style.display === '') {
+                content.style.display = 'block';
+                icon.textContent = '▼';
+            } else {
+                content.style.display = 'none';
+                icon.textContent = '▶';
+            }
+        }
+        
+        // Переменные для сортировки таблицы
+        let currentSortColumn = -1;
+        let sortDirection = 1; // 1 = по возрастанию, -1 = по убыванию
+        
+        // Reference ranges function (глобальная)
+        function getReferenceRanges() {
+            return {
+                'jitter_percent': {normal: [0.0, 1.0], unit: '%'},
+                'shimmer_percent': {normal: [2.0, 4.0], unit: '%'},
+                'hnr_db': {normal: [20.0, 25.0], unit: 'дБ'},
+                'f0_mean_hz': {normal: [100.0, 300.0], unit: 'Гц'},
+                'f0_sd_hz': {normal: [10.0, 50.0], unit: 'Гц'},
+                'rate_syl_sec': {normal: [4.5, 7.0], unit: 'сл/сек'},
+                'mpt_sec': {normal: [15.0, 30.0], unit: 'сек'},
+                'f0_high_hz': {normal: [400.0, 600.0], unit: 'Гц'},
+                'i_low_db': {normal: [25.0, 45.0], unit: 'дБ'},
+                'dsi_score': {normal: [2.0, 5.0], unit: ''}
+            };
+        }
+        
+        // Функция форматирования значения с референсом для таблицы
+        function formatTableValueWithRef(value, paramName) {
+            if (value === 'N/A' || value === undefined || value === null) return 'N/A';
+            const refRanges = getReferenceRanges();
+            if (!refRanges[paramName]) {
+                return typeof value === 'number' ? value.toFixed(2) : value;
+            }
+            
+            const ref = refRanges[paramName];
+            const [normalMin, normalMax] = ref.normal;
+            const unit = ref.unit;
+            
+            let statusIcon = '';
+            let statusClass = '';
+            if (normalMin <= value && value <= normalMax) {
+                statusIcon = '🟢';
+                statusClass = 'text-success';
+            } else {
+                statusIcon = '🔴';
+                statusClass = 'text-danger';
+            }
+            
+            const numDecimals = paramName.includes('percent') ? 2 : (paramName.includes('db') || paramName.includes('hz')) ? 1 : 2;
+            const valueStr = typeof value === 'number' ? value.toFixed(numDecimals) : value;
+            
+            return `<div><strong class="${statusClass}">${valueStr} ${statusIcon}</strong><br><small class="text-muted">(норма: ${normalMin.toFixed(numDecimals)}-${normalMax.toFixed(numDecimals)} ${unit})</small></div>`;
+        }
+        
+        function displaySummaryTable(results) {
+            const tableContainer = document.getElementById('summary-table-container');
+            const tableBody = document.getElementById('summary-table-body');
+            const divider = document.getElementById('results-divider');
+            
+            if (!results || results.length === 0) {
+                tableContainer.style.display = 'none';
+                divider.style.display = 'none';
+                return;
+            }
+            
+            tableContainer.style.display = 'block';
+            divider.style.display = 'block';
+            tableBody.innerHTML = '';
+            
+            results.forEach((result, index) => {
+                const userInfo = result.user_info || {};
+                const dsi = result.dsi || {};
+                const features = result.features || {};
+                const symptomScores = result.symptom_scores || {};
+                
+                const username = userInfo.tg_username || 'Неизвестный';
+                const timestamp = userInfo.timestamp || '';
+                
+                // Форматирование даты
+                let dateStr = 'N/A';
+                if (timestamp) {
+                    try {
+                        const date = new Date(timestamp);
+                        dateStr = date.toLocaleString('ru-RU', {
+                            year: 'numeric',
+                            month: '2-digit',
+                            day: '2-digit',
+                            hour: '2-digit',
+                            minute: '2-digit'
+                        });
+                    } catch (e) {
+                        dateStr = timestamp;
+                    }
+                }
+                
+                // DSI
+                const dsiScore = dsi.dsi_score !== null && dsi.dsi_score !== undefined 
+                    ? dsi.dsi_score.toFixed(2) 
+                    : 'N/A';
+                const dsiRange = dsi.dsi_range || 'N/A';
+                
+                // Риск ПД
+                const pdRisk = symptomScores.pd_risk || 'Не определен';
+                let riskClass = 'table-badge-minimal';
+                let riskText = pdRisk.split('(')[0].trim();
+                if (pdRisk.includes('Высокий')) {
+                    riskClass = 'table-badge-high';
+                } else if (pdRisk.includes('Умеренный')) {
+                    riskClass = 'table-badge-medium';
+                } else if (pdRisk.includes('Низкий')) {
+                    riskClass = 'table-badge-low';
+                }
+                
+                // Признаки с референсами
+                const jitter = features.jitter_percent !== undefined 
+                    ? formatTableValueWithRef(features.jitter_percent, 'jitter_percent')
+                    : 'N/A';
+                const shimmer = features.shimmer_percent !== undefined 
+                    ? formatTableValueWithRef(features.shimmer_percent, 'shimmer_percent')
+                    : 'N/A';
+                const hnr = features.hnr_db !== undefined 
+                    ? formatTableValueWithRef(features.hnr_db, 'hnr_db')
+                    : 'N/A';
+                const f0sd = features.f0_sd_hz !== undefined 
+                    ? formatTableValueWithRef(features.f0_sd_hz, 'f0_sd_hz')
+                    : 'N/A';
+                
+                const row = document.createElement('tr');
+                row.setAttribute('data-index', index);
+                row.onclick = () => {
+                    // Прокручиваем к соответствующей карточке
+                    const card = document.querySelector(`[data-index="${index}"]`);
+                    if (card) {
+                        card.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                        // Раскрываем карточку
+                        toggleResult(index);
+                    }
+                };
+                
+                row.innerHTML = `
+                    <td>${dateStr}</td>
+                    <td><strong>${username}</strong></td>
+                    <td>${dsiScore}</td>
+                    <td><small>${dsiRange}</small></td>
+                    <td><span class="table-badge ${riskClass}">${riskText}</span></td>
+                    <td>${jitter}</td>
+                    <td>${shimmer}</td>
+                    <td>${hnr}</td>
+                    <td>${f0sd}</td>
+                    <td>
+                        <button class="btn btn-sm btn-outline-primary" onclick="event.stopPropagation(); scrollToResult(${index})">
+                            👁️ Показать
+                        </button>
+                    </td>
+                `;
+                
+                tableBody.appendChild(row);
+            });
+            
+            // Инициализация поиска
+            initTableSearch();
+        }
+        
+        function scrollToResult(index) {
+            const card = document.querySelector(`[data-index="${index}"]`);
+            if (card) {
+                card.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                // Подсвечиваем карточку
+                card.style.transition = 'box-shadow 0.3s';
+                card.style.boxShadow = '0 0 20px rgba(44, 95, 141, 0.5)';
+                setTimeout(() => {
+                    card.style.boxShadow = '';
+                }, 2000);
+                // Раскрываем карточку
+                toggleResult(index);
+            }
+        }
+        
+        function initTableSearch() {
+            const searchInput = document.getElementById('table-search');
+            if (!searchInput) return;
+            
+            // Удаляем старый обработчик, если есть
+            const newSearchInput = searchInput.cloneNode(true);
+            searchInput.parentNode.replaceChild(newSearchInput, searchInput);
+            
+            newSearchInput.addEventListener('input', (e) => {
+                const searchTerm = e.target.value.toLowerCase();
+                const rows = document.querySelectorAll('#summary-table-body tr');
+                
+                rows.forEach(row => {
+                    const text = row.textContent.toLowerCase();
+                    if (text.includes(searchTerm)) {
+                        row.style.display = '';
+                    } else {
+                        row.style.display = 'none';
+                    }
+                });
+            });
+        }
+        
+        function sortTable(columnIndex) {
+            if (!window.allResults || window.allResults.length === 0) return;
+            
+            // Меняем направление сортировки, если кликнули по той же колонке
+            if (currentSortColumn === columnIndex) {
+                sortDirection *= -1;
+            } else {
+                currentSortColumn = columnIndex;
+                sortDirection = 1;
+            }
+            
+            const sorted = [...window.allResults].sort((a, b) => {
+                let valueA, valueB;
+                
+                switch(columnIndex) {
+                    case 0: // Дата
+                        valueA = new Date(a.user_info?.timestamp || 0).getTime();
+                        valueB = new Date(b.user_info?.timestamp || 0).getTime();
+                        break;
+                    case 1: // Пользователь
+                        valueA = (a.user_info?.tg_username || '').toLowerCase();
+                        valueB = (b.user_info?.tg_username || '').toLowerCase();
+                        break;
+                    case 2: // DSI Score
+                        valueA = a.dsi?.dsi_score ?? -Infinity;
+                        valueB = b.dsi?.dsi_score ?? -Infinity;
+                        break;
+                    case 3: // DSI Range
+                        valueA = (a.dsi?.dsi_range || '').toLowerCase();
+                        valueB = (b.dsi?.dsi_range || '').toLowerCase();
+                        break;
+                    case 4: // Риск ПД
+                        valueA = (a.symptom_scores?.pd_risk || '').toLowerCase();
+                        valueB = (b.symptom_scores?.pd_risk || '').toLowerCase();
+                        break;
+                    case 5: // Jitter
+                        valueA = a.features?.jitter_percent ?? -Infinity;
+                        valueB = b.features?.jitter_percent ?? -Infinity;
+                        break;
+                    case 6: // Shimmer
+                        valueA = a.features?.shimmer_percent ?? -Infinity;
+                        valueB = b.features?.shimmer_percent ?? -Infinity;
+                        break;
+                    case 7: // HNR
+                        valueA = a.features?.hnr_db ?? -Infinity;
+                        valueB = b.features?.hnr_db ?? -Infinity;
+                        break;
+                    case 8: // F0 SD
+                        valueA = a.features?.f0_sd_hz ?? -Infinity;
+                        valueB = b.features?.f0_sd_hz ?? -Infinity;
+                        break;
+                    default:
+                        return 0;
+                }
+                
+                if (typeof valueA === 'string') {
+                    return sortDirection * valueA.localeCompare(valueB);
+                } else {
+                    return sortDirection * (valueA - valueB);
+                }
+            });
+            
+            window.allResults = sorted;
+            displaySummaryTable(sorted);
+            
+            // Обновляем детальные карточки тоже
+            const resultsList = document.getElementById('results-list');
+            resultsList.innerHTML = '';
+            sorted.forEach((result, index) => {
+                const resultCard = createResultCard(result, index);
+                resultsList.appendChild(resultCard);
+            });
+        }
+        
+        function initResultsList() {
+            loadResults();
+            // Автообновление каждые 30 секунд
+            setInterval(loadResults, 30000);
+            
+            // Инициализация кнопок экспорта
+            document.getElementById('export-csv-btn').addEventListener('click', () => {
+                window.location.href = `${API_URL}/api/export/csv`;
+            });
+            
+            document.getElementById('export-json-btn').addEventListener('click', () => {
+                window.location.href = `${API_URL}/api/export/json`;
+            });
+            
+            document.getElementById('export-html-btn').addEventListener('click', () => {
+                window.location.href = `${API_URL}/api/export/html`;
+            });
+        }
+        
+        function initAudioContext() {
+            try {
+                audioContext = new (window.AudioContext || window.webkitAudioContext)();
+            } catch (e) {
+                alert('Web Audio API не поддерживается в вашем браузере');
+            }
+        }
+        
+        function initUploadZone() {
+            const uploadZone = document.getElementById('upload-zone');
+            const fileInput = document.getElementById('file-input');
+            
+            uploadZone.addEventListener('click', () => fileInput.click());
+            
+            uploadZone.addEventListener('dragover', (e) => {
+                e.preventDefault();
+                uploadZone.classList.add('dragover');
+            });
+            
+            uploadZone.addEventListener('dragleave', () => {
+                uploadZone.classList.remove('dragover');
+            });
+            
+            uploadZone.addEventListener('drop', (e) => {
+                e.preventDefault();
+                uploadZone.classList.remove('dragover');
+                const files = e.dataTransfer.files;
+                if (files.length > 0) {
+                    handleAudioFile(files[0]);
+                }
+            });
+            
+            fileInput.addEventListener('change', (e) => {
+                if (e.target.files.length > 0) {
+                    handleAudioFile(e.target.files[0]);
+                }
+            });
+        }
+        
+        function initRecordButton() {
+            const recordBtn = document.getElementById('record-btn');
+            
+            recordBtn.addEventListener('click', async () => {
+                if (!isRecording) {
+                    await startRecording();
+                } else {
+                    stopRecording();
+                }
+            });
+        }
+        
+        function initAnalyzeButton() {
+            document.getElementById('analyze-btn').addEventListener('click', analyzeAudio);
+        }
+        
+        function initExportButton() {
+            document.getElementById('export-btn').addEventListener('click', exportJSON);
+        }
+        
+        async function handleAudioFile(file) {
+            if (!file.type.startsWith('audio/')) {
+                alert('Пожалуйста, выберите аудиофайл');
+                return;
+            }
+            
+            try {
+                const arrayBuffer = await file.arrayBuffer();
+                audioBuffer = await audioContext.decodeAudioData(arrayBuffer);
+                
+                // Check duration (max 60 seconds)
+                if (audioBuffer.duration > 60) {
+                    alert('Аудио должно быть не более 60 секунд. Пожалуйста, обрежьте файл.');
+                    return;
+                }
+                
+                displayAudioInfo(file.name, audioBuffer);
+                initWaveform(audioBuffer);
+                document.getElementById('analyze-btn').disabled = false;
+            } catch (e) {
+                let errorMsg = 'Ошибка загрузки аудио: ' + e.message;
+                if (file.name.toLowerCase().endsWith('.ogg') || file.name.toLowerCase().endsWith('.oga')) {
+                    errorMsg += '\n\nЕсли файл OGG не загружается, попробуйте конвертировать его в WAV или MP3.';
+                }
+                alert(errorMsg);
+                console.error('Ошибка декодирования аудио:', e);
+            }
+        }
+        
+        function displayAudioInfo(name, buffer) {
+            document.getElementById('audio-info').style.display = 'block';
+            document.getElementById('audio-name').textContent = name;
+            document.getElementById('audio-duration').textContent = buffer.duration.toFixed(2);
+            document.getElementById('audio-sr').textContent = buffer.sampleRate;
+        }
+        
+        function initWaveform(buffer) {
+            const waveformCard = document.getElementById('waveform-card');
+            waveformCard.style.display = 'block';
+            
+            if (wavesurfer) {
+                wavesurfer.destroy();
+            }
+            
+            // Check if WaveSurfer is available
+            if (typeof WaveSurfer === 'undefined') {
+                console.error('WaveSurfer не загружен. Пропускаем визуализацию waveform.');
+                return;
+            }
+            
+            // Create audio blob for wavesurfer
+            // Передаем AudioBuffer, а не массив данных
+            const wav = audioBufferToWav(buffer, buffer.sampleRate);
+            const blob = wav; // audioBufferToWav уже возвращает Blob
+            const url = URL.createObjectURL(blob);
+            
+            try {
+                // WaveSurfer 6 uses WaveSurfer.create()
+                wavesurfer = WaveSurfer.create({
+                    container: '#waveform',
+                    waveColor: '#2c5f8d',
+                    progressColor: '#4a90c2',
+                    cursorColor: '#dc3545',
+                    barWidth: 2,
+                    barRadius: 3,
+                    responsive: true,
+                    height: 100
+                });
+                
+                wavesurfer.load(url);
+            } catch (e) {
+                console.error('Ошибка инициализации WaveSurfer:', e);
+                // Hide waveform card if initialization fails
+                waveformCard.style.display = 'none';
+            }
+        }
+        
+        async function startRecording() {
+            try {
+                // Проверка протокола - должен быть http:// или https://, не file://
+                const protocol = window.location.protocol;
+                const hostname = window.location.hostname;
+                
+                if (protocol === 'file:') {
+                    throw new Error('Страница открыта напрямую из файла. Пожалуйста, запустите сервер (python start_api.py) и откройте страницу через http://localhost:5000');
+                }
+                
+                // Проверка доступности API для работы с микрофоном
+                let getUserMedia = null;
+                
+                if (navigator.mediaDevices && navigator.mediaDevices.getUserMedia) {
+                    // Современный API
+                    getUserMedia = navigator.mediaDevices.getUserMedia.bind(navigator.mediaDevices);
+                } else if (navigator.getUserMedia) {
+                    // Fallback для старых браузеров
+                    getUserMedia = (constraints) => {
+                        return new Promise((resolve, reject) => {
+                            navigator.getUserMedia(constraints, resolve, reject);
+                        });
+                    };
+                } else {
+                    // Детальная диагностика
+                    const diagnostics = [];
+                    diagnostics.push(`Протокол: ${protocol}`);
+                    diagnostics.push(`Hostname: ${hostname}`);
+                    diagnostics.push(`navigator.mediaDevices: ${typeof navigator.mediaDevices}`);
+                    diagnostics.push(`navigator.getUserMedia: ${typeof navigator.getUserMedia}`);
+                    diagnostics.push(`User Agent: ${navigator.userAgent}`);
+                    
+                    console.error('Диагностика доступа к микрофону:', diagnostics);
+                    
+                    let errorMsg = 'Ваш браузер не поддерживает доступ к микрофону.\n\n';
+                    errorMsg += 'Возможные решения:\n';
+                    errorMsg += '1. Убедитесь, что страница открыта через HTTP/HTTPS сервер (не file://)\n';
+                    errorMsg += '2. Запустите сервер: python start_api.py\n';
+                    errorMsg += '3. Откройте страницу: http://localhost:5000\n';
+                    errorMsg += '4. Используйте современный браузер (Chrome, Firefox, Edge)\n';
+                    errorMsg += '5. Проверьте настройки браузера - разрешен ли доступ к микрофону\n\n';
+                    errorMsg += `Диагностика: ${diagnostics.join(', ')}`;
+                    
+                    throw new Error(errorMsg);
+                }
+                
+                const stream = await getUserMedia({ audio: true });
+                mediaRecorder = new MediaRecorder(stream);
+                recordedChunks = [];
+                
+                mediaRecorder.ondataavailable = (e) => {
+                    if (e.data.size > 0) {
+                        recordedChunks.push(e.data);
+                    }
+                };
+                
+                mediaRecorder.onstop = async () => {
+                    const blob = new Blob(recordedChunks, { type: 'audio/wav' });
+                    const arrayBuffer = await blob.arrayBuffer();
+                    audioBuffer = await audioContext.decodeAudioData(arrayBuffer);
+                    
+                    displayAudioInfo('Запись с микрофона', audioBuffer);
+                    initWaveform(audioBuffer);
+                    document.getElementById('analyze-btn').disabled = false;
+                    
+                    stream.getTracks().forEach(track => track.stop());
+                };
+                
+                mediaRecorder.start();
+                isRecording = true;
+                document.getElementById('record-btn').classList.add('recording');
+                document.getElementById('record-btn').textContent = '⏹ Остановить запись';
+            } catch (e) {
+                alert('Ошибка доступа к микрофону: ' + e.message);
+            }
+        }
+        
+        function stopRecording() {
+            if (mediaRecorder && isRecording) {
+                mediaRecorder.stop();
+                isRecording = false;
+                document.getElementById('record-btn').classList.remove('recording');
+                document.getElementById('record-btn').textContent = '🎤 Записать с микрофона';
+            }
+        }
+        
+        async function analyzeAudio() {
+            if (!audioBuffer) {
+                alert('Пожалуйста, загрузите или запишите аудио');
+                return;
+            }
+            
+            // Show progress
+            const progressContainer = document.querySelector('.progress-container');
+            const progressBar = document.querySelector('.progress-bar');
+            const progressText = document.getElementById('progress-text');
+            progressContainer.style.display = 'block';
+            progressBar.style.width = '0%';
+            
+            // Disable button
+            document.getElementById('analyze-btn').disabled = true;
+            
+            try {
+                // Конвертируем аудио в WAV и отправляем на сервер для анализа
+                progressBar.style.width = '10%';
+                progressText.textContent = 'Подготовка аудио...';
+                
+                // Конвертируем AudioBuffer в WAV Blob
+                progressBar.style.width = '20%';
+                progressText.textContent = 'Конвертация аудио в WAV...';
+                const wavBlob = audioBufferToWav(audioBuffer, audioBuffer.sampleRate);
+                
+                // Создаем FormData для отправки файла
+                const formData = new FormData();
+                formData.append('file', wavBlob, 'audio.wav');
+                
+                // Отправляем на сервер для анализа (это сохранит сырые данные)
+                progressBar.style.width = '40%';
+                progressText.textContent = 'Отправка на сервер для анализа...';
+                
+                const analyzeResponse = await fetch(`${API_URL}/api/analyze`, {
+                    method: 'POST',
+                    body: formData
+                });
+                
+                if (!analyzeResponse.ok) {
+                    const errorText = await analyzeResponse.text();
+                    throw new Error(`Ошибка анализа: ${analyzeResponse.status} ${errorText}`);
+                }
+                
+                progressBar.style.width = '90%';
+                progressText.textContent = 'Получение результатов...';
+                
+                const result = await analyzeResponse.json();
+                
+                // Добавляем информацию о пользователе
+                result.user_info = {
+                    tg_username: 'Локальный анализ',
+                    tg_user_id: 0,
+                    timestamp: new Date().toISOString(),
+                    source: 'web_interface'
+                };
+                
+                // Сохранение результата через API (результат уже содержит raw_data от сервера)
+                try {
+                    progressBar.style.width = '95%';
+                    progressText.textContent = 'Сохранение результата...';
+                    const saveResponse = await fetch(`${API_URL}/api/results`, {
+                        method: 'POST',
+                        headers: {
+                            'Content-Type': 'application/json'
+                        },
+                        body: JSON.stringify(result)
+                    });
+                    
+                    if (saveResponse.ok) {
+                        const saveData = await saveResponse.json();
+                        console.log('✅ Результат успешно сохранен:', saveData);
+                        
+                        // Показываем уведомление
+                        const notification = document.createElement('div');
+                        notification.className = 'alert alert-success alert-dismissible fade show position-fixed';
+                        notification.style.cssText = 'top: 20px; right: 20px; z-index: 9999; min-width: 300px;';
+                        notification.innerHTML = `
+                            <strong>✅ Результат сохранен!</strong> Результат добавлен в общий список анализов.
+                            <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
+                        `;
+                        document.body.appendChild(notification);
+                        setTimeout(() => {
+                            notification.remove();
+                        }, 5000);
+                        
+                        // Обновляем список результатов
+                        await loadResults();
+                        await loadStats();
+                    } else {
+                        const errorText = await saveResponse.text();
+                        console.error('Ошибка сохранения результата:', saveResponse.status, errorText);
+                        
+                        // Показываем предупреждение
+                        const warning = document.createElement('div');
+                        warning.className = 'alert alert-warning alert-dismissible fade show position-fixed';
+                        warning.style.cssText = 'top: 20px; right: 20px; z-index: 9999; min-width: 300px;';
+                        warning.innerHTML = `
+                            <strong>⚠️ Не удалось сохранить результат</strong> Анализ выполнен, но результат не добавлен в список.
+                            <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
+                        `;
+                        document.body.appendChild(warning);
+                        setTimeout(() => {
+                            warning.remove();
+                        }, 5000);
+                    }
+                } catch (saveError) {
+                    console.error('Ошибка при сохранении результата:', saveError);
+                    
+                    // Показываем предупреждение
+                    const warning = document.createElement('div');
+                    warning.className = 'alert alert-warning alert-dismissible fade show position-fixed';
+                    warning.style.cssText = 'top: 20px; right: 20px; z-index: 9999; min-width: 300px;';
+                    warning.innerHTML = `
+                        <strong>⚠️ Ошибка сохранения</strong> ${saveError.message}
+                        <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
+                    `;
+                    document.body.appendChild(warning);
+                    setTimeout(() => {
+                        warning.remove();
+                    }, 5000);
+                }
+                
+                // Display results
+                displayResults(result);
+                
+                // Store result for export
+                window.lastAnalysisResult = result;
+                
+            } catch (e) {
+                alert('Ошибка анализа: ' + e.message);
+                console.error(e);
+            } finally {
+                progressContainer.style.display = 'none';
+                document.getElementById('analyze-btn').disabled = false;
+            }
+        }
+        
+        async function resampleAudio(buffer, targetSampleRate) {
+            if (buffer.sampleRate === targetSampleRate) {
+                return buffer;
+            }
+            
+            const offlineContext = new OfflineAudioContext(
+                buffer.numberOfChannels,
+                Math.ceil(buffer.length * targetSampleRate / buffer.sampleRate),
+                targetSampleRate
+            );
+            
+            const source = offlineContext.createBufferSource();
+            source.buffer = buffer;
+            source.connect(offlineContext.destination);
+            source.start();
+            
+            return await offlineContext.startRendering();
+        }
+        
+        async function extractFeatures(buffer) {
+            const audioData = buffer.getChannelData(0);
+            const sampleRate = buffer.sampleRate;
+            const duration = buffer.duration;
+            
+            // Extract F0 (pitch) using autocorrelation
+            const f0Values = extractF0(audioData, sampleRate);
+            
+            // Calculate features
+            // Calculate DSI parameters
+            const mpt = calculateMaxPhonation(audioData, sampleRate);
+            const f0High = f0Values.length > 0 ? calculateHighestF0(f0Values) : 0;
+            const iLow = calculateLowestIntensity(audioData, sampleRate);
+            
+            const features = {
+                jitter_percent: calculateJitter(f0Values),
+                shimmer_percent: calculateShimmer(audioData, f0Values, sampleRate),
+                hnr_db: calculateHNR(audioData, sampleRate),
+                rate_syl_sec: estimateSpeechRate(audioData, sampleRate),
+                f0_sd_hz: f0Values.length > 0 ? calculateStdDev(f0Values) : 0,
+                f0_mean_hz: f0Values.length > 0 ? calculateMean(f0Values) : 0,
+                amplitude_db_variation: calculateAmplitudeVariation(audioData, sampleRate),
+                pause_ratio: calculatePauseRatio(audioData, sampleRate),
+                rms_mean: calculateRMS(audioData),
+                amplitude_db_range: calculateAmplitudeRange(audioData, sampleRate),
+                // DSI parameters
+                mpt_sec: mpt,
+                f0_high_hz: f0High,
+                i_low_db: iLow
+            };
+            
+            return features;
+        }
+        
+        function extractF0(audioData, sampleRate) {
+            const frameLength = Math.floor(0.04 * sampleRate); // 40ms frames
+            const hopLength = Math.floor(0.01 * sampleRate);   // 10ms hop
+            const f0Values = [];
+            
+            for (let i = 0; i < audioData.length - frameLength; i += hopLength) {
+                const frame = audioData.slice(i, i + frameLength);
+                const f0 = autocorrelationPitch(frame, sampleRate);
+                if (f0 > 50 && f0 < 500) { // Valid pitch range
+                    f0Values.push(f0);
+                }
+            }
+            
+            return f0Values;
+        }
+        
+        function autocorrelationPitch(frame, sampleRate) {
+            // Normalize
+            const mean = frame.reduce((a, b) => a + b, 0) / frame.length;
+            const normalized = frame.map(x => x - mean);
+            
+            // Autocorrelation
+            const autocorr = [];
+            const maxLag = Math.floor(sampleRate / 50); // Minimum 50Hz
+            const minLag = Math.floor(sampleRate / 500); // Maximum 500Hz
+            
+            for (let lag = minLag; lag < maxLag; lag++) {
+                let sum = 0;
+                for (let i = 0; i < frame.length - lag; i++) {
+                    sum += normalized[i] * normalized[i + lag];
+                }
+                autocorr.push(sum);
+            }
+            
+            // Find peak
+            if (autocorr.length === 0) return 0;
+            
+            let maxIdx = 0;
+            let maxVal = autocorr[0];
+            for (let i = 1; i < autocorr.length; i++) {
+                if (autocorr[i] > maxVal) {
+                    maxVal = autocorr[i];
+                    maxIdx = i;
+                }
+            }
+            
+            const lag = maxIdx + minLag;
+            return sampleRate / lag;
+        }
+        
+        function calculateJitter(f0Values) {
+            if (f0Values.length < 2) return 0;
+            
+            const periods = f0Values.map(f => 1 / f);
+            const periodDiffs = [];
+            for (let i = 1; i < periods.length; i++) {
+                periodDiffs.push(Math.abs(periods[i] - periods[i - 1]));
+            }
+            
+            const meanPeriod = periods.reduce((a, b) => a + b, 0) / periods.length;
+            const meanDiff = periodDiffs.reduce((a, b) => a + b, 0) / periodDiffs.length;
+            
+            return (meanDiff / meanPeriod) * 100;
+        }
+        
+        function calculateShimmer(audioData, f0Values, sampleRate) {
+            if (f0Values.length < 2) return 0;
+            
+            const amplitudes = [];
+            const frameLength = Math.floor(0.01 * sampleRate);
+            
+            for (let i = 0; i < f0Values.length; i++) {
+                const frameStart = Math.floor(i * frameLength);
+                const frameEnd = Math.min(frameStart + frameLength, audioData.length);
+                if (frameEnd > frameStart) {
+                    const frame = audioData.slice(frameStart, frameEnd);
+                    const rms = Math.sqrt(frame.reduce((sum, x) => sum + x * x, 0) / frame.length);
+                    amplitudes.push(rms);
+                }
+            }
+            
+            if (amplitudes.length < 2) return 0;
+            
+            const ampDiffs = [];
+            for (let i = 1; i < amplitudes.length; i++) {
+                ampDiffs.push(Math.abs(amplitudes[i] - amplitudes[i - 1]));
+            }
+            
+            const meanAmp = amplitudes.reduce((a, b) => a + b, 0) / amplitudes.length;
+            const meanDiff = ampDiffs.reduce((a, b) => a + b, 0) / ampDiffs.length;
+            
+            return (meanDiff / (meanAmp + 1e-10)) * 100;
+        }
+        
+        function calculateHNR(audioData, sampleRate) {
+            const frameLength = Math.floor(0.04 * sampleRate);
+            const hopLength = Math.floor(0.02 * sampleRate);
+            const hnrValues = [];
+            
+            for (let i = 0; i < audioData.length - frameLength; i += hopLength) {
+                const frame = audioData.slice(i, i + frameLength);
+                const mean = frame.reduce((a, b) => a + b, 0) / frame.length;
+                const normalized = frame.map(x => x - mean);
+                
+                // Autocorrelation
+                const autocorr = [];
+                for (let lag = 0; lag < frame.length / 2; lag++) {
+                    let sum = 0;
+                    for (let j = 0; j < frame.length - lag; j++) {
+                        sum += normalized[j] * normalized[j + lag];
+                    }
+                    autocorr.push(sum);
+                }
+                
+                if (autocorr.length > 0) {
+                    const maxIdx = Math.floor(sampleRate / 200); // ~200Hz
+                    if (maxIdx < autocorr.length) {
+                        const peak = Math.max(...autocorr.slice(Math.floor(sampleRate / 500), maxIdx));
+                        const noise = autocorr.reduce((a, b) => a + b, 0) / autocorr.length;
+                        
+                        if (noise > 0 && peak > 0) {
+                            const hnr = 10 * Math.log10(peak / noise);
+                            if (hnr > 0) {
+                                hnrValues.push(hnr);
+                            }
+                        }
+                    }
+                }
+            }
+            
+            return hnrValues.length > 0 ? hnrValues.reduce((a, b) => a + b, 0) / hnrValues.length : 10.0;
+        }
+        
+        function estimateSpeechRate(audioData, sampleRate) {
+            const frameLength = Math.floor(0.025 * sampleRate);
+            const hopLength = Math.floor(0.01 * sampleRate);
+            const rmsFrames = [];
+            
+            for (let i = 0; i < audioData.length - frameLength; i += hopLength) {
+                const frame = audioData.slice(i, i + frameLength);
+                const rms = Math.sqrt(frame.reduce((sum, x) => sum + x * x, 0) / frame.length);
+                rmsFrames.push(rms);
+            }
+            
+            if (rmsFrames.length === 0) return 0;
+            
+            const threshold = rmsFrames.sort((a, b) => a - b)[Math.floor(rmsFrames.length * 0.2)];
+            const speechFrames = rmsFrames.filter(rms => rms > threshold);
+            const transitions = rmsFrames.reduce((count, rms, i) => {
+                if (i > 0 && (rms > threshold) !== (rmsFrames[i - 1] > threshold)) {
+                    return count + 1;
+                }
+                return count;
+            }, 0);
+            
+            const duration = audioData.length / sampleRate;
+            const syllables = transitions / 2;
+            return duration > 0 ? syllables / duration : 0;
+        }
+        
+        function calculateAmplitudeVariation(audioData, sampleRate) {
+            const frameLength = Math.floor(0.025 * sampleRate);
+            const hopLength = Math.floor(0.01 * sampleRate);
+            const dbValues = [];
+            
+            for (let i = 0; i < audioData.length - frameLength; i += hopLength) {
+                const frame = audioData.slice(i, i + frameLength);
+                const rms = Math.sqrt(frame.reduce((sum, x) => sum + x * x, 0) / frame.length);
+                const db = 20 * Math.log10(rms + 1e-10);
+                dbValues.push(db);
+            }
+            
+            if (dbValues.length === 0) return 0;
+            
+            const mean = dbValues.reduce((a, b) => a + b, 0) / dbValues.length;
+            const variance = dbValues.reduce((sum, db) => sum + Math.pow(db - mean, 2), 0) / dbValues.length;
+            return Math.sqrt(variance);
+        }
+        
+        function calculatePauseRatio(audioData, sampleRate) {
+            const frameLength = Math.floor(0.025 * sampleRate);
+            const hopLength = Math.floor(0.01 * sampleRate);
+            const rmsFrames = [];
+            
+            for (let i = 0; i < audioData.length - frameLength; i += hopLength) {
+                const frame = audioData.slice(i, i + frameLength);
+                const rms = Math.sqrt(frame.reduce((sum, x) => sum + x * x, 0) / frame.length);
+                rmsFrames.push(rms);
+            }
+            
+            if (rmsFrames.length === 0) return 0;
+            
+            const threshold = rmsFrames.sort((a, b) => a - b)[Math.floor(rmsFrames.length * 0.2)];
+            const silenceFrames = rmsFrames.filter(rms => rms <= threshold).length;
+            return silenceFrames / rmsFrames.length;
+        }
+        
+        function calculateRMS(audioData) {
+            const sumSquares = audioData.reduce((sum, x) => sum + x * x, 0);
+            return Math.sqrt(sumSquares / audioData.length);
+        }
+        
+        function calculateAmplitudeRange(audioData, sampleRate) {
+            const frameLength = Math.floor(0.025 * sampleRate);
+            const hopLength = Math.floor(0.01 * sampleRate);
+            const dbValues = [];
+            
+            for (let i = 0; i < audioData.length - frameLength; i += hopLength) {
+                const frame = audioData.slice(i, i + frameLength);
+                const rms = Math.sqrt(frame.reduce((sum, x) => sum + x * x, 0) / frame.length);
+                const db = 20 * Math.log10(rms + 1e-10);
+                dbValues.push(db);
+            }
+            
+            if (dbValues.length === 0) return 0;
+            
+            const max = Math.max(...dbValues);
+            const min = Math.min(...dbValues);
+            return max - min;
+        }
+        
+        function calculateMean(values) {
+            return values.reduce((a, b) => a + b, 0) / values.length;
+        }
+        
+        function calculateStdDev(values) {
+            const mean = calculateMean(values);
+            const variance = values.reduce((sum, val) => sum + Math.pow(val - mean, 2), 0) / values.length;
+            return Math.sqrt(variance);
+        }
+        
+        function calculateMaxPhonation(audioData, sampleRate) {
+            // Calculate RMS frames to detect vocalization
+            const frameLength = Math.floor(0.01 * sampleRate);
+            const hopLength = Math.floor(0.01 * sampleRate);
+            const rmsFrames = [];
+            
+            for (let i = 0; i < audioData.length - frameLength; i += hopLength) {
+                const frame = audioData.slice(i, i + frameLength);
+                const rms = Math.sqrt(frame.reduce((sum, x) => sum + x * x, 0) / frame.length);
+                rmsFrames.push(rms);
+            }
+            
+            if (rmsFrames.length === 0) return audioData.length / sampleRate;
+            
+            // Threshold for vocalization (50% of max)
+            const threshold = Math.max(...rmsFrames) * 0.5;
+            
+            // Find longest continuous vocalization segment
+            let maxDuration = 0;
+            let currentDuration = 0;
+            
+            for (const rms of rmsFrames) {
+                if (rms >= threshold) {
+                    currentDuration += 0.01; // time_step
+                    maxDuration = Math.max(maxDuration, currentDuration);
+                } else {
+                    currentDuration = 0;
+                }
+            }
+            
+            return maxDuration > 0 ? maxDuration : audioData.length / sampleRate;
+        }
+        
+        function calculateHighestF0(f0Values) {
+            if (f0Values.length === 0) return 0;
+            // Use 95th percentile to exclude outliers
+            const sorted = [...f0Values].sort((a, b) => a - b);
+            const index = Math.floor(sorted.length * 0.95);
+            return sorted[index];
+        }
+        
+        function calculateLowestIntensity(audioData, sampleRate) {
+            // Calculate intensity frames using RMS
+            const frameLength = Math.floor(0.01 * sampleRate);
+            const hopLength = Math.floor(0.01 * sampleRate);
+            const rmsFrames = [];
+            
+            for (let i = 0; i < audioData.length - frameLength; i += hopLength) {
+                const frame = audioData.slice(i, i + frameLength);
+                const rms = Math.sqrt(frame.reduce((sum, x) => sum + x * x, 0) / frame.length);
+                rmsFrames.push(rms);
+            }
+            
+            if (rmsFrames.length === 0) return 0;
+            
+            // Filter only vocalization (20% of max, same as Python)
+            const maxRms = Math.max(...rmsFrames);
+            if (maxRms <= 0) return 0;
+            
+            const threshold = maxRms * 0.20;
+            const vocalRms = rmsFrames.filter(rms => rms >= threshold);
+            
+            if (vocalRms.length === 0) {
+                // If no vocalization, use minimum
+                const minRms = Math.min(...rmsFrames.filter(r => r > 0));
+                if (minRms > 0 && maxRms > 0) {
+                    const relativeIntensity = minRms / maxRms;
+                    const iLowDb = 30 + (relativeIntensity * 30);
+                    return Math.max(25, Math.min(65, iLowDb));
+                }
+                return 0;
+            }
+            
+            // Use 5th percentile as I-Low (lowest intensity during vocalization)
+            const sorted = [...vocalRms].sort((a, b) => a - b);
+            const index = Math.floor(sorted.length * 0.05);
+            const iLowRms = sorted[index];
+            
+            // For DSI, I-Low should be in range 30-60 dB for normal speech
+            // Use relative intensity and scale to correct range
+            if (iLowRms > 0 && maxRms > 0) {
+                const relativeIntensity = iLowRms / maxRms;
+                // Scale to range 30-60 dB: 30 + (relative * 30)
+                const iLowDb = 30 + (relativeIntensity * 30);
+                // Limit to range 25-65 dB
+                return Math.max(25, Math.min(65, iLowDb));
+            }
+            
+            return 0;
+        }
+        
+        function calculateDSI(features) {
+            const mpt = features.mpt_sec || 0;
+            const f0High = features.f0_high_hz || 0;
+            const iLow = features.i_low_db || 0;
+            const jitter = features.jitter_percent || 0;
+            
+            // Check if all parameters are available
+            if (mpt === 0 || f0High === 0 || iLow === 0) {
+                return {
+                    dsi_score: null,
+                    dsi_range: "Недостаточно данных для расчета DSI",
+                    dsi_breakdown: {
+                        mpt_sec: mpt,
+                        f0_high_hz: f0High,
+                        i_low_db: iLow,
+                        jitter_percent: jitter
+                    },
+                    error: "Отсутствуют необходимые параметры для расчета DSI"
+                };
+            }
+            
+            // Calculate DSI: DSI = 0.13 × MPT + 0.0053 × F0-High - 0.26 × I-Low - 1.18 × Jitter(%) + 12.4
+            const dsiScore = 0.13 * mpt + 0.0053 * f0High - 0.26 * iLow - 1.18 * jitter + 12.4;
+            
+            // Interpretation
+            let dsiRange, pdRiskNote;
+            if (dsiScore >= 2.0) {
+                dsiRange = "Нормальный голос";
+                pdRiskNote = "Низкий риск ПД";
+            } else if (dsiScore >= 0.0) {
+                dsiRange = "Легкая дисфония";
+                pdRiskNote = "Умеренный риск ПД";
+            } else if (dsiScore >= -2.0) {
+                dsiRange = "Умеренная дисфония (PD риск высокий)";
+                pdRiskNote = "Высокий риск ПД (стадия 1-2)";
+            } else {
+                dsiRange = "Тяжелая дисфония (PD риск очень высокий)";
+                pdRiskNote = "Очень высокий риск ПД (стадия 3-5)";
+            }
+            
+            // Status for each parameter
+            const mptStatus = mpt < 10 ? "Низкий" : (mpt >= 15 ? "Нормальный" : "Снижен");
+            const f0HighStatus = f0High < 300 ? "Низкий" : (f0High >= 400 ? "Нормальный" : "Снижен");
+            const iLowStatus = iLow > 55 ? "Повышен" : (iLow < 45 ? "Нормальный" : "Повышен");
+            const jitterStatus = jitter > 1.5 ? "Высокий" : (jitter < 1.0 ? "Нормальный" : "Повышен");
+            
+            return {
+                dsi_score: dsiScore,
+                dsi_range: dsiRange,
+                dsi_breakdown: {
+                    mpt_sec: mpt,
+                    f0_high_hz: f0High,
+                    i_low_db: iLow,
+                    jitter_percent: jitter
+                },
+                interpretation: {
+                    mpt_status: mptStatus,
+                    f0_high_status: f0HighStatus,
+                    i_low_status: iLowStatus,
+                    jitter_status: jitterStatus,
+                    pd_risk_note: pdRiskNote
+                }
+            };
+        }
+        
+        function analyzeSymptoms(features) {
+            const THRESHOLDS = {
+                jitter_percent: 1.1,
+                shimmer_percent: 7.5,
+                hnr_db: 13.0,
+                f0_sd_hz: 50.0,
+                rate_syl_sec: 3.0,
+                pause_ratio: 0.30,
+                amplitude_db_variation: 6.0
+            };
+            
+            // Score symptoms (0-3)
+            const symptom_scores = {
+                hypophonia: scoreHypophonia(features),
+                monopitch: scoreMonopitch(features),
+                monoloudness: scoreMonoloudness(features),
+                hoarseness: scoreHoarseness(features),
+                imprecise_articulation: scoreArticulation(features)
+            };
+            
+            // Count exceeded thresholds
+            const exceeded = [];
+            if (features.jitter_percent > THRESHOLDS.jitter_percent) exceeded.push('jitter');
+            if (features.shimmer_percent > THRESHOLDS.shimmer_percent) exceeded.push('shimmer');
+            if (features.hnr_db < THRESHOLDS.hnr_db) exceeded.push('hnr');
+            if (features.f0_sd_hz < THRESHOLDS.f0_sd_hz) exceeded.push('f0_sd');
+            if (features.rate_syl_sec < THRESHOLDS.rate_syl_sec) exceeded.push('rate');
+            if (features.pause_ratio > THRESHOLDS.pause_ratio) exceeded.push('pause_ratio');
+            if (features.amplitude_db_variation < THRESHOLDS.amplitude_db_variation) exceeded.push('amplitude_variation');
+            
+            // Assess PD risk
+            const numExceeded = exceeded.length;
+            const severeSymptoms = Object.values(symptom_scores).filter(s => s >= 2).length;
+            
+            let riskLevel, accuracy;
+            if (numExceeded >= 4 || severeSymptoms >= 3) {
+                riskLevel = "Высокий";
+                accuracy = 92;
+            } else if (numExceeded >= 3 || severeSymptoms >= 2) {
+                riskLevel = "Высокий";
+                accuracy = 89;
+            } else if (numExceeded >= 2 || severeSymptoms >= 1) {
+                riskLevel = "Умеренный";
+                accuracy = 75;
+            } else if (numExceeded >= 1) {
+                riskLevel = "Низкий";
+                accuracy = 60;
+            } else {
+                riskLevel = "Минимальный";
+                accuracy = 30;
+            }
+            
+            symptom_scores.pd_risk = `${riskLevel} (${accuracy}%, согласно Little 2004 + Daoudi 2022)`;
+            
+            // Generate report
+            const report = generateReport(features, symptom_scores, exceeded);
+            
+            return { symptom_scores, report, exceeded };
+        }
+        
+        function scoreHypophonia(features) {
+            const rms = features.rms_mean || 0;
+            if (rms < 0.02) return 3;
+            if (rms < 0.04) return 2;
+            if (rms < 0.05) return 1;
+            return 0;
+        }
+        
+        function scoreMonopitch(features) {
+            const f0_sd = features.f0_sd_hz || 0;
+            if (f0_sd < 20) return 3;
+            if (f0_sd < 35) return 2;
+            if (f0_sd < 50) return 1;
+            return 0;
+        }
+        
+        function scoreMonoloudness(features) {
+            const dbVar = features.amplitude_db_variation || 0;
+            const dbRange = features.amplitude_db_range || 0;
+            if (dbVar < 2.0 || dbRange < 10.0) return 3;
+            if (dbVar < 4.0 || dbRange < 15.0) return 2;
+            if (dbVar < 6.0 || dbRange < 20.0) return 1;
+            return 0;
+        }
+        
+        function scoreHoarseness(features) {
+            const jitter = features.jitter_percent || 0;
+            const shimmer = features.shimmer_percent || 0;
+            const hnr = features.hnr_db || 20;
+            
+            let score = 0;
+            if (jitter > 2.0 || shimmer > 12.0) score += 2;
+            else if (jitter > 1.1 || shimmer > 7.5) score += 1;
+            
+            if (hnr < 8.0) score += 2;
+            else if (hnr < 13.0) score += 1;
+            
+            return Math.min(score, 3);
+        }
+        
+        function scoreArticulation(features) {
+            const rate = features.rate_syl_sec || 4.0;
+            const pauseRatio = features.pause_ratio || 0;
+            
+            let score = 0;
+            if (rate < 2.0) score += 2;
+            else if (rate < 3.0) score += 1;
+            
+            if (pauseRatio > 0.40) score += 2;
+            else if (pauseRatio > 0.30) score += 1;
+            
+            return Math.min(score, 3);
+        }
+        
+        function generateReport(features, symptom_scores, exceeded) {
+            const report = [];
+            const severityNames = ['', 'легкая', 'умеренная', 'тяжелая'];
+            const severityNamesM = ['', 'легкий', 'умеренный', 'тяжелый'];
+            
+            if (symptom_scores.hypophonia > 0) {
+                const severity = severityNames[symptom_scores.hypophonia];
+                report.push(`- Гипофония (${severity}): низкий RMS (${features.rms_mean.toFixed(3)}), типично для ПД [Little 2004].`);
+            }
+            
+            if (symptom_scores.monopitch > 0) {
+                const severity = severityNamesM[symptom_scores.monopitch];
+                report.push(`- Monopitch (${severity}): низкая вариация F0 (SD=${features.f0_sd_hz.toFixed(1)}Hz), отсутствие просодии характерно для ПД [Daoudi 2022].`);
+            }
+            
+            if (symptom_scores.monoloudness > 0) {
+                const severity = severityNames[symptom_scores.monoloudness];
+                report.push(`- Monoloudness (${severity}): вариация амплитуды ${features.amplitude_db_variation.toFixed(1)}dB, монотонная громкость [Little 2004].`);
+            }
+            
+            if (symptom_scores.hoarseness > 0) {
+                const severity = severityNames[symptom_scores.hoarseness];
+                const details = [];
+                if (features.jitter_percent > 1.1) details.push(`jitter=${features.jitter_percent.toFixed(2)}%`);
+                if (features.shimmer_percent > 7.5) details.push(`shimmer=${features.shimmer_percent.toFixed(2)}%`);
+                if (features.hnr_db < 13.0) details.push(`HNR=${features.hnr_db.toFixed(1)}dB`);
+                report.push(`- Охриплость (${severity}): нестабильность голосовых связок (${details.join(', ')}) [Little 2004, Daoudi 2022].`);
+            }
+            
+            if (symptom_scores.imprecise_articulation > 0) {
+                const severity = severityNames[symptom_scores.imprecise_articulation];
+                report.push(`- Неточная артикуляция (${severity}): скорость речи ${features.rate_syl_sec.toFixed(1)} сл/сек, паузы ${(features.pause_ratio * 100).toFixed(1)}% [NIH 2025].`);
+            }
+            
+            if (exceeded.length >= 3) {
+                report.push(`- Рекомендация: консультация невролога, LSVT логопедия, скрининг в РФ с использованием ИИ-инструментов (2023-2025).`);
+            } else if (exceeded.length >= 1) {
+                report.push(`- Рекомендация: мониторинг симптомов, логопедическая оценка.`);
+            }
+            
+            if (report.length === 0) {
+                report.push(`- Акустические параметры в пределах нормы. Симптомы ПД не выявлены.`);
+            }
+            
+            return report;
+        }
+        
+        function addDSIToReport(report, dsiResult) {
+            if (!dsiResult || dsiResult.dsi_score === null) {
+                return report;
+            }
+            
+            const updatedReport = [...report];
+            const breakdown = dsiResult.dsi_breakdown;
+            const interpretation = dsiResult.interpretation || {};
+            
+            updatedReport.push('');
+            updatedReport.push('=== DSI (Dysphonia Severity Index) ===');
+            updatedReport.push(`DSI Score: ${dsiResult.dsi_score.toFixed(2)} (${dsiResult.dsi_range})`);
+            updatedReport.push(`Параметры:`);
+            updatedReport.push(`  - MPT: ${breakdown.mpt_sec.toFixed(2)}с (${interpretation.mpt_status || 'N/A'})`);
+            updatedReport.push(`  - F0-High: ${breakdown.f0_high_hz.toFixed(1)} Гц (${interpretation.f0_high_status || 'N/A'})`);
+            updatedReport.push(`  - I-Low: ${breakdown.i_low_db.toFixed(1)} дБ (${interpretation.i_low_status || 'N/A'})`);
+            updatedReport.push(`  - Jitter: ${breakdown.jitter_percent.toFixed(2)}% (${interpretation.jitter_status || 'N/A'})`);
+            updatedReport.push(`Интерпретация: ${interpretation.pd_risk_note || 'N/A'}`);
+            updatedReport.push(`DSI коррелирует с Voice Handicap Index и идеален для мониторинга терапии (LSVT LOUD).`);
+            
+            return updatedReport;
+        }
+        
+        function displayResults(result) {
+            const localResults = document.getElementById('local-results');
+            if (!localResults) {
+                console.error('Элемент local-results не найден');
+                return;
+            }
+            localResults.style.display = 'block';
+            
+            // Display DSI
+            displayDSI(result.dsi);
+            
+            // Risk badge
+            const riskBadge = document.getElementById('risk-badge');
+            if (riskBadge) {
+                const riskText = result.symptom_scores.pd_risk || 'Не определен';
+                riskBadge.textContent = riskText;
+                riskBadge.className = 'risk-badge ' + (riskText.includes('Высокий') ? 'risk-high' : 
+                                                          riskText.includes('Умеренный') ? 'risk-medium' : 'risk-low');
+            }
+            
+            // Features table
+            const featuresTable = document.getElementById('features-table');
+            if (!featuresTable) {
+                console.error('Элемент features-table не найден');
+                return;
+            }
+            featuresTable.innerHTML = '';
+            
+            const thresholds = {
+                jitter_percent: { value: result.features.jitter_percent, threshold: 1.1, name: 'Jitter (%)', op: '>' },
+                shimmer_percent: { value: result.features.shimmer_percent, threshold: 7.5, name: 'Shimmer (%)', op: '>' },
+                hnr_db: { value: result.features.hnr_db, threshold: 13.0, name: 'HNR (dB)', op: '<' },
+                f0_sd_hz: { value: result.features.f0_sd_hz, threshold: 50.0, name: 'F0 SD (Hz)', op: '<' },
+                rate_syl_sec: { value: result.features.rate_syl_sec, threshold: 3.0, name: 'Скорость речи (сл/сек)', op: '<' },
+                pause_ratio: { value: result.features.pause_ratio, threshold: 0.30, name: 'Паузы (%)', op: '>', mult: 100 },
+                amplitude_db_variation: { value: result.features.amplitude_db_variation, threshold: 6.0, name: 'Вариация амплитуды (dB)', op: '<' }
+            };
+            
+            for (const [key, info] of Object.entries(thresholds)) {
+                const row = document.createElement('tr');
+                const value = info.mult ? (info.value * info.mult) : info.value;
+                const displayValue = info.mult ? value.toFixed(1) : value.toFixed(2);
+                const thresholdValue = info.mult ? (info.threshold * info.mult) : info.threshold;
+                
+                let exceeded = false;
+                if (info.op === '>') {
+                    exceeded = info.value > info.threshold;
+                } else {
+                    exceeded = info.value < info.threshold;
+                }
+                
+                row.innerHTML = `
+                    <td>${info.name}</td>
+                    <td>${displayValue}</td>
+                    <td>${info.op} ${thresholdValue.toFixed(2)}</td>
+                    <td><span class="badge ${exceeded ? 'bg-danger' : 'bg-success'}">${exceeded ? 'Превышен' : 'Норма'}</span></td>
+                `;
+                featuresTable.appendChild(row);
+            }
+            
+            // Symptom scores
+            const symptomScoresDiv = document.getElementById('symptom-scores');
+            if (symptomScoresDiv) {
+                const symptomNames = {
+                    hypophonia: 'Гипофония',
+                    monopitch: 'Monopitch',
+                    monoloudness: 'Monoloudness',
+                    hoarseness: 'Охриплость',
+                    imprecise_articulation: 'Неточная артикуляция'
+                };
+                
+                symptomScoresDiv.innerHTML = '';
+                for (const [key, score] of Object.entries(result.symptom_scores || {})) {
+                    if (key === 'pd_risk') continue;
+                    const div = document.createElement('div');
+                    div.className = 'mb-2';
+                    div.innerHTML = `
+                        <strong>${symptomNames[key] || key}:</strong> 
+                        <span class="symptom-score score-${score}">${score}</span>
+                        <small class="text-muted">(${['Нет', 'Легкий', 'Умеренный', 'Тяжелый'][score] || 'N/A'})</small>
+                    `;
+                    symptomScoresDiv.appendChild(div);
+                }
+            }
+            
+            // Charts
+            createCharts(result);
+            
+            // Report
+            const reportList = document.getElementById('report-list');
+            if (reportList && result.report) {
+                reportList.innerHTML = '';
+                result.report.forEach(item => {
+                const li = document.createElement('li');
+                // Handle DSI section header
+                if (item.startsWith('===')) {
+                    li.className = 'fw-bold mt-3';
+                    li.style.borderLeft = '4px solid #2c5f8d';
+                    li.style.background = '#e7f3ff';
+                } else if (item.startsWith('  -')) {
+                    // DSI parameters (indented)
+                    li.style.paddingLeft = '30px';
+                } else if (item.trim() === '') {
+                    // Empty line
+                    li.style.padding = '5px';
+                    li.style.border = 'none';
+                    li.style.background = 'transparent';
+                }
+                    li.textContent = item;
+                    reportList.appendChild(li);
+                });
+            }
+            
+            // Scroll to results
+            if (localResults) {
+                setTimeout(() => {
+                    localResults.scrollIntoView({ behavior: 'smooth' });
+                }, 100);
+            }
+        }
+        
+        function displayDSI(dsiResult) {
+            const dsiCard = document.getElementById('dsi-card');
+            const dsiScoreEl = document.getElementById('dsi-score');
+            const dsiRangeEl = document.getElementById('dsi-range');
+            const dsiBreakdownEl = document.getElementById('dsi-breakdown');
+            const dsiInterpretationEl = document.getElementById('dsi-interpretation');
+            
+            if (!dsiResult || dsiResult.dsi_score === null) {
+                if (dsiCard) dsiCard.style.display = 'none';
+                return;
+            }
+            
+            if (!dsiCard || !dsiScoreEl || !dsiRangeEl || !dsiBreakdownEl || !dsiInterpretationEl) {
+                console.warn('Некоторые элементы DSI не найдены');
+                return;
+            }
+            
+            dsiCard.style.display = 'block';
+            
+            // Display score with color coding
+            const score = dsiResult.dsi_score;
+            if (dsiScoreEl) dsiScoreEl.textContent = score.toFixed(2);
+            if (dsiScoreEl) {
+                if (score >= 2.0) {
+                    dsiScoreEl.className = 'display-4 text-success';
+                } else if (score >= 0.0) {
+                    dsiScoreEl.className = 'display-4 text-warning';
+                } else if (score >= -2.0) {
+                    dsiScoreEl.className = 'display-4 text-warning';
+                } else {
+                    dsiScoreEl.className = 'display-4 text-danger';
+                }
+            }
+            
+            if (dsiRangeEl) dsiRangeEl.textContent = dsiResult.dsi_range || '';
+            
+            // Display breakdown
+            const breakdown = dsiResult.dsi_breakdown || {};
+            const interpretation = dsiResult.interpretation || {};
+            
+            if (dsiBreakdownEl) {
+                dsiBreakdownEl.innerHTML = `
+                <tr>
+                    <td><strong>MPT (сек)</strong></td>
+                    <td>${(breakdown.mpt_sec || 0).toFixed(2)}</td>
+                    <td><span class="badge ${(breakdown.mpt_sec || 0) < 10 ? 'bg-danger' : (breakdown.mpt_sec || 0) >= 15 ? 'bg-success' : 'bg-warning'}">${interpretation.mpt_status || 'N/A'}</span></td>
+                </tr>
+                <tr>
+                    <td><strong>F0-High (Гц)</strong></td>
+                    <td>${(breakdown.f0_high_hz || 0).toFixed(1)}</td>
+                    <td><span class="badge ${(breakdown.f0_high_hz || 0) < 300 ? 'bg-danger' : (breakdown.f0_high_hz || 0) >= 400 ? 'bg-success' : 'bg-warning'}">${interpretation.f0_high_status || 'N/A'}</span></td>
+                </tr>
+                <tr>
+                    <td><strong>I-Low (дБ)</strong></td>
+                    <td>${(breakdown.i_low_db || 0).toFixed(1)}</td>
+                    <td><span class="badge ${(breakdown.i_low_db || 0) > 55 ? 'bg-danger' : (breakdown.i_low_db || 0) < 45 ? 'bg-success' : 'bg-warning'}">${interpretation.i_low_status || 'N/A'}</span></td>
+                </tr>
+                <tr>
+                    <td><strong>Jitter (%)</strong></td>
+                    <td>${(breakdown.jitter_percent || 0).toFixed(2)}</td>
+                    <td><span class="badge ${(breakdown.jitter_percent || 0) > 1.5 ? 'bg-danger' : (breakdown.jitter_percent || 0) < 1.0 ? 'bg-success' : 'bg-warning'}">${interpretation.jitter_status || 'N/A'}</span></td>
+                </tr>
+            `;
+            }
+            
+            // Display interpretation
+            if (dsiInterpretationEl) {
+                dsiInterpretationEl.innerHTML = `
+                <p><strong>Оценка риска:</strong> ${interpretation.pd_risk_note || 'N/A'}</p>
+                <div class="mt-2">
+                    <small>
+                        <strong>Нормальные значения:</strong><br>
+                        • MPT: >15-20 сек<br>
+                        • F0-High: >400-500 Гц<br>
+                        • I-Low: <45 дБ<br>
+                        • Jitter: <1%
+                    </small>
+                </div>
+            `;
+            }
+        }
+        
+        function createCharts(result) {
+            // Features chart
+            const featuresChartEl = document.getElementById('features-chart');
+            if (featuresChartEl) {
+                const featuresCtx = featuresChartEl.getContext('2d');
+                if (featuresCtx) {
+                    if (featuresChart) featuresChart.destroy();
+                    
+                    featuresChart = new Chart(featuresCtx, {
+                        type: 'bar',
+                        data: {
+                            labels: ['Jitter (%)', 'Shimmer (%)', 'HNR (dB)', 'F0 SD (Hz)', 'Скорость (сл/сек)', 'Паузы (%)', 'Амплитуда (dB)'],
+                            datasets: [{
+                                label: 'Значение',
+                                data: [
+                                    result.features.jitter_percent,
+                                    result.features.shimmer_percent,
+                                    result.features.hnr_db,
+                                    result.features.f0_sd_hz,
+                                    result.features.rate_syl_sec,
+                                    result.features.pause_ratio * 100,
+                                    result.features.amplitude_db_variation
+                                ],
+                                backgroundColor: '#2c5f8d'
+                            }]
+                        },
+                        options: {
+                            responsive: true,
+                            maintainAspectRatio: false,
+                            plugins: {
+                                title: {
+                                    display: true,
+                                    text: 'Акустические признаки'
+                                }
+                            }
+                        }
+                    });
+                }
+            }
+            
+            // Symptoms chart
+            const symptomsChartEl = document.getElementById('symptoms-chart');
+            if (symptomsChartEl) {
+                const symptomsCtx = symptomsChartEl.getContext('2d');
+                if (symptomsCtx) {
+                    if (symptomsChart) symptomsChart.destroy();
+                    
+                    const symptomLabels = ['Гипофония', 'Monopitch', 'Monoloudness', 'Охриплость', 'Артикуляция'];
+                    const symptomValues = [
+                        result.symptom_scores?.hypophonia || 0,
+                        result.symptom_scores?.monopitch || 0,
+                        result.symptom_scores?.monoloudness || 0,
+                        result.symptom_scores?.hoarseness || 0,
+                        result.symptom_scores?.imprecise_articulation || 0
+                    ];
+                    
+                    symptomsChart = new Chart(symptomsCtx, {
+                        type: 'bar',
+                        data: {
+                            labels: symptomLabels,
+                            datasets: [{
+                                label: 'Оценка (0-3)',
+                                data: symptomValues,
+                                backgroundColor: symptomValues.map(v => 
+                                    v === 0 ? '#28a745' : v === 1 ? '#ffc107' : v === 2 ? '#fd7e14' : '#dc3545'
+                                )
+                            }]
+                        },
+                        options: {
+                            responsive: true,
+                            maintainAspectRatio: false,
+                            scales: {
+                                y: {
+                                    beginAtZero: true,
+                                    max: 3
+                                }
+                            },
+                            plugins: {
+                                title: {
+                                    display: true,
+                                    text: 'Оценка симптомов'
+                                }
+                            }
+                        }
+                    });
+                }
+            }
+        }
+        
+        function exportJSON() {
+            if (!window.lastAnalysisResult) {
+                alert('Нет результатов для экспорта');
+                return;
+            }
+            
+            const json = JSON.stringify(window.lastAnalysisResult, null, 2);
+            const blob = new Blob([json], { type: 'application/json' });
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = `parkinson_analysis_${new Date().toISOString().split('T')[0]}.json`;
+            a.click();
+            URL.revokeObjectURL(url);
+        }
+        
+        // Helper: Convert AudioBuffer to WAV for wavesurfer
+        function audioBufferToWav(audioBuffer, sampleRate) {
+            // Получаем моно канал (используем первый канал)
+            const channelData = audioBuffer.getChannelData(0);
+            const length = channelData.length;
+            const arrayBuffer = new ArrayBuffer(44 + length * 2);
+            const view = new DataView(arrayBuffer);
+            const samples = new Int16Array(arrayBuffer, 44);
+            
+            // WAV header
+            const writeString = (offset, string) => {
+                for (let i = 0; i < string.length; i++) {
+                    view.setUint8(offset + i, string.charCodeAt(i));
+                }
+            };
+            
+            writeString(0, 'RIFF');
+            view.setUint32(4, 36 + length * 2, true);
+            writeString(8, 'WAVE');
+            writeString(12, 'fmt ');
+            view.setUint32(16, 16, true);
+            view.setUint16(20, 1, true); // PCM
+            view.setUint16(22, 1, true); // моно
+            view.setUint32(24, sampleRate, true);
+            view.setUint32(28, sampleRate * 2, true);
+            view.setUint16(32, 2, true);
+            view.setUint16(34, 16, true);
+            writeString(36, 'data');
+            view.setUint32(40, length * 2, true);
+            
+            // Convert float samples to 16-bit PCM
+            for (let i = 0; i < length; i++) {
+                const s = Math.max(-1, Math.min(1, channelData[i]));
+                samples[i] = s < 0 ? s * 0x8000 : s * 0x7FFF;
+            }
+            
+            // Возвращаем Blob для отправки на сервер
+            return new Blob([arrayBuffer], { type: 'audio/wav' });
+        }
+    </script>
+</body>
+</html>

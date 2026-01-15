@@ -1,0 +1,48 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+*.egg-info/
+dist/
+build/
+env/
+venv/
+ENV/
+.venv
+
+# Результаты и данные
+results.json
+results/
+data/
+temp_voice_*.ogg
+*.wav
+*.mp3
+*.ogg
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Переменные окружения
+.env
+.env.local
+.docker-compose.env
+.env.production
+.env.prod
+env
+
+# Логи
+*.log
+
+# Временные файлы
+*.tmp
+*.bak
+*~

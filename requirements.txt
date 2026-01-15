@@ -1,0 +1,11 @@
+librosa>=0.10.0
+numpy>=1.24.0
+soundfile>=0.12.0
+praat-parselmouth>=0.4.7
+scipy>=1.10.0
+matplotlib>=3.7.0
+aiogram>=3.0.0
+flask>=2.3.0
+flask-cors>=4.0.0
+requests>=2.31.0
+python-dotenv>=1.0.0
