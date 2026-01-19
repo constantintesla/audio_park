@@ -231,22 +231,33 @@ def save_result():
 def get_results():
     """Получение всех результатов"""
     try:
-        results = load_results()
+        all_results = load_results()
         
-        # Фильтрация по user_id, если указан
+        # Фильтрация по user_id, если указан,
+        # при этом сохраняем исходный индекс записи в файле results.json
         user_id = request.args.get('user_id', type=int)
-        if user_id:
-            results = [r for r in results if r.get('user_info', {}).get('tg_user_id') == user_id]
+        indexed_results = []
+        for original_index, result in enumerate(all_results):
+            if user_id is not None:
+                if result.get('user_info', {}).get('tg_user_id') != user_id:
+                    continue
+            # Не мутируем исходный объект, чтобы не портить данные на диске
+            result_with_index = dict(result)
+            result_with_index['_index'] = original_index
+            indexed_results.append(result_with_index)
         
-        # Сортировка по дате (новые первыми)
-        results.sort(key=lambda x: x.get('user_info', {}).get('timestamp', ''), reverse=True)
+        # Сортировка по дате (новые первыми), но индекс остаётся исходным
+        indexed_results.sort(
+            key=lambda x: x.get('user_info', {}).get('timestamp', ''),
+            reverse=True
+        )
         
         # Ограничение количества результатов (опционально)
         limit = request.args.get('limit', type=int)
         if limit:
-            results = results[:limit]
+            indexed_results = indexed_results[:limit]
         
-        return jsonify({"results": results, "count": len(results)}), 200
+        return jsonify({"results": indexed_results, "count": len(indexed_results)}), 200
         
     except Exception as e:
         logger.error(f"Ошибка получения результатов: {e}")

@@ -383,6 +383,7 @@
             try {
                 const response = await fetch('/api/results');
                 const data = await response.json();
+                
                 const select = document.getElementById('result-select');
                 select.innerHTML = '<option value="">Выберите результат...</option>';
                 
@@ -392,12 +393,16 @@
                     const username = userInfo.tg_username || 'Unknown';
                     const date = timestamp ? new Date(timestamp).toLocaleString('ru-RU') : `#${index}`;
                     const option = document.createElement('option');
-                    option.value = index;
+                    // Используем стабильный индекс из backend (`_index`),
+                    // чтобы он совпадал с /api/results/<index> и /api/visualization/<index>
+                    const backendIndex = Number.isInteger(result._index) ? result._index : index;
+                    option.value = backendIndex;
                     option.textContent = `${date} - ${username}`;
                     select.appendChild(option);
                 });
                 
-                if (preselectIndex !== null && data.results[preselectIndex]) {
+                if (preselectIndex !== null) {
+                    // preselectIndex — это индекс из backend (оригинальный индекс в results.json)
                     select.value = String(preselectIndex);
                     // Автоматически запускаем загрузку визуализации, если индекс передан из URL
                     setTimeout(() => {
