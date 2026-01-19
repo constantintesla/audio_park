@@ -1,0 +1,630 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Все результаты анализа - Анализ голоса на болезнь Паркинсона</title>
+    
+    <!-- Bootstrap 5 CSS -->
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+    
+    <style>
+        :root {
+            --medical-blue: #2c5f8d;
+            --medical-light-blue: #4a90c2;
+            --medical-grey: #6c757d;
+            --medical-light-grey: #e9ecef;
+            --risk-high: #dc3545;
+            --risk-medium: #ffc107;
+            --risk-low: #28a745;
+        }
+        
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background: linear-gradient(135deg, #f5f7fa 0%, #e9ecef 100%);
+            min-height: 100vh;
+            padding: 20px 0;
+        }
+        
+        .container {
+            max-width: 1200px;
+        }
+        
+        .header {
+            background: linear-gradient(135deg, var(--medical-blue) 0%, var(--medical-light-blue) 100%);
+            color: white;
+            padding: 30px;
+            border-radius: 15px;
+            margin-bottom: 30px;
+            box-shadow: 0 4px 6px rgba(0,0,0,0.1);
+        }
+        
+        .header h1 {
+            margin: 0;
+            font-size: 2rem;
+            font-weight: 600;
+        }
+        
+        .header p {
+            margin: 10px 0 0 0;
+            opacity: 0.9;
+        }
+        
+        .card {
+            border: none;
+            border-radius: 15px;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+            margin-bottom: 20px;
+        }
+        
+        .card-header {
+            background: var(--medical-light-grey);
+            border-bottom: 2px solid var(--medical-blue);
+            font-weight: 600;
+            padding: 15px 20px;
+        }
+        
+        .btn-primary {
+            background: var(--medical-blue);
+            border: none;
+            padding: 12px 30px;
+            font-size: 1.1rem;
+            border-radius: 8px;
+            transition: all 0.3s;
+        }
+        
+        .btn-primary:hover {
+            background: var(--medical-light-blue);
+            transform: translateY(-2px);
+            box-shadow: 0 4px 8px rgba(0,0,0,0.2);
+        }
+        
+        .feature-table {
+            width: 100%;
+            margin: 20px 0;
+        }
+        
+        .feature-table th {
+            background: var(--medical-blue);
+            color: white;
+            padding: 12px;
+            text-align: left;
+        }
+        
+        .feature-table td {
+            padding: 10px 12px;
+            border-bottom: 1px solid #dee2e6;
+        }
+        
+        .feature-table tr:hover {
+            background: var(--medical-light-grey);
+        }
+        
+        .risk-badge {
+            display: inline-block;
+            padding: 8px 16px;
+            border-radius: 20px;
+            font-weight: 600;
+            font-size: 1.1rem;
+        }
+        
+        .risk-high {
+            background: var(--risk-high);
+            color: white;
+        }
+        
+        .risk-medium {
+            background: var(--risk-medium);
+            color: #333;
+        }
+        
+        .risk-low {
+            background: var(--risk-low);
+            color: white;
+        }
+        
+        .symptom-score {
+            display: inline-block;
+            padding: 4px 12px;
+            border-radius: 15px;
+            font-weight: 600;
+            margin: 2px;
+        }
+        
+        .score-0 { background: #d4edda; color: #155724; }
+        .score-1 { background: #fff3cd; color: #856404; }
+        .score-2 { background: #ffeaa7; color: #856404; }
+        .score-3 { background: #f8d7da; color: #721c24; }
+        
+        .report-list {
+            background: white;
+            padding: 20px;
+            border-radius: 10px;
+            margin: 20px 0;
+        }
+        
+        .report-list ul {
+            list-style: none;
+            padding: 0;
+        }
+        
+        .report-list li {
+            padding: 10px;
+            margin: 5px 0;
+            border-left: 4px solid var(--medical-blue);
+            background: var(--medical-light-grey);
+        }
+        
+        .footer {
+            text-align: center;
+            padding: 20px;
+            color: var(--medical-grey);
+            font-size: 0.9rem;
+            margin-top: 40px;
+        }
+        
+        @media (max-width: 768px) {
+            .header h1 {
+                font-size: 1.5rem;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h1>📋 Все результаты анализов</h1>
+            <p>Полный список всех сохраненных результатов анализа голоса</p>
+            <div class="mt-3 d-flex flex-column flex-md-row align-items-start align-items-md-center gap-2 flex-wrap">
+                <a href="/" class="btn btn-light btn-lg fw-semibold">
+                    🏠 Главная страница
+                </a>
+                <a href="/visualization" class="btn btn-light btn-lg fw-semibold">
+                    🎯 Открыть визуализацию параметров
+                </a>
+            </div>
+        </div>
+        
+        <!-- Results List -->
+        <div class="card mb-3">
+            <div class="card-header d-flex justify-content-between align-items-center">
+                <h4 class="mb-0">📋 Результаты анализов</h4>
+                <small class="text-muted" id="results-count">Загрузка...</small>
+            </div>
+            <div class="card-body">
+                <div class="text-center mb-3">
+                    <button id="refresh-btn" class="btn btn-primary">🔄 Обновить список</button>
+                </div>
+                
+                <div id="results-list"></div>
+            </div>
+        </div>
+        
+        <!-- Loading indicator -->
+        <div id="loading-indicator" class="text-center" style="display: none;">
+            <div class="spinner-border text-primary" role="status">
+                <span class="visually-hidden">Загрузка...</span>
+            </div>
+            <p class="mt-2">Загрузка результатов...</p>
+        </div>
+        
+        <!-- Footer -->
+        <div class="footer">
+            <p>⚠️ Система предназначена для исследовательских целей и не заменяет медицинскую диагностику</p>
+        </div>
+    </div>
+    
+    <!-- Scripts -->
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+    
+    <script>
+        const API_URL = '';
+        
+        // Инициализация при загрузке
+        window.addEventListener('DOMContentLoaded', () => {
+            initRefreshButton();
+            loadResults();
+        });
+        
+        function initRefreshButton() {
+            document.getElementById('refresh-btn').addEventListener('click', () => {
+                loadResults();
+            });
+        }
+        
+        async function loadResults() {
+            const loadingIndicator = document.getElementById('loading-indicator');
+            const resultsList = document.getElementById('results-list');
+            
+            if (loadingIndicator) {
+                loadingIndicator.style.display = 'block';
+            }
+            if (resultsList) {
+                resultsList.innerHTML = '';
+            }
+            
+            try {
+                const response = await fetch(`${API_URL}/api/results`);
+                if (!response.ok) {
+                    throw new Error(`HTTP error! status: ${response.status}`);
+                }
+                const data = await response.json();
+                
+                if (data.results && data.results.length > 0) {
+                    // Обновляем счетчик
+                    const resultsCount = document.getElementById('results-count');
+                    if (resultsCount) {
+                        resultsCount.textContent = `Всего: ${data.results.length}`;
+                    }
+                    
+                    // Сортируем по дате (новые первыми)
+                    const sortedResults = [...data.results].sort((a, b) => {
+                        const dateA = new Date(a.user_info?.timestamp || 0);
+                        const dateB = new Date(b.user_info?.timestamp || 0);
+                        return dateB - dateA;
+                    });
+                    
+                    // Отображаем детальные карточки
+                    sortedResults.forEach((result, index) => {
+                        const resultCard = createResultCard(result, index);
+                        if (resultsList) {
+                            resultsList.appendChild(resultCard);
+                        }
+                    });
+                } else {
+                    const resultsCount = document.getElementById('results-count');
+                    if (resultsCount) {
+                        resultsCount.textContent = 'Нет результатов';
+                    }
+                    if (resultsList) {
+                        resultsList.innerHTML = `
+                            <div class="alert alert-info text-center">
+                                <h5>📭 Пока нет результатов анализа</h5>
+                                <p class="mb-0">Результаты появятся здесь после анализа голосовых сообщений через Telegram бота или локального анализа.</p>
+                            </div>
+                        `;
+                    }
+                }
+            } catch (e) {
+                console.error('Ошибка загрузки результатов:', e);
+                if (resultsList) {
+                    resultsList.innerHTML = `
+                        <div class="alert alert-danger">
+                            <h5>❌ Ошибка загрузки результатов</h5>
+                            <p>${e.message}</p>
+                            <p class="mb-0"><small>Проверьте, что API сервер запущен и доступен по адресу ${API_URL || 'текущий домен'}</small></p>
+                        </div>
+                    `;
+                }
+            } finally {
+                if (loadingIndicator) {
+                    loadingIndicator.style.display = 'none';
+                }
+            }
+        }
+        
+        function createResultCard(result, index) {
+            const card = document.createElement('div');
+            card.className = 'card mb-3';
+            
+            const userInfo = result.user_info || {};
+            const username = userInfo.tg_username || 'Неизвестный пользователь';
+            const timestamp = userInfo.timestamp || '';
+            const dsi = result.dsi || {};
+            const dsiScore = dsi.dsi_score;
+            const symptomScores = result.symptom_scores || {};
+            const pdRisk = symptomScores.pd_risk || 'Не определен';
+            
+            // Форматирование даты
+            let dateStr = 'Дата неизвестна';
+            let dateObj = null;
+            if (timestamp) {
+                try {
+                    dateObj = new Date(timestamp);
+                    dateStr = dateObj.toLocaleString('ru-RU', {
+                        year: 'numeric',
+                        month: 'long',
+                        day: 'numeric',
+                        hour: '2-digit',
+                        minute: '2-digit'
+                    });
+                } catch (e) {
+                    dateStr = timestamp;
+                }
+            }
+            
+            // Определение цвета риска
+            let riskClass = 'risk-low';
+            let riskIcon = '🟢';
+            if (pdRisk.includes('Высокий')) {
+                riskClass = 'risk-high';
+                riskIcon = '🔴';
+            } else if (pdRisk.includes('Умеренный')) {
+                riskClass = 'risk-medium';
+                riskIcon = '🟡';
+            }
+            
+            // Краткая информация для заголовка
+            const shortInfo = dsiScore !== null && dsiScore !== undefined 
+                ? `DSI: ${dsiScore.toFixed(2)} | ` 
+                : '';
+            
+            card.innerHTML = `
+                <div class="card-header d-flex justify-content-between align-items-center" style="cursor: pointer;" onclick="toggleResult(${index})">
+                    <div class="flex-grow-1">
+                        <div class="d-flex align-items-center gap-2">
+                            <h5 class="mb-0">👤 ${username}</h5>
+                            <span class="risk-badge ${riskClass}" style="font-size: 0.85rem; padding: 4px 12px;">
+                                ${riskIcon} ${pdRisk.split('(')[0].trim()}
+                            </span>
+                        </div>
+                        <div class="mt-1">
+                            <small class="text-muted">📅 ${dateStr}</small>
+                            ${shortInfo ? `<small class="text-muted ms-2">${shortInfo}</small>` : ''}
+                        </div>
+                    </div>
+                    <div class="d-flex gap-2 align-items-center">
+                        <button class="btn btn-sm btn-outline-secondary" onclick="event.stopPropagation(); openVisualization(${index})" title="Открыть визуализацию">
+                            📈
+                        </button>
+                        <button class="btn btn-sm btn-outline-secondary" onclick="event.stopPropagation(); toggleResult(${index})">
+                            <span id="toggle-icon-${index}">▼</span>
+                        </button>
+                    </div>
+                </div>
+                <div class="card-body" id="result-content-${index}" style="display: none;">
+                    ${createResultContent(result)}
+                </div>
+            `;
+            
+            // Сохраняем индекс в data-атрибуте для правильной работы toggle
+            card.setAttribute('data-index', index);
+            
+            return card;
+        }
+        
+        function createResultContent(result) {
+            const dsi = result.dsi || {};
+            const dsiScore = dsi.dsi_score;
+            const symptomScores = result.symptom_scores || {};
+            const pdRisk = symptomScores.pd_risk || 'Не определен';
+            const features = result.features || {};
+            const jitterRaw = features.jitter_percent ?? 0;
+            const jitterCapped = (features.jitter_percent_capped !== undefined && features.jitter_percent_capped !== null)
+                ? features.jitter_percent_capped
+                : Math.min(jitterRaw, 5.0);
+            
+            let html = '';
+            
+            // DSI Section
+            if (dsiScore !== null && dsiScore !== undefined) {
+                const dsiRange = dsi.dsi_range || '';
+                const breakdown = dsi.dsi_breakdown || {};
+                const interpretation = dsi.interpretation || {};
+                
+                const dsiColorClass = dsiScore >= 2.0 ? 'text-success' : 
+                                     dsiScore >= 0.0 ? 'text-warning' : 
+                                     dsiScore >= -2.0 ? 'text-warning' : 'text-danger';
+                
+                html += `
+                    <div class="card mt-3 mb-3">
+                        <div class="card-header bg-primary text-white">
+                            <h5 class="mb-0">📊 DSI (Dysphonia Severity Index)</h5>
+                        </div>
+                        <div class="card-body">
+                            <div class="text-center mb-3">
+                                <h2 class="display-4 ${dsiColorClass}">${dsiScore.toFixed(2)}</h2>
+                                <p class="lead">${dsiRange}</p>
+                                <p class="text-muted"><small>${dsiScore >= 2.0 ? '🟢' : dsiScore >= 0.0 ? '🟡' : dsiScore >= -2.0 ? '🟠' : '🔴'} Референсный диапазон: 2.0-5.0 (нормальный голос)</small></p>
+                            </div>
+                            <div class="row">
+                                <div class="col-md-6">
+                                    <h6>Параметры DSI:</h6>
+                                    <table class="table table-sm table-bordered">
+                                        <thead class="table-light">
+                                            <tr>
+                                                <th>Параметр</th>
+                                                <th>Значение</th>
+                                                <th>Референс</th>
+                                            </tr>
+                                        </thead>
+                                        <tbody>
+                                            <tr>
+                                                <td><strong>MPT (гласный, сек)</strong></td>
+                                                <td>${(breakdown.mpt_sec || 0).toFixed(2)}</td>
+                                                <td><small class="${(breakdown.mpt_sec || 0) >= 15 ? 'text-success' : (breakdown.mpt_sec || 0) < 10 ? 'text-danger' : 'text-warning'}">${(breakdown.mpt_sec || 0) >= 15 ? '🟢' : (breakdown.mpt_sec || 0) < 10 ? '🔴' : '🟡'} норма: 15-30 сек</small></td>
+                                            </tr>
+                                            <tr>
+                                                <td><strong>MPT (речь, сек)</strong></td>
+                                                <td>${(breakdown.mpt_speech_sec || 0).toFixed(2)}</td>
+                                                <td><small class="text-muted">оценка по речи</small></td>
+                                            </tr>
+                                            <tr>
+                                                <td><strong>F0-High (Гц)</strong></td>
+                                                <td>${(breakdown.f0_high_hz || 0).toFixed(1)}</td>
+                                                <td><small class="${(breakdown.f0_high_hz || 0) >= 400 ? 'text-success' : (breakdown.f0_high_hz || 0) < 300 ? 'text-danger' : 'text-warning'}">${(breakdown.f0_high_hz || 0) >= 400 ? '🟢' : (breakdown.f0_high_hz || 0) < 300 ? '🔴' : '🟡'} норма: 400-600 Гц</small></td>
+                                            </tr>
+                                            <tr>
+                                                <td><strong>I-Low (дБ, норм.)</strong></td>
+                                                <td>${(breakdown.i_low_db || 0).toFixed(1)}</td>
+                                                <td><small class="${(breakdown.i_low_db || 0) <= 45 && (breakdown.i_low_db || 0) >= 25 ? 'text-success' : (breakdown.i_low_db || 0) > 55 ? 'text-danger' : 'text-warning'}">${(breakdown.i_low_db || 0) <= 45 && (breakdown.i_low_db || 0) >= 25 ? '🟢' : (breakdown.i_low_db || 0) > 55 ? '🔴' : '🟡'} норма: 25-45 дБ</small></td>
+                                            </tr>
+                                            <tr>
+                                                <td><strong>Jitter (%)</strong></td>
+                                                <td>${(breakdown.jitter_percent || 0).toFixed(2)}</td>
+                                                <td><small class="${(breakdown.jitter_percent || 0) <= 1.0 ? 'text-success' : (breakdown.jitter_percent || 0) > 1.5 ? 'text-danger' : 'text-warning'}">${(breakdown.jitter_percent || 0) <= 1.0 ? '🟢' : (breakdown.jitter_percent || 0) > 1.5 ? '🔴' : '🟡'} норма: 0.0-1.0 %</small></td>
+                                            </tr>
+                                            <tr>
+                                                <td><strong>Jitter (cap 5%)</strong></td>
+                                                <td>${(breakdown.jitter_percent_capped || 0).toFixed(2)}</td>
+                                                <td><small class="text-muted">ограниченная копия</small></td>
+                                            </tr>
+                                        </tbody>
+                                    </table>
+                                </div>
+                                <div class="col-md-6">
+                                    <h6>Интерпретация:</h6>
+                                    <p><strong>Оценка риска:</strong> ${interpretation.pd_risk_note || 'N/A'}</p>
+                                    <div class="alert alert-info mt-3" role="alert">
+                                        <small>
+                                            <strong>Формула:</strong> DSI = 0.13 × MPT + 0.0053 × F0-High - 0.26 × I-Low - 1.18 × Jitter(%) + 12.4<br>
+                                            I-Low — нормализованный дБ (не SPL).
+                                        </small>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                `;
+            }
+            
+            function formatWithReference(value, paramName) {
+                const refRanges = getReferenceRanges();
+                if (!refRanges[paramName]) return value.toFixed(2);
+                
+                const ref = refRanges[paramName];
+                const [normalMin, normalMax] = ref.normal;
+                const unit = ref.unit;
+                
+                let statusIcon = '';
+                let statusClass = '';
+                if (normalMin <= value && value <= normalMax) {
+                    statusIcon = '🟢';
+                    statusClass = 'text-success';
+                } else if (value < normalMin) {
+                    statusIcon = '🔴';
+                    statusClass = 'text-danger';
+                } else {
+                    statusIcon = '🔴';
+                    statusClass = 'text-danger';
+                }
+                
+                return `<span class="${statusClass}">${value.toFixed(2)} ${unit} ${statusIcon}</span> <small class="text-muted">(норма: ${normalMin.toFixed(1)}-${normalMax.toFixed(1)} ${unit})</small>`;
+            }
+            
+            // Features Table
+            html += `
+                <h5>Акустические признаки</h5>
+                <table class="feature-table table table-sm table-bordered">
+                    <thead class="table-light">
+                        <tr>
+                            <th>Признак</th>
+                            <th>Значение</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        <tr>
+                            <td><strong>Jitter</strong></td>
+                            <td>${formatWithReference(features.jitter_percent || 0, 'jitter_percent')}</td>
+                        </tr>
+                        <tr>
+                            <td><strong>Jitter (cap 5%)</strong></td>
+                            <td>${formatWithReference(jitterCapped, 'jitter_percent')}</td>
+                        </tr>
+                        <tr>
+                            <td><strong>Shimmer</strong></td>
+                            <td>${formatWithReference(features.shimmer_percent || 0, 'shimmer_percent')}</td>
+                        </tr>
+                        <tr>
+                            <td><strong>HNR</strong></td>
+                            <td>${formatWithReference(features.hnr_db || 0, 'hnr_db')}</td>
+                        </tr>
+                        <tr>
+                            <td><strong>F0 Mean</strong></td>
+                            <td>${formatWithReference(features.f0_mean_hz || 0, 'f0_mean_hz')}</td>
+                        </tr>
+                        <tr>
+                            <td><strong>F0 SD</strong></td>
+                            <td>${formatWithReference(features.f0_sd_hz || 0, 'f0_sd_hz')}</td>
+                        </tr>
+                        <tr>
+                            <td><strong>Скорость речи</strong></td>
+                            <td>${formatWithReference(features.rate_syl_sec || 0, 'rate_syl_sec')}</td>
+                        </tr>
+                    </tbody>
+                </table>
+            `;
+            
+            // Symptom Scores
+            html += `
+                <h5 class="mt-4">Оценка симптомов (0-3)</h5>
+                <div class="mb-3">
+            `;
+            
+            const symptomNames = {
+                hypophonia: 'Гипофония',
+                monopitch: 'Monopitch',
+                monoloudness: 'Monoloudness',
+                hoarseness: 'Охриплость',
+                imprecise_articulation: 'Неточная артикуляция'
+            };
+            
+            for (const [key, name] of Object.entries(symptomNames)) {
+                const score = symptomScores[key] || 0;
+                html += `
+                    <div class="mb-2">
+                        <strong>${name}:</strong> 
+                        <span class="symptom-score score-${score}">${score}</span>
+                        <small class="text-muted">(${['Нет', 'Легкий', 'Умеренный', 'Тяжелый'][score]})</small>
+                    </div>
+                `;
+            }
+            
+            html += '</div>';
+            
+            // Report
+            if (result.report && result.report.length > 0) {
+                html += `
+                    <h5 class="mt-4">Отчет</h5>
+                    <div class="report-list">
+                        <ul>
+                `;
+                result.report.forEach(item => {
+                    html += `<li>${item}</li>`;
+                });
+                html += `
+                        </ul>
+                    </div>
+                `;
+            }
+            
+            return html;
+        }
+        
+        function toggleResult(index) {
+            const content = document.getElementById(`result-content-${index}`);
+            const icon = document.getElementById(`toggle-icon-${index}`);
+            
+            if (!content || !icon) return;
+            
+            if (content.style.display === 'none' || content.style.display === '') {
+                content.style.display = 'block';
+                icon.textContent = '▼';
+            } else {
+                content.style.display = 'none';
+                icon.textContent = '▶';
+            }
+        }
+        
+        function openVisualization(index) {
+            window.location.href = `/visualization?index=${index}`;
+        }
+        
+        // Reference ranges function
+        function getReferenceRanges() {
+            return {
+                'jitter_percent': {normal: [0.0, 1.0], unit: '%'},
+                'shimmer_percent': {normal: [2.0, 4.0], unit: '%'},
+                'hnr_db': {normal: [20.0, 25.0], unit: 'дБ'},
+                'f0_mean_hz': {normal: [100.0, 300.0], unit: 'Гц'},
+                'f0_sd_hz': {normal: [10.0, 50.0], unit: 'Гц'},
+                'rate_syl_sec': {normal: [4.5, 7.0], unit: 'сл/сек'},
+                'mpt_sec': {normal: [15.0, 30.0], unit: 'сек'},
+                'f0_high_hz': {normal: [400.0, 600.0], unit: 'Гц'},
+                'i_low_db': {normal: [25.0, 45.0], unit: 'дБ'},
+                'dsi_score': {normal: [2.0, 5.0], unit: ''}
+            };
+        }
+    </script>
+</body>
+</html>

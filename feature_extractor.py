@@ -118,8 +118,9 @@ class FeatureExtractor:
                         if jitter_fallback > 0 and jitter_fallback <= 5.0:
                             jitter_percent = jitter_fallback
                         elif jitter_percent > 10.0:
-                            # Если Praat дал слишком большое значение, ограничиваем
-                            jitter_percent = min(jitter_percent, 5.0)
+                            # Если Praat дал подозрительно большое значение, используем fallback
+                            # но не ограничиваем - возможно это реальное значение
+                            pass
                     else:
                         # Если значение разумное, но слишком высокое для здорового голоса,
                         # дополнительно проверяем нашим методом
@@ -134,21 +135,13 @@ class FeatureExtractor:
                                 # Если fallback в норме, а Praat завышает - используем среднее
                                 jitter_percent = (jitter_percent + jitter_fallback) / 2
                     
-                    # Ограничиваем разумными значениями (jitter обычно <2% для здоровых, <5% для патологии)
-                    # Для здоровых людей jitter обычно 0.2-0.7%, поэтому если значение >1.5%,
-                    # дополнительно проверяем качество сигнала
-                    if jitter_percent > 1.5:
-                        # Проверяем качество F0: если вариация F0 слишком высокая, возможно завышение jitter
-                        if len(f0_values) > 10:
-                            f0_cv = (np.std(f0_values) / np.mean(f0_values)) * 100
-                            # Если коэффициент вариации F0 нормальный (<15%), но jitter высокий,
-                            # возможно проблема в расчете - используем более консервативную оценку
-                            if f0_cv < 15.0 and jitter_percent > 2.0:
-                                # Ограничиваем до 1.5% если вариация F0 нормальная
-                                jitter_percent = min(jitter_percent, 1.5)
-                    
-                    jitter_percent = max(0.01, min(jitter_percent, 5.0))  # Минимум 0.01% вместо 0
-                    features['jitter_percent'] = float(jitter_percent)
+                    # Проверяем только на валидность (положительное и конечное значение)
+                    # Не ограничиваем значения - используем настоящие результаты расчета
+                    if jitter_percent > 0 and np.isfinite(jitter_percent):
+                        features['jitter_percent'] = float(jitter_percent)
+                    else:
+                        # Только если значение невалидное, используем минимальное
+                        features['jitter_percent'] = 0.01
                 except Exception as e:
                     print(f"Предупреждение: не удалось рассчитать jitter через Praat: {str(e)}")
                     # Fallback на наш улучшенный метод
@@ -288,15 +281,12 @@ class FeatureExtractor:
             jitter = (np.mean(period_diff) / mean_period) * 100
             # Проверяем на nan и inf
             if math.isnan(jitter) or math.isinf(jitter) or jitter <= 0:
-                return 0.01  # Минимальное значение вместо 0
+                return 0.01  # Только для невалидных значений
             
-            # Ограничиваем разумными значениями
-            # Норма для здоровых: <1%, патология: >1.5-3%
-            # Значения >5% обычно указывают на ошибку расчета
-            jitter = max(0.01, min(jitter, 5.0))  # Минимум 0.01% вместо 0
+            # Возвращаем настоящее значение без ограничений
             return float(jitter)
         
-        return 0.01  # Минимальное значение вместо 0
+        return 0.01  # Только если расчет невозможен (нет данных)
     
     def _calculate_shimmer(self, sound, 
                           f0_values: np.ndarray,
@@ -348,10 +338,9 @@ class FeatureExtractor:
                 
                 if mean_amp > 0:
                     shimmer = (np.mean(amp_diff) / mean_amp) * 100
-                    # Ограничиваем разумными значениями (shimmer обычно <50% для патологии)
-                    # Значения >50% обычно указывают на ошибку расчета
-                    shimmer = min(shimmer, 50.0)
-                    return float(shimmer)
+                    # Возвращаем настоящее значение без ограничений
+                    if np.isfinite(shimmer) and shimmer >= 0:
+                        return float(shimmer)
         except Exception as e:
             print(f"Ошибка расчета shimmer: {str(e)}")
             import traceback
@@ -543,19 +532,9 @@ class FeatureExtractor:
                         else:
                             hnr_parselmouth = None
                         
-                        # Валидация: HNR обычно в диапазоне 5-30 dB для речи
-                        if 5.0 <= hnr_parselmouth <= 30.0:
+                        # Используем настоящие значения без капов
+                        if np.isfinite(hnr_parselmouth) and hnr_parselmouth > 0:
                             hnr = hnr_parselmouth
-                        elif hnr_parselmouth > 30.0:
-                            # Если значение слишком высокое, ограничиваем
-                            hnr = 25.0
-                        elif hnr_parselmouth < 5.0:
-                            # Если значение слишком низкое, возможно проблема с сигналом
-                            # Но все равно используем, если оно положительное
-                            if hnr_parselmouth > 0:
-                                hnr = max(hnr_parselmouth, 8.0)  # Минимум 8 дБ
-                            else:
-                                hnr = None  # Используем fallback метод
                         else:
                             hnr = None  # Используем fallback метод
                     else:
@@ -661,17 +640,15 @@ class FeatureExtractor:
                                     ratio = harmonic_energy / noise_energy
                                     if ratio > 0 and np.isfinite(ratio):
                                         hnr_db = 10 * np.log10(ratio)
-                                        # Проверяем на inf и nan
-                                        if np.isfinite(hnr_db):
-                                            # Валидация: HNR обычно в диапазоне 5-30 dB
-                                            if 5.0 <= hnr_db <= 30.0:
-                                                hnr_values.append(hnr_db)
+                                        # Проверяем на inf и nan, но не ограничиваем диапазон
+                                        if np.isfinite(hnr_db) and hnr_db > 0:
+                                            hnr_values.append(hnr_db)
                 
                 if len(hnr_values) > 0:
                     # Используем медиану для устойчивости к выбросам
                     hnr_median = np.median(hnr_values)
-                    # Дополнительная валидация: если медиана разумная, используем её
-                    if 5.0 <= hnr_median <= 30.0:
+                    # Возвращаем настоящее значение без ограничений
+                    if np.isfinite(hnr_median) and hnr_median > 0:
                         return float(hnr_median)
             except Exception as e:
                 print(f"Ошибка в cepstral методе HNR: {str(e)}")
@@ -705,10 +682,8 @@ class FeatureExtractor:
                             ratio = harmonic_energy / denominator
                             if ratio > 0 and np.isfinite(ratio):
                                 hnr_approx = 10 * np.log10(ratio)
-                                # Проверяем на inf и nan
-                                if np.isfinite(hnr_approx):
-                                    # Ограничиваем разумными значениями
-                                    hnr_approx = max(8.0, min(25.0, hnr_approx))
+                                # Проверяем на inf и nan, но не ограничиваем значения
+                                if np.isfinite(hnr_approx) and hnr_approx > 0:
                                     return float(hnr_approx)
             except Exception as e:
                 print(f"Ошибка в спектральном методе HNR: {str(e)}")
@@ -716,9 +691,9 @@ class FeatureExtractor:
         except Exception as e:
             print(f"Общая ошибка расчета HNR: {str(e)}")
         
-        # Fallback значение (консервативное, указывает на возможную проблему)
-        # Используем 15.0 вместо 10.0 как более реалистичное значение для низкого качества
-        return 15.0
+        # Fallback значение только если расчет полностью не удался
+        # Возвращаем None, чтобы вызывающий код мог обработать это
+        return 0.0
     
     def _extract_features_librosa(self, audio: np.ndarray) -> Dict[str, float]:
         """Fallback извлечение признаков через librosa"""

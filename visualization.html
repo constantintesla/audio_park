@@ -327,22 +327,6 @@
                 </div>
             </div>
             
-            <!-- Сегменты -->
-            <div class="card">
-                <div class="card-header">📑 Сегменты аудио</div>
-                <div class="info-box">
-                    <strong>Описание:</strong> Аудио разбито на сегменты по паузам. Каждый сегмент анализируется отдельно для оценки артикуляции.
-                </div>
-                <div class="segment-list" id="segments-list"></div>
-            </div>
-            
-            <!-- Параметры по сегментам -->
-            <div class="card">
-                <div class="card-header">📊 Параметры по сегментам</div>
-                <div class="chart-container tall">
-                    <canvas id="segments-chart"></canvas>
-                </div>
-            </div>
         </div>
     </div>
     
@@ -351,9 +335,51 @@
         let charts = {};
         let currentData = null;
         let currentTime = 0;
+        const MAX_POINTS = {
+            waveform: 5000,
+            f0: 4000,
+            intensity: 4000,
+            spectrogram: 15000
+        };
+
+        function downsampleTimeSeries(time, values, maxPoints) {
+            if (!time || !values || time.length === 0) return [];
+            if (time.length <= maxPoints) {
+                return time.map((t, i) => ({ x: t, y: values[i] }));
+            }
+            
+            const step = Math.ceil(time.length / maxPoints);
+            const sampled = [];
+            for (let i = 0; i < time.length; i += step) {
+                const end = Math.min(i + step, time.length);
+                let sum = 0;
+                let count = 0;
+                for (let j = i; j < end; j++) {
+                    const v = values[j];
+                    if (Number.isFinite(v)) {
+                        sum += v;
+                        count += 1;
+                    }
+                }
+                sampled.push({
+                    x: time[i],
+                    y: count ? sum / count : 0
+                });
+            }
+            return sampled;
+        }
+
+        function runRenderTasks(tasks) {
+            if (!tasks.length) return;
+            requestAnimationFrame(() => {
+                const task = tasks.shift();
+                task();
+                runRenderTasks(tasks);
+            });
+        }
         
         // Загрузка списка результатов
-        async function loadResults() {
+        async function loadResults(preselectIndex = null) {
             try {
                 const response = await fetch('/api/results');
                 const data = await response.json();
@@ -370,8 +396,19 @@
                     option.textContent = `${date} - ${username}`;
                     select.appendChild(option);
                 });
+                
+                if (preselectIndex !== null && data.results[preselectIndex]) {
+                    select.value = String(preselectIndex);
+                    // Автоматически запускаем загрузку визуализации, если индекс передан из URL
+                    setTimeout(() => {
+                        loadVisualization();
+                    }, 100);
+                }
+                
+                return data.results;
             } catch (error) {
                 showError('Ошибка загрузки списка результатов: ' + error.message);
+                return [];
             }
         }
         
@@ -429,27 +466,25 @@
                     '<div class="error">Аудиофайл недоступен</div>';
             }
             
-            // Создание графиков
+            // Создание графиков (пошагово, чтобы не блокировать UI)
+            const renderTasks = [];
             if (vizData.waveform && vizData.waveform.time && vizData.waveform.amplitude) {
-                createWaveformChart(vizData.waveform);
+                renderTasks.push(() => createWaveformChart(vizData.waveform));
             }
             
             if (vizData.f0_data && vizData.f0_data.time && vizData.f0_data.values) {
-                createF0Chart(vizData.f0_data);
+                renderTasks.push(() => createF0Chart(vizData.f0_data));
             }
             
             if (vizData.spectrogram) {
-                createSpectrogramChart(vizData.spectrogram);
+                renderTasks.push(() => createSpectrogramChart(vizData.spectrogram));
             }
             
             if (vizData.intensity && vizData.intensity.time && vizData.intensity.values) {
-                createIntensityChart(vizData.intensity);
+                renderTasks.push(() => createIntensityChart(vizData.intensity));
             }
             
-            if (vizData.segments && vizData.segments.length > 0) {
-                createSegmentsChart(vizData.segments);
-                displaySegments(vizData.segments);
-            }
+            runRenderTasks(renderTasks);
         }
         
         // Отображение параметров
@@ -461,12 +496,24 @@
             const dsi = result.dsi || {};
             const dsiBreakdown = dsi.dsi_breakdown || {};
             
+            const jitterRaw = features.jitter_percent || 0;
+            const jitterCapped = (features.jitter_percent_capped !== undefined && features.jitter_percent_capped !== null)
+                ? features.jitter_percent_capped
+                : Math.min(jitterRaw, 5.0);
+            const hasMptSpeech = Object.prototype.hasOwnProperty.call(dsiBreakdown, 'mpt_speech_sec');
+            
             const parameters = [
                 {
                     name: 'Jitter',
                     value: features.jitter_percent || 0,
                     unit: '%',
                     description: 'Вариация периода F0. Норма: <1.0%'
+                },
+                {
+                    name: 'Jitter (cap 5%)',
+                    value: jitterCapped,
+                    unit: '%',
+                    description: 'Ограниченная копия (до 5.0%)'
                 },
                 {
                     name: 'Shimmer',
@@ -493,6 +540,24 @@
                     description: 'Стандартное отклонение F0'
                 },
                 {
+                    name: 'Темп речи',
+                    value: features.rate_syl_sec || 0,
+                    unit: 'сл/сек',
+                    description: 'Средняя скорость речи'
+                },
+                {
+                    name: 'Паузы',
+                    value: (features.pause_ratio || 0) * 100,
+                    unit: '%',
+                    description: 'Доля пауз в речи'
+                },
+                {
+                    name: 'Вариация амплитуды',
+                    value: features.amplitude_db_variation || 0,
+                    unit: 'dB',
+                    description: 'Изменчивость громкости'
+                },
+                {
                     name: 'F0-High',
                     value: dsiBreakdown.f0_high_hz || 0,
                     unit: 'Hz',
@@ -505,10 +570,16 @@
                     description: 'Максимальное время фонации'
                 },
                 {
+                    name: 'MPT (речь)',
+                    value: hasMptSpeech ? dsiBreakdown.mpt_speech_sec : null,
+                    unit: 'сек',
+                    description: 'Максимальная непрерывная вокализация в речи'
+                },
+                {
                     name: 'I-Low',
                     value: dsiBreakdown.i_low_db || 0,
                     unit: 'dB',
-                    description: 'Низшая интенсивность (5-й перцентиль)'
+                    description: 'Низшая интенсивность (нормализованный дБ, 5-й перцентиль)'
                 },
                 {
                     name: 'DSI Score',
@@ -521,11 +592,13 @@
             parameters.forEach(param => {
                 const card = document.createElement('div');
                 card.className = 'parameter-card';
+                const hasValue = Number.isFinite(param.value);
+                const valueText = hasValue ? param.value.toFixed(2) : 'N/A';
                 card.innerHTML = `
                     <h4>${param.name}</h4>
                     <div>
-                        <span class="value">${param.value.toFixed(2)}</span>
-                        <span class="unit">${param.unit}</span>
+                        <span class="value">${valueText}</span>
+                        <span class="unit">${hasValue ? param.unit : ''}</span>
                     </div>
                     <div class="description">${param.description}</div>
                 `;
@@ -567,13 +640,18 @@
                 charts.waveform.destroy();
             }
             
+            const waveformPoints = downsampleTimeSeries(
+                waveformData.time,
+                waveformData.amplitude,
+                MAX_POINTS.waveform
+            );
+            
             charts.waveform = new Chart(ctx, {
                 type: 'line',
                 data: {
-                    labels: waveformData.time,
                     datasets: [{
                         label: 'Амплитуда',
-                        data: waveformData.amplitude,
+                        data: waveformPoints,
                         borderColor: '#2c5f8d',
                         backgroundColor: 'rgba(44, 95, 141, 0.1)',
                         borderWidth: 1,
@@ -584,6 +662,9 @@
                 options: {
                     responsive: true,
                     maintainAspectRatio: false,
+                    parsing: false,
+                    normalized: true,
+                    animation: false,
                     interaction: {
                         intersect: false,
                         mode: 'index'
@@ -613,6 +694,7 @@
                     },
                     scales: {
                         x: {
+                            type: 'linear',
                             title: {
                                 display: true,
                                 text: 'Время (сек)'
@@ -637,9 +719,15 @@
                 charts.f0.destroy();
             }
             
+            const f0Points = downsampleTimeSeries(
+                f0Data.time,
+                f0Data.values,
+                MAX_POINTS.f0
+            );
+            
             const datasets = [{
                 label: 'F0 (Основная частота)',
-                data: f0Data.values.map((v, i) => ({x: f0Data.time[i], y: v})),
+                data: f0Points,
                 borderColor: '#28a745',
                 backgroundColor: 'rgba(40, 167, 69, 0.1)',
                 borderWidth: 2,
@@ -651,7 +739,7 @@
             if (f0Data.mean) {
                 datasets.push({
                     label: 'F0 Mean',
-                    data: f0Data.values.map((v, i) => ({x: f0Data.time[i], y: f0Data.mean})),
+                    data: f0Points.map((p) => ({ x: p.x, y: f0Data.mean })),
                     borderColor: '#ffc107',
                     borderWidth: 2,
                     borderDash: [5, 5],
@@ -665,6 +753,9 @@
                 options: {
                     responsive: true,
                     maintainAspectRatio: false,
+                    parsing: false,
+                    normalized: true,
+                    animation: false,
                     interaction: {
                         intersect: false,
                         mode: 'index'
@@ -729,9 +820,10 @@
             // Подготовка данных для тепловой карты (упрощенная версия)
             // Берем каждый 10-й элемент для производительности
             const data = [];
-            const step = Math.max(1, Math.floor(spectrogramData.times.length / 500)); // Максимум 500 точек
-            for (let i = 0; i < spectrogramData.times.length; i += step) {
-                for (let j = 0; j < spectrogramData.frequencies.length; j += 5) { // Каждая 5-я частота
+            const timeStep = Math.max(1, Math.floor(spectrogramData.times.length / 300));
+            const freqStep = Math.max(1, Math.floor(spectrogramData.frequencies.length / 80));
+            for (let i = 0; i < spectrogramData.times.length; i += timeStep) {
+                for (let j = 0; j < spectrogramData.frequencies.length; j += freqStep) {
                     if (spectrogramData.magnitude && 
                         spectrogramData.magnitude[j] && 
                         spectrogramData.magnitude[j][i] !== undefined) {
@@ -742,8 +834,14 @@
                                 y: spectrogramData.frequencies[j],
                                 v: value
                             });
+                            if (data.length >= MAX_POINTS.spectrogram) {
+                                break;
+                            }
                         }
                     }
+                }
+                if (data.length >= MAX_POINTS.spectrogram) {
+                    break;
                 }
             }
             
@@ -771,6 +869,9 @@
                 options: {
                     responsive: true,
                     maintainAspectRatio: false,
+                    parsing: false,
+                    normalized: true,
+                    animation: false,
                     plugins: {
                         legend: {
                             display: false
@@ -828,13 +929,18 @@
                 charts.intensity.destroy();
             }
             
+            const intensityPoints = downsampleTimeSeries(
+                intensityData.time,
+                intensityData.values,
+                MAX_POINTS.intensity
+            );
+            
             charts.intensity = new Chart(ctx, {
                 type: 'line',
                 data: {
-                    labels: intensityData.time,
                     datasets: [{
                         label: 'Интенсивность',
-                        data: intensityData.values,
+                        data: intensityPoints,
                         borderColor: '#dc3545',
                         backgroundColor: 'rgba(220, 53, 69, 0.1)',
                         borderWidth: 2,
@@ -846,6 +952,9 @@
                 options: {
                     responsive: true,
                     maintainAspectRatio: false,
+                    parsing: false,
+                    normalized: true,
+                    animation: false,
                     interaction: {
                         intersect: false,
                         mode: 'index'
@@ -875,6 +984,7 @@
                     },
                     scales: {
                         x: {
+                            type: 'linear',
                             title: {
                                 display: true,
                                 text: 'Время (сек)'
@@ -1026,8 +1136,13 @@
         }
         
         // Инициализация при загрузке
-        window.addEventListener('DOMContentLoaded', () => {
-            loadResults();
+        window.addEventListener('DOMContentLoaded', async () => {
+            const params = new URLSearchParams(window.location.search);
+            const indexParam = params.get('index');
+            const preselectIndex = indexParam !== null && Number.isFinite(Number(indexParam)) ? Number(indexParam) : null;
+            
+            await loadResults(preselectIndex);
+            // loadVisualization будет вызван автоматически из loadResults если preselectIndex задан
         });
     </script>
 </body>

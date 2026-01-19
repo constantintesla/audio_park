@@ -253,6 +253,83 @@ def get_results():
         return jsonify({"error": str(e)}), 500
 
 
+@app.route('/api/recalculate-all', methods=['POST'])
+def recalculate_all():
+    """Пересчет всех результатов с обновленными параметрами (без капов и фолбеков)"""
+    try:
+        from parkinson_analyzer import ParkinsonAnalyzer
+        from datetime import datetime
+        
+        logger.info("🔄 Начало пересчета всех результатов...")
+        results = load_results()
+        
+        if not results:
+            return jsonify({"status": "success", "message": "Нет результатов для пересчета", "recalculated": 0}), 200
+        
+        # Используем абсолютный путь для RESULTS_DIR
+        results_dir_abs = os.path.abspath(RESULTS_DIR)
+        analyzer = ParkinsonAnalyzer(save_raw_data=False, raw_data_dir=results_dir_abs)
+        
+        recalculated = 0
+        errors = []
+        
+        for idx, result in enumerate(results):
+            try:
+                # Получаем путь к оригинальному аудиофайлу
+                raw_data = result.get('raw_data', {})
+                files = raw_data.get('files', {}) if isinstance(raw_data, dict) else {}
+                audio_path = files.get('original_audio') or files.get('processed_audio')
+                
+                if not audio_path or not os.path.exists(audio_path):
+                    logger.warning(f"⚠️  Результат {idx}: аудиофайл не найден: {audio_path}")
+                    errors.append(f"Результат {idx}: аудиофайл не найден")
+                    continue
+                
+                # Получаем result_id из результата
+                result_id = raw_data.get('result_id') or result.get('user_info', {}).get('timestamp', '').replace(':', '').replace('-', '')[:15]
+                
+                # Пересчитываем анализ
+                logger.info(f"🔄 Пересчет результата {idx + 1}/{len(results)}: {audio_path}")
+                new_result = analyzer.analyze_audio_file(audio_path, save_raw=False, result_id=result_id)
+                
+                # Сохраняем оригинальную информацию о пользователе
+                original_user_info = result.get('user_info', {})
+                new_result['user_info'] = original_user_info
+                
+                # Сохраняем оригинальные raw_data (пути к файлам)
+                if raw_data:
+                    new_result['raw_data'] = raw_data
+                
+                # Обновляем результат в списке
+                results[idx] = clean_json_values(new_result)
+                recalculated += 1
+                logger.info(f"✅ Результат {idx + 1} пересчитан успешно")
+                
+            except Exception as e:
+                logger.error(f"❌ Ошибка при пересчете результата {idx}: {e}", exc_info=True)
+                errors.append(f"Результат {idx}: {str(e)}")
+                continue
+        
+        # Сохраняем все пересчитанные результаты
+        if recalculated > 0:
+            save_results(results)
+            logger.info(f"✅ Сохранено {recalculated} пересчитанных результатов")
+        
+        response_data = {
+            "status": "success",
+            "message": f"Пересчитано {recalculated} из {len(results)} результатов",
+            "recalculated": recalculated,
+            "total": len(results),
+            "errors": errors if errors else None
+        }
+        
+        return jsonify(response_data), 200
+        
+    except Exception as e:
+        logger.error(f"Ошибка пересчета всех результатов: {e}", exc_info=True)
+        return jsonify({"error": str(e)}), 500
+
+
 @app.route('/api/results/<int:index>', methods=['GET'])
 def get_result(index: int):
     """Получение конкретного результата по индексу"""
@@ -602,6 +679,12 @@ def is_recent(result: Dict, days: int = 7) -> bool:
 def index():
     """Главная страница - отдача index.html"""
     return send_from_directory('.', 'index.html')
+
+
+@app.route('/results')
+def results_page():
+    """Страница со списком всех результатов"""
+    return send_from_directory('.', 'results.html')
 
 
 @app.route('/visualization')

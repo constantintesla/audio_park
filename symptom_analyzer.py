@@ -496,8 +496,7 @@ class SymptomAnalyzer:
         # Общие рекомендации
         if len(exceeded_thresholds) >= 3:
             report.append(
-                "- Рекомендация: консультация невролога, LSVT логопедия, "
-                "скрининг в РФ с использованием ИИ-инструментов (2023-2025)."
+                "- Рекомендация: консультация невролога, LSVT логопедия."
             )
         elif len(exceeded_thresholds) >= 1:
             report.append(

@@ -579,14 +579,20 @@ class ParkinsonBot:
             
             report_part1 += "<b>Параметры DSI:</b>\n"
             mpt_val = dsi_breakdown.get('mpt_sec', 0)
+            mpt_speech_val = dsi_breakdown.get('mpt_speech_sec', 0)
             f0_high_val = dsi_breakdown.get('f0_high_hz', 0)
             i_low_val = dsi_breakdown.get('i_low_db', 0)
             jitter_val = dsi_breakdown.get('jitter_percent', 0)
+            jitter_capped_val = dsi_breakdown.get('jitter_percent_capped', jitter_val)
             
-            report_part1 += f"  • MPT: {self._format_with_reference(mpt_val, 'mpt_sec', ref_ranges)}\n"
+            report_part1 += f"  • MPT (гласный): {self._format_with_reference(mpt_val, 'mpt_sec', ref_ranges)}\n"
+            report_part1 += f"  • MPT (речь): {mpt_speech_val:.2f} сек\n"
             report_part1 += f"  • F0-High: {self._format_with_reference(f0_high_val, 'f0_high_hz', ref_ranges)}\n"
-            report_part1 += f"  • I-Low: {self._format_with_reference(i_low_val, 'i_low_db', ref_ranges)}\n"
-            report_part1 += f"  • Jitter: {self._format_with_reference(jitter_val, 'jitter_percent', ref_ranges)}\n\n"
+            report_part1 += f"  • I-Low (норм. дБ): {self._format_with_reference(i_low_val, 'i_low_db', ref_ranges)}\n"
+            report_part1 += f"  • Jitter: {self._format_with_reference(jitter_val, 'jitter_percent', ref_ranges)}\n"
+            report_part1 += f"  • Jitter (cap 5%): {self._format_with_reference(jitter_capped_val, 'jitter_percent', ref_ranges)}\n\n"
+        elif dsi.get('error'):
+            report_part1 += f"⚠️ <b>DSI:</b> {dsi.get('error')}\n\n"
         
         # Риск ПД
         risk_emoji = "🔴" if "Высокий" in pd_risk else "🟡" if "Умеренный" in pd_risk else "🟢"
@@ -602,6 +608,7 @@ class ParkinsonBot:
         ref_ranges = self._get_reference_ranges()
         
         report_part2 += f"📊 Jitter: {self._format_with_reference(features.get('jitter_percent', 0), 'jitter_percent', ref_ranges)}\n"
+        report_part2 += f"📊 Jitter (cap 5%): {self._format_with_reference(features.get('jitter_percent_capped', 0), 'jitter_percent', ref_ranges)}\n"
         report_part2 += f"📊 Shimmer: {self._format_with_reference(features.get('shimmer_percent', 0), 'shimmer_percent', ref_ranges)}\n"
         report_part2 += f"📊 HNR: {self._format_with_reference(features.get('hnr_db', 0), 'hnr_db', ref_ranges)}\n"
         report_part2 += f"📊 F0 Mean: {self._format_with_reference(features.get('f0_mean_hz', 0), 'f0_mean_hz', ref_ranges)}\n"
@@ -644,9 +651,29 @@ class ParkinsonBot:
             report_part4 += "📋 <b>ДЕТАЛЬНЫЙ ОТЧЕТ</b>\n"
             report_part4 += "━━━━━━━━━━━━━━━━━━━━\n\n"
             
+            def is_dsi_report_line(text: str) -> bool:
+                trimmed = text.strip()
+                if not trimmed:
+                    return True
+                if trimmed.startswith("=== DSI"):
+                    return True
+                if trimmed.startswith("DSI Score") or trimmed.startswith("DSI:"):
+                    return True
+                if trimmed.startswith("Параметры:") or trimmed.startswith("Интерпретация:"):
+                    return True
+                if trimmed.startswith("DSI коррелирует"):
+                    return True
+                if trimmed.startswith("- MPT:") or trimmed.startswith("- F0-High:"):
+                    return True
+                if trimmed.startswith("- I-Low:") or trimmed.startswith("- Jitter:"):
+                    return True
+                return False
+
             for item in report_items:
                 # Пропускаем пустые строки и заголовки DSI
-                if item.strip() and not item.startswith('==='):
+                if is_dsi_report_line(item):
+                    continue
+                if item.strip():
                     # Форматируем маркеры списка
                     if item.startswith('- '):
                         report_part4 += f"• {item[2:]}\n"

@@ -342,11 +342,15 @@
         <div class="header">
             <h1>🎤 Анализ голоса на болезнь Паркинсона</h1>
             <p>Результаты анализа голосовых сообщений из Telegram бота</p>
-            <p style="margin-top: 10px;">
-                <a href="/visualization" style="color: white; text-decoration: underline; font-weight: 600;">
+            <div class="mt-3 d-flex flex-column flex-md-row align-items-start align-items-md-center gap-2 flex-wrap">
+                <a href="/visualization" class="btn btn-light btn-lg fw-semibold">
                     🎯 Открыть визуализацию параметров
                 </a>
-            </p>
+                <a href="/results" class="btn btn-primary btn-lg fw-semibold">
+                    📋 Показать все результаты
+                </a>
+                <span class="small text-white-50">Подробные графики и аудио для каждого анализа</span>
+            </div>
         </div>
         
         <!-- Stats Section -->
@@ -397,18 +401,29 @@
             </div>
         </div>
         
-        <!-- Results List -->
-        <div class="card mb-3" id="results-list-container">
+        <!-- Сводная таблица результатов -->
+        <div class="card mb-3">
             <div class="card-header d-flex justify-content-between align-items-center">
-                <h4 class="mb-0">📋 Результаты анализов</h4>
+                <h4 class="mb-0">📊 Сводная таблица результатов</h4>
                 <small class="text-muted" id="results-count">Загрузка...</small>
             </div>
             <div class="card-body">
                 <div class="text-center mb-3">
                     <button id="refresh-btn" class="btn btn-primary">🔄 Обновить список</button>
+                    <button id="recalculate-all-btn" class="btn btn-secondary">♻️ Пересчитать все результаты</button>
                     <button id="export-csv-btn" class="btn btn-success">📊 Экспорт CSV</button>
                     <button id="export-json-btn" class="btn btn-info">📄 Экспорт JSON</button>
                     <button id="export-html-btn" class="btn btn-warning">🌐 Экспорт HTML</button>
+                </div>
+                <div id="recalculate-status" class="alert alert-info" style="display: none; margin-top: 15px;">
+                    <div class="d-flex align-items-center">
+                        <div class="spinner-border spinner-border-sm me-2" role="status"></div>
+                        <span id="recalculate-status-text">Пересчет результатов...</span>
+                    </div>
+                    <div class="progress mt-2" style="height: 20px;">
+                        <div id="recalculate-progress" class="progress-bar progress-bar-striped progress-bar-animated" 
+                             role="progressbar" style="width: 0%"></div>
+                    </div>
                 </div>
                 
                 <!-- Сводная таблица -->
@@ -439,9 +454,19 @@
                     </div>
                 </div>
                 
-                <hr class="my-4" id="results-divider" style="display: none;">
-                
-                <div id="results-list"></div>
+            </div>
+        </div>
+        
+        <!-- Детальный отчет по выбранному результату -->
+        <div id="single-result-container" class="card mb-3" style="display: none;">
+            <div class="card-header d-flex justify-content-between align-items-center">
+                <h4 class="mb-0">📄 Детальный отчет</h4>
+                <button class="btn btn-sm btn-outline-secondary" onclick="closeSingleResult()">
+                    ✕ Закрыть
+                </button>
+            </div>
+            <div class="card-body" id="single-result-content">
+                <!-- Содержимое отчета будет добавлено динамически -->
             </div>
         </div>
         
@@ -509,6 +534,7 @@
                                 <div class="alert alert-info mt-3" role="alert">
                                     <small>
                                         <strong>Формула:</strong> DSI = 0.13 × MPT + 0.0053 × F0-High - 0.26 × I-Low - 1.18 × Jitter(%) + 12.4<br>
+                                        I-Low — нормализованный дБ (не SPL).<br>
                                         DSI коррелирует с Voice Handicap Index и идеален для мониторинга терапии (LSVT LOUD).
                                     </small>
                                 </div>
@@ -558,12 +584,7 @@
         
         <!-- Footer -->
         <div class="footer">
-            <p>
-                Основано на исследованиях: 
-                <strong>Little et al. 2004</strong> (104 акустических признака), 
-                <strong>Daoudi 2022</strong> (monopitch/phonatory instability), 
-                <strong>NIH 2025</strong> (12 вокальных биомаркеров)
-            </p>
+            
             <p style="margin-top: 10px; font-size: 0.85rem;">
                 ⚠️ Система предназначена для исследовательских целей и не заменяет медицинскую диагностику
             </p>
@@ -633,6 +654,68 @@
             document.getElementById('refresh-btn').addEventListener('click', () => {
                 loadResults();
             });
+            
+            // Обработчик кнопки пересчета всех результатов
+            document.getElementById('recalculate-all-btn').addEventListener('click', async () => {
+                const btn = document.getElementById('recalculate-all-btn');
+                const statusDiv = document.getElementById('recalculate-status');
+                const statusText = document.getElementById('recalculate-status-text');
+                const progressBar = document.getElementById('recalculate-progress');
+                
+                // Подтверждение действия
+                if (!confirm('⚠️ Внимание! Это действие пересчитает все сохраненные результаты с использованием обновленных алгоритмов (без капов и фолбеков).\n\nЭто может занять несколько минут в зависимости от количества результатов.\n\nПродолжить?')) {
+                    return;
+                }
+                
+                // Блокируем кнопку и показываем прогресс
+                btn.disabled = true;
+                statusDiv.style.display = 'block';
+                statusDiv.className = 'alert alert-info';
+                statusText.textContent = 'Пересчет результатов...';
+                progressBar.style.width = '0%';
+                
+                try {
+                    const response = await fetch('/api/recalculate-all', {
+                        method: 'POST',
+                        headers: {
+                            'Content-Type': 'application/json'
+                        }
+                    });
+                    
+                    const data = await response.json();
+                    
+                    if (response.ok) {
+                        statusDiv.className = 'alert alert-success';
+                        statusText.textContent = `✅ ${data.message}`;
+                        progressBar.style.width = '100%';
+                        
+                        // Обновляем список результатов после пересчета
+                        setTimeout(() => {
+                            loadResults();
+                            statusDiv.style.display = 'none';
+                        }, 2000);
+                    } else {
+                        statusDiv.className = 'alert alert-danger';
+                        statusText.textContent = `❌ Ошибка: ${data.error || 'Неизвестная ошибка'}`;
+                        progressBar.style.width = '100%';
+                        progressBar.className = 'progress-bar bg-danger';
+                    }
+                } catch (error) {
+                    statusDiv.className = 'alert alert-danger';
+                    statusText.textContent = `❌ Ошибка соединения: ${error.message}`;
+                    progressBar.style.width = '100%';
+                    progressBar.className = 'progress-bar bg-danger';
+                } finally {
+                    btn.disabled = false;
+                    setTimeout(() => {
+                        if (statusDiv.style.display !== 'none') {
+                            statusDiv.style.display = 'none';
+                            progressBar.className = 'progress-bar progress-bar-striped progress-bar-animated';
+                            progressBar.style.width = '0%';
+                        }
+                    }, 5000);
+                }
+            });
         }
         
         async function loadStats() {
@@ -650,10 +733,10 @@
         
         async function loadResults() {
             const loadingIndicator = document.getElementById('loading-indicator');
-            const resultsList = document.getElementById('results-list');
             
-            loadingIndicator.style.display = 'block';
-            resultsList.innerHTML = '';
+            if (loadingIndicator) {
+                loadingIndicator.style.display = 'block';
+            }
             
             try {
                 const response = await fetch(`${API_URL}/api/results`);
@@ -681,39 +764,35 @@
                     
                     // Отображаем сводную таблицу
                     displaySummaryTable(sortedResults);
-                    
-                    // Отображаем детальные карточки
-                    sortedResults.forEach((result, index) => {
-                        const resultCard = createResultCard(result, index);
-                        resultsList.appendChild(resultCard);
-                    });
                 } else {
                     const resultsCount = document.getElementById('results-count');
                     if (resultsCount) {
                         resultsCount.textContent = 'Нет результатов';
                     }
-                    document.getElementById('summary-table-container').style.display = 'none';
-                    document.getElementById('results-divider').style.display = 'none';
-                    resultsList.innerHTML = `
-                        <div class="alert alert-info text-center">
-                            <h5>📭 Пока нет результатов анализа</h5>
-                            <p class="mb-0">Результаты появятся здесь после анализа голосовых сообщений через Telegram бота или локального анализа.</p>
-                        </div>
-                    `;
+                    const tableContainer = document.getElementById('summary-table-container');
+                    if (tableContainer) {
+                        tableContainer.style.display = 'none';
+                    }
                 }
                 
                 await loadStats();
             } catch (e) {
                 console.error('Ошибка загрузки результатов:', e);
-                resultsList.innerHTML = `
-                    <div class="alert alert-danger">
-                        <h5>❌ Ошибка загрузки результатов</h5>
-                        <p>${e.message}</p>
-                        <p class="mb-0"><small>Проверьте, что API сервер запущен и доступен по адресу ${API_URL}</small></p>
-                    </div>
-                `;
+                const tableContainer = document.getElementById('summary-table-container');
+                if (tableContainer) {
+                    tableContainer.innerHTML = `
+                        <div class="alert alert-danger">
+                            <h5>❌ Ошибка загрузки результатов</h5>
+                            <p>${e.message}</p>
+                            <p class="mb-0"><small>Проверьте, что API сервер запущен и доступен по адресу ${API_URL}</small></p>
+                        </div>
+                    `;
+                    tableContainer.style.display = 'block';
+                }
             } finally {
-                loadingIndicator.style.display = 'none';
+                if (loadingIndicator) {
+                    loadingIndicator.style.display = 'none';
+                }
             }
         }
         
@@ -777,9 +856,14 @@
                             ${shortInfo ? `<small class="text-muted ms-2">${shortInfo}</small>` : ''}
                         </div>
                     </div>
-                    <button class="btn btn-sm btn-outline-secondary" onclick="event.stopPropagation(); toggleResult(${index})">
-                        <span id="toggle-icon-${index}">▼</span>
-                    </button>
+                    <div class="d-flex gap-2 align-items-center">
+                        <button class="btn btn-sm btn-outline-secondary" onclick="event.stopPropagation(); openVisualization(${index})" title="Открыть визуализацию">
+                            📈
+                        </button>
+                        <button class="btn btn-sm btn-outline-secondary" onclick="event.stopPropagation(); toggleResult(${index})">
+                            <span id="toggle-icon-${index}">▼</span>
+                        </button>
+                    </div>
                 </div>
                 <div class="card-body" id="result-content-${index}" style="display: none;">
                     ${createResultContent(result)}
@@ -798,16 +882,12 @@
             const symptomScores = result.symptom_scores || {};
             const pdRisk = symptomScores.pd_risk || 'Не определен';
             const features = result.features || {};
+            const jitterRaw = features.jitter_percent ?? 0;
+            const jitterCapped = (features.jitter_percent_capped !== undefined && features.jitter_percent_capped !== null)
+                ? features.jitter_percent_capped
+                : Math.min(jitterRaw, 5.0);
             
-            let html = `
-                <!-- Risk Assessment -->
-                <div class="text-center mb-4">
-                    <h4>Оценка риска</h4>
-                    <div class="risk-badge ${pdRisk.includes('Высокий') ? 'risk-high' : pdRisk.includes('Умеренный') ? 'risk-medium' : 'risk-low'}">
-                        ${pdRisk}
-                    </div>
-                </div>
-            `;
+            let html = '';
             
             // DSI Section
             if (dsiScore !== null && dsiScore !== undefined) {
@@ -833,7 +913,7 @@
                             <div class="row">
                                 <div class="col-md-6">
                                     <h6>Параметры DSI:</h6>
-                                    <table class="table table-sm table-bordered">
+                                <table class="table table-sm table-bordered">
                                         <thead class="table-light">
                                             <tr>
                                                 <th>Параметр</th>
@@ -843,17 +923,22 @@
                                         </thead>
                                         <tbody>
                                             <tr>
-                                                <td><strong>MPT (сек)</strong></td>
+                                            <td><strong>MPT (гласный, сек)</strong></td>
                                                 <td>${(breakdown.mpt_sec || 0).toFixed(2)}</td>
                                                 <td><small class="${(breakdown.mpt_sec || 0) >= 15 ? 'text-success' : (breakdown.mpt_sec || 0) < 10 ? 'text-danger' : 'text-warning'}">${(breakdown.mpt_sec || 0) >= 15 ? '🟢' : (breakdown.mpt_sec || 0) < 10 ? '🔴' : '🟡'} норма: 15-30 сек</small></td>
                                             </tr>
+                                        <tr>
+                                            <td><strong>MPT (речь, сек)</strong></td>
+                                            <td>${(breakdown.mpt_speech_sec || 0).toFixed(2)}</td>
+                                            <td><small class="text-muted">оценка по речи</small></td>
+                                        </tr>
                                             <tr>
                                                 <td><strong>F0-High (Гц)</strong></td>
                                                 <td>${(breakdown.f0_high_hz || 0).toFixed(1)}</td>
                                                 <td><small class="${(breakdown.f0_high_hz || 0) >= 400 ? 'text-success' : (breakdown.f0_high_hz || 0) < 300 ? 'text-danger' : 'text-warning'}">${(breakdown.f0_high_hz || 0) >= 400 ? '🟢' : (breakdown.f0_high_hz || 0) < 300 ? '🔴' : '🟡'} норма: 400-600 Гц</small></td>
                                             </tr>
                                             <tr>
-                                                <td><strong>I-Low (дБ)</strong></td>
+                                            <td><strong>I-Low (дБ, норм.)</strong></td>
                                                 <td>${(breakdown.i_low_db || 0).toFixed(1)}</td>
                                                 <td><small class="${(breakdown.i_low_db || 0) <= 45 && (breakdown.i_low_db || 0) >= 25 ? 'text-success' : (breakdown.i_low_db || 0) > 55 ? 'text-danger' : 'text-warning'}">${(breakdown.i_low_db || 0) <= 45 && (breakdown.i_low_db || 0) >= 25 ? '🟢' : (breakdown.i_low_db || 0) > 55 ? '🔴' : '🟡'} норма: 25-45 дБ</small></td>
                                             </tr>
@@ -862,12 +947,23 @@
                                                 <td>${(breakdown.jitter_percent || 0).toFixed(2)}</td>
                                                 <td><small class="${(breakdown.jitter_percent || 0) <= 1.0 ? 'text-success' : (breakdown.jitter_percent || 0) > 1.5 ? 'text-danger' : 'text-warning'}">${(breakdown.jitter_percent || 0) <= 1.0 ? '🟢' : (breakdown.jitter_percent || 0) > 1.5 ? '🔴' : '🟡'} норма: 0.0-1.0 %</small></td>
                                             </tr>
+                                        <tr>
+                                            <td><strong>Jitter (cap 5%)</strong></td>
+                                            <td>${(breakdown.jitter_percent_capped || 0).toFixed(2)}</td>
+                                            <td><small class="text-muted">ограниченная копия</small></td>
+                                        </tr>
                                         </tbody>
                                     </table>
                                 </div>
                                 <div class="col-md-6">
                                     <h6>Интерпретация:</h6>
                                     <p><strong>Оценка риска:</strong> ${interpretation.pd_risk_note || 'N/A'}</p>
+                                    <div class="alert alert-info mt-3" role="alert">
+                                        <small>
+                                            <strong>Формула:</strong> DSI = 0.13 × MPT + 0.0053 × F0-High - 0.26 × I-Low - 1.18 × Jitter(%) + 12.4<br>
+                                            I-Low — нормализованный дБ (не SPL).
+                                        </small>
+                                    </div>
                                 </div>
                             </div>
                         </div>
@@ -907,39 +1003,36 @@
                         <tr>
                             <th>Признак</th>
                             <th>Значение</th>
-                            <th>Референсный диапазон</th>
                         </tr>
                     </thead>
                     <tbody>
                         <tr>
                             <td><strong>Jitter</strong></td>
                             <td>${formatWithReference(features.jitter_percent || 0, 'jitter_percent')}</td>
-                            <td><small class="text-muted">0.0-1.0 %</small></td>
+                        </tr>
+                        <tr>
+                            <td><strong>Jitter (cap 5%)</strong></td>
+                            <td>${formatWithReference(jitterCapped, 'jitter_percent')}</td>
                         </tr>
                         <tr>
                             <td><strong>Shimmer</strong></td>
                             <td>${formatWithReference(features.shimmer_percent || 0, 'shimmer_percent')}</td>
-                            <td><small class="text-muted">2.0-4.0 %</small></td>
                         </tr>
                         <tr>
                             <td><strong>HNR</strong></td>
                             <td>${formatWithReference(features.hnr_db || 0, 'hnr_db')}</td>
-                            <td><small class="text-muted">20.0-25.0 дБ</small></td>
                         </tr>
                         <tr>
                             <td><strong>F0 Mean</strong></td>
                             <td>${formatWithReference(features.f0_mean_hz || 0, 'f0_mean_hz')}</td>
-                            <td><small class="text-muted">100.0-300.0 Гц</small></td>
                         </tr>
                         <tr>
                             <td><strong>F0 SD</strong></td>
                             <td>${formatWithReference(features.f0_sd_hz || 0, 'f0_sd_hz')}</td>
-                            <td><small class="text-muted">10.0-50.0 Гц</small></td>
                         </tr>
                         <tr>
                             <td><strong>Скорость речи</strong></td>
                             <td>${formatWithReference(features.rate_syl_sec || 0, 'rate_syl_sec')}</td>
-                            <td><small class="text-muted">4.5-7.0 сл/сек</small></td>
                         </tr>
                     </tbody>
                 </table>
@@ -1057,17 +1150,23 @@
         function displaySummaryTable(results) {
             const tableContainer = document.getElementById('summary-table-container');
             const tableBody = document.getElementById('summary-table-body');
-            const divider = document.getElementById('results-divider');
             
             if (!results || results.length === 0) {
-                tableContainer.style.display = 'none';
-                divider.style.display = 'none';
+                if (tableContainer) {
+                    tableContainer.style.display = 'none';
+                }
                 return;
             }
             
-            tableContainer.style.display = 'block';
-            divider.style.display = 'block';
-            tableBody.innerHTML = '';
+            if (tableContainer) {
+                tableContainer.style.display = 'block';
+            }
+            if (tableBody) {
+                tableBody.innerHTML = '';
+            } else {
+                console.error('Элемент summary-table-body не найден');
+                return;
+            }
             
             results.forEach((result, index) => {
                 const userInfo = result.user_info || {};
@@ -1129,14 +1228,14 @@
                 
                 const row = document.createElement('tr');
                 row.setAttribute('data-index', index);
-                row.onclick = () => {
-                    // Прокручиваем к соответствующей карточке
-                    const card = document.querySelector(`[data-index="${index}"]`);
-                    if (card) {
-                        card.scrollIntoView({ behavior: 'smooth', block: 'center' });
-                        // Раскрываем карточку
-                        toggleResult(index);
+                row.style.cursor = 'pointer';
+                row.onclick = (e) => {
+                    // Игнорируем клик если он по кнопке
+                    if (e.target.tagName === 'BUTTON') {
+                        return;
                     }
+                    // Показываем результат внизу страницы
+                    showSingleResult(index);
                 };
                 
                 row.innerHTML = `
@@ -1150,9 +1249,14 @@
                     <td>${hnr}</td>
                     <td>${f0sd}</td>
                     <td>
-                        <button class="btn btn-sm btn-outline-primary" onclick="event.stopPropagation(); scrollToResult(${index})">
-                            👁️ Показать
-                        </button>
+                        <div class="d-flex align-items-center justify-content-center gap-2 flex-wrap">
+                            <button class="btn btn-sm btn-outline-primary" onclick="event.stopPropagation(); showSingleResult(${index})">
+                                👁️ Показать
+                            </button>
+                            <button class="btn btn-sm btn-outline-secondary" onclick="event.stopPropagation(); openVisualization(${index})">
+                                📈 Визуализация
+                            </button>
+                        </div>
                     </td>
                 `;
                 
@@ -1163,19 +1267,50 @@
             initTableSearch();
         }
         
-        function scrollToResult(index) {
-            const card = document.querySelector(`[data-index="${index}"]`);
-            if (card) {
-                card.scrollIntoView({ behavior: 'smooth', block: 'center' });
-                // Подсвечиваем карточку
-                card.style.transition = 'box-shadow 0.3s';
-                card.style.boxShadow = '0 0 20px rgba(44, 95, 141, 0.5)';
+        // Показать один результат внизу страницы
+        async function showSingleResult(index) {
+            try {
+                const response = await fetch(`${API_URL}/api/results/${index}`);
+                if (!response.ok) {
+                    throw new Error(`HTTP error! status: ${response.status}`);
+                }
+                const result = await response.json();
+                
+                // Отображаем результат
+                const container = document.getElementById('single-result-container');
+                const content = document.getElementById('single-result-content');
+                
+                // Используем функцию createResultContent для генерации содержимого
+                content.innerHTML = createResultContent(result);
+                
+                // Показываем контейнер
+                container.style.display = 'block';
+                
+                // Прокручиваем к отчету с плавной анимацией
                 setTimeout(() => {
-                    card.style.boxShadow = '';
-                }, 2000);
-                // Раскрываем карточку
-                toggleResult(index);
+                    container.scrollIntoView({ behavior: 'smooth', block: 'start' });
+                    // Подсвечиваем контейнер
+                    container.style.transition = 'box-shadow 0.3s';
+                    container.style.boxShadow = '0 0 20px rgba(44, 95, 141, 0.5)';
+                    setTimeout(() => {
+                        container.style.boxShadow = '';
+                    }, 2000);
+                }, 100);
+                
+            } catch (error) {
+                console.error('Ошибка загрузки результата:', error);
+                alert('Ошибка загрузки результата: ' + error.message);
             }
+        }
+        
+        // Закрыть отчет
+        function closeSingleResult() {
+            const container = document.getElementById('single-result-container');
+            container.style.display = 'none';
+        }
+
+        function openVisualization(index) {
+            window.location.href = `/visualization?index=${index}`;
         }
         
         function initTableSearch() {
@@ -1265,14 +1400,7 @@
             
             window.allResults = sorted;
             displaySummaryTable(sorted);
-            
-            // Обновляем детальные карточки тоже
-            const resultsList = document.getElementById('results-list');
-            resultsList.innerHTML = '';
-            sorted.forEach((result, index) => {
-                const resultCard = createResultCard(result, index);
-                resultsList.appendChild(resultCard);
-            });
+            // Список результатов больше не отображается на главной странице
         }
         
         function initResultsList() {
@@ -2440,11 +2568,23 @@
             const interpretation = dsiResult.interpretation || {};
             
             if (dsiBreakdownEl) {
+                const hasMptSpeech = Object.prototype.hasOwnProperty.call(breakdown, 'mpt_speech_sec');
+                const mptSpeechText = hasMptSpeech ? (breakdown.mpt_speech_sec || 0).toFixed(2) : 'N/A';
+                const jitterRaw = breakdown.jitter_percent || 0;
+                const jitterCapped = Number.isFinite(breakdown.jitter_percent_capped)
+                    ? breakdown.jitter_percent_capped
+                    : Math.min(jitterRaw, 5.0);
+                
                 dsiBreakdownEl.innerHTML = `
                 <tr>
-                    <td><strong>MPT (сек)</strong></td>
+                    <td><strong>MPT (гласный, сек)</strong></td>
                     <td>${(breakdown.mpt_sec || 0).toFixed(2)}</td>
                     <td><span class="badge ${(breakdown.mpt_sec || 0) < 10 ? 'bg-danger' : (breakdown.mpt_sec || 0) >= 15 ? 'bg-success' : 'bg-warning'}">${interpretation.mpt_status || 'N/A'}</span></td>
+                </tr>
+                <tr>
+                    <td><strong>MPT (речь, сек)</strong></td>
+                    <td>${mptSpeechText}</td>
+                    <td><span class="badge bg-secondary">Оценка по речи</span></td>
                 </tr>
                 <tr>
                     <td><strong>F0-High (Гц)</strong></td>
@@ -2452,7 +2592,7 @@
                     <td><span class="badge ${(breakdown.f0_high_hz || 0) < 300 ? 'bg-danger' : (breakdown.f0_high_hz || 0) >= 400 ? 'bg-success' : 'bg-warning'}">${interpretation.f0_high_status || 'N/A'}</span></td>
                 </tr>
                 <tr>
-                    <td><strong>I-Low (дБ)</strong></td>
+                    <td><strong>I-Low (дБ, норм.)</strong></td>
                     <td>${(breakdown.i_low_db || 0).toFixed(1)}</td>
                     <td><span class="badge ${(breakdown.i_low_db || 0) > 55 ? 'bg-danger' : (breakdown.i_low_db || 0) < 45 ? 'bg-success' : 'bg-warning'}">${interpretation.i_low_status || 'N/A'}</span></td>
                 </tr>
@@ -2460,6 +2600,11 @@
                     <td><strong>Jitter (%)</strong></td>
                     <td>${(breakdown.jitter_percent || 0).toFixed(2)}</td>
                     <td><span class="badge ${(breakdown.jitter_percent || 0) > 1.5 ? 'bg-danger' : (breakdown.jitter_percent || 0) < 1.0 ? 'bg-success' : 'bg-warning'}">${interpretation.jitter_status || 'N/A'}</span></td>
+                </tr>
+                <tr>
+                    <td><strong>Jitter (cap 5%)</strong></td>
+                    <td>${jitterCapped.toFixed(2)}</td>
+                    <td><span class="badge bg-secondary">Ограниченная копия</span></td>
                 </tr>
             `;
             }
@@ -2473,9 +2618,12 @@
                         <strong>Нормальные значения:</strong><br>
                         • MPT: >15-20 сек<br>
                         • F0-High: >400-500 Гц<br>
-                        • I-Low: <45 дБ<br>
+                        • I-Low: <45 дБ (норм.)<br>
                         • Jitter: <1%
                     </small>
+                </div>
+                <div class="mt-2">
+                    <small><strong>I-Low — нормализованный дБ, не SPL.</strong></small>
                 </div>
             `;
             }
