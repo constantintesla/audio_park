@@ -13,7 +13,7 @@ import json
 try:
     from aiogram import Bot, Dispatcher, types, F
     from aiogram.filters import Command
-    from aiogram.types import Message, Voice
+    from aiogram.types import Message, Voice, InlineKeyboardMarkup, InlineKeyboardButton, CallbackQuery
     from aiogram.fsm.context import FSMContext
     from aiogram.fsm.state import State, StatesGroup
     from aiogram.fsm.storage.memory import MemoryStorage
@@ -58,50 +58,306 @@ class ParkinsonBot:
         @self.dp.message(Command("start"))
         async def cmd_start(message: Message):
             """Обработка команды /start"""
+            keyboard = InlineKeyboardMarkup(inline_keyboard=[
+                [InlineKeyboardButton(text="🔍 Начать анализ", callback_data="start_analysis")],
+                [InlineKeyboardButton(text="📋 История отчетов", callback_data="history")],
+                [InlineKeyboardButton(text="ℹ️ О боте", callback_data="about")]
+            ])
             await message.answer(
                 "👋 Добро пожаловать в бот для анализа голоса!\n\n"
                 "Я помогу вам проверить голос на симптомы болезни Паркинсона.\n\n"
-                "Используйте команду /analyze для начала анализа."
+                "Выберите действие:",
+                reply_markup=keyboard
             )
+        
+        @self.dp.callback_query(F.data == "start_analysis")
+        async def callback_start_analysis(callback: CallbackQuery, state: FSMContext):
+            """Обработка нажатия кнопки 'Начать анализ'"""
+            keyboard = InlineKeyboardMarkup(inline_keyboard=[
+                [InlineKeyboardButton(text="🔄 Начать заново", callback_data="start_analysis")],
+                [InlineKeyboardButton(text="🏠 Главное меню", callback_data="main_menu")]
+            ])
+            await callback.message.edit_text(
+                f"📝 Пожалуйста, прочитайте следующую фразу:\n\n"
+                f"<i>{READING_TEXT}</i>\n\n"
+                f"🎤 Отправьте голосовое сообщение или аудио файл после прочтения.\n\n"
+                f"<i>Поддерживаемые форматы: голосовые сообщения, .ogg, .wav, .mp3</i>",
+                parse_mode="HTML",
+                reply_markup=keyboard
+            )
+            await callback.answer()
+            await state.set_state(AnalysisState.waiting_for_voice)
+        
+        @self.dp.callback_query(F.data == "about")
+        async def callback_about(callback: CallbackQuery):
+            """Обработка нажатия кнопки 'О боте'"""
+            keyboard = InlineKeyboardMarkup(inline_keyboard=[
+                [InlineKeyboardButton(text="🔍 Начать анализ", callback_data="start_analysis")],
+                [InlineKeyboardButton(text="📋 История отчетов", callback_data="history")],
+                [InlineKeyboardButton(text="🏠 Главное меню", callback_data="main_menu")]
+            ])
+            await callback.message.edit_text(
+                "ℹ️ <b>О боте</b>\n\n"
+                "Этот бот анализирует голос на симптомы болезни Паркинсона.\n\n"
+                "📊 <b>Что анализируется:</b>\n"
+                "• DSI (Dysphonia Severity Index)\n"
+                "• Акустические признаки (jitter, shimmer, HNR)\n"
+                "• Симптомы (гипофония, monopitch, охриплость и др.)\n\n"
+                "🎤 <b>Как использовать:</b>\n"
+                "1. Нажмите 'Начать анализ'\n"
+                "2. Прочитайте предложенный текст\n"
+                "3. Отправьте голосовое сообщение или аудио файл\n"
+                "4. Получите детальный отчет\n\n"
+                "💡 <b>Поддерживаемые форматы:</b>\n"
+                "• Голосовые сообщения Telegram\n"
+                "• Аудио файлы: .ogg, .wav, .mp3",
+                parse_mode="HTML",
+                reply_markup=keyboard
+            )
+            await callback.answer()
+        
+        @self.dp.callback_query(F.data == "main_menu")
+        async def callback_main_menu(callback: CallbackQuery):
+            """Обработка нажатия кнопки 'Главное меню'"""
+            keyboard = InlineKeyboardMarkup(inline_keyboard=[
+                [InlineKeyboardButton(text="🔍 Начать анализ", callback_data="start_analysis")],
+                [InlineKeyboardButton(text="📋 История отчетов", callback_data="history")],
+                [InlineKeyboardButton(text="ℹ️ О боте", callback_data="about")]
+            ])
+            await callback.message.edit_text(
+                "👋 Добро пожаловать в бот для анализа голоса!\n\n"
+                "Я помогу вам проверить голос на симптомы болезни Паркинсона.\n\n"
+                "Выберите действие:",
+                reply_markup=keyboard
+            )
+            await callback.answer()
+        
+        @self.dp.callback_query(F.data == "history")
+        async def callback_history(callback: CallbackQuery):
+            """Обработка нажатия кнопки 'История отчетов'"""
+            try:
+                user_id = callback.from_user.id
+                
+                # Получение истории пользователя через API
+                response = requests.get(
+                    f"{self.api_url}/api/results",
+                    params={"user_id": user_id},
+                    timeout=10
+                )
+                
+                if response.status_code != 200:
+                    await callback.answer("❌ Ошибка при получении истории", show_alert=True)
+                    return
+                
+                data = response.json()
+                results = data.get('results', [])
+                
+                if not results:
+                    keyboard = InlineKeyboardMarkup(inline_keyboard=[
+                        [InlineKeyboardButton(text="🔍 Начать анализ", callback_data="start_analysis")],
+                        [InlineKeyboardButton(text="🏠 Главное меню", callback_data="main_menu")]
+                    ])
+                    await callback.message.edit_text(
+                        "📋 <b>История отчетов</b>\n\n"
+                        "У вас пока нет сохраненных отчетов.\n\n"
+                        "Начните новый анализ, чтобы создать первый отчет!",
+                        parse_mode="HTML",
+                        reply_markup=keyboard
+                    )
+                    await callback.answer()
+                    return
+                
+                # Показываем список отчетов (первые 10)
+                await self._show_history_list(callback, results, user_id, page=0)
+                await callback.answer()
+                
+            except Exception as e:
+                logger.error(f"Ошибка получения истории: {e}")
+                await callback.answer("❌ Ошибка при получении истории", show_alert=True)
+        
+        @self.dp.callback_query(F.data.startswith("history_page_"))
+        async def callback_history_page(callback: CallbackQuery):
+            """Обработка пагинации истории"""
+            try:
+                page = int(callback.data.split("_")[-1])
+                user_id = callback.from_user.id
+                
+                response = requests.get(
+                    f"{self.api_url}/api/results",
+                    params={"user_id": user_id},
+                    timeout=10
+                )
+                
+                if response.status_code == 200:
+                    data = response.json()
+                    results = data.get('results', [])
+                    await self._show_history_list(callback, results, user_id, page=page)
+                
+                await callback.answer()
+            except Exception as e:
+                logger.error(f"Ошибка пагинации истории: {e}")
+                await callback.answer("❌ Ошибка", show_alert=True)
+        
+        @self.dp.callback_query(F.data.startswith("view_report_"))
+        async def callback_view_report(callback: CallbackQuery):
+            """Просмотр конкретного отчета"""
+            try:
+                # Получаем индекс отчета из callback_data
+                report_index = int(callback.data.split("_")[-1])
+                user_id = callback.from_user.id
+                
+                # Получаем все результаты пользователя
+                response = requests.get(
+                    f"{self.api_url}/api/results",
+                    params={"user_id": user_id},
+                    timeout=10
+                )
+                
+                if response.status_code != 200:
+                    await callback.answer("❌ Ошибка при получении отчета", show_alert=True)
+                    return
+                
+                data = response.json()
+                results = data.get('results', [])
+                
+                if report_index < 0 or report_index >= len(results):
+                    await callback.answer("❌ Отчет не найден", show_alert=True)
+                    return
+                
+                result = results[report_index]
+                
+                # Отправляем отчет пользователю
+                report_parts = self._format_report(result)
+                keyboard = InlineKeyboardMarkup(inline_keyboard=[
+                    [InlineKeyboardButton(text="📋 К истории", callback_data="history")],
+                    [InlineKeyboardButton(text="🏠 Главное меню", callback_data="main_menu")]
+                ])
+                
+                # Отправляем первую часть отчета
+                if report_parts:
+                    await callback.message.edit_text(
+                        report_parts[0],
+                        parse_mode="HTML",
+                        reply_markup=keyboard
+                    )
+                    
+                    # Отправляем остальные части отдельными сообщениями с клавиатурой
+                    nav_keyboard = InlineKeyboardMarkup(inline_keyboard=[
+                        [InlineKeyboardButton(text="📋 К истории", callback_data="history")],
+                        [InlineKeyboardButton(text="🏠 Главное меню", callback_data="main_menu")]
+                    ])
+                    for part in report_parts[1:]:
+                        await callback.message.answer(part, parse_mode="HTML", reply_markup=nav_keyboard)
+                        await asyncio.sleep(0.3)
+                
+                await callback.answer()
+                
+            except Exception as e:
+                logger.error(f"Ошибка просмотра отчета: {e}")
+                await callback.answer("❌ Ошибка при просмотре отчета", show_alert=True)
         
         @self.dp.message(Command("analyze"))
         async def cmd_analyze(message: Message, state: FSMContext):
-            """Обработка команды /analyze"""
+            """Обработка команды /analyze (для обратной совместимости)"""
+            keyboard = InlineKeyboardMarkup(inline_keyboard=[
+                [InlineKeyboardButton(text="🔄 Начать заново", callback_data="start_analysis")],
+                [InlineKeyboardButton(text="🏠 Главное меню", callback_data="main_menu")]
+            ])
             await message.answer(
                 f"📝 Пожалуйста, прочитайте следующую фразу:\n\n"
                 f"<i>{READING_TEXT}</i>\n\n"
-                f"🎤 Отправьте голосовое сообщение после прочтения.",
-                parse_mode="HTML"
+                f"🎤 Отправьте голосовое сообщение или аудио файл после прочтения.\n\n"
+                f"<i>Поддерживаемые форматы: голосовые сообщения, .ogg, .wav, .mp3</i>",
+                parse_mode="HTML",
+                reply_markup=keyboard
             )
             await state.set_state(AnalysisState.waiting_for_voice)
         
         @self.dp.message(AnalysisState.waiting_for_voice)
         async def process_voice(message: Message, state: FSMContext):
-            """Обработка голосового сообщения"""
-            # Проверка наличия голосового сообщения
-            if not message.voice:
-                await message.answer(
-                    "❌ Пожалуйста, отправьте голосовое сообщение.\n\n"
-                    "Используйте команду /analyze для начала нового анализа."
-                )
-                return
+            """Обработка голосового сообщения или аудио файла"""
+            file_id = None
+            file_name = None
+            file_path = None
+            is_voice = False
             
-            voice: Voice = message.voice
-            
-            # Проверка длительности (макс 60 секунд)
-            if voice.duration > 60:
+            # Проверка типа файла
+            if message.voice:
+                # Голосовое сообщение
+                voice: Voice = message.voice
+                file_id = voice.file_id
+                file_name = f"voice_{voice.file_id}.ogg"
+                is_voice = True
+                
+                # Проверка длительности (макс 60 секунд)
+                if voice.duration > 60:
+                    keyboard = InlineKeyboardMarkup(inline_keyboard=[
+                        [InlineKeyboardButton(text="🔄 Попробовать снова", callback_data="start_analysis")]
+                    ])
+                    await message.answer(
+                        "❌ Голосовое сообщение слишком длинное (максимум 60 секунд). "
+                        "Пожалуйста, отправьте более короткое сообщение.",
+                        reply_markup=keyboard
+                    )
+                    return
+            elif message.audio:
+                # Аудио файл
+                audio = message.audio
+                file_id = audio.file_id
+                file_name = audio.file_name or f"audio_{audio.file_id}"
+                
+                # Проверка формата
+                if file_name:
+                    ext = file_name.lower().split('.')[-1]
+                    if ext not in ['ogg', 'wav', 'mp3', 'm4a', 'flac']:
+                        keyboard = InlineKeyboardMarkup(inline_keyboard=[
+                            [InlineKeyboardButton(text="🔄 Попробовать снова", callback_data="start_analysis")]
+                        ])
+                        await message.answer(
+                            f"❌ Неподдерживаемый формат файла: .{ext}\n\n"
+                            "Поддерживаемые форматы: .ogg, .wav, .mp3, .m4a, .flac",
+                            reply_markup=keyboard
+                        )
+                        return
+            elif message.document:
+                # Документ (может быть аудио файлом)
+                doc = message.document
+                file_id = doc.file_id
+                file_name = doc.file_name or f"file_{doc.file_id}"
+                
+                # Проверка формата
+                if file_name:
+                    ext = file_name.lower().split('.')[-1]
+                    if ext not in ['ogg', 'wav', 'mp3', 'm4a', 'flac']:
+                        keyboard = InlineKeyboardMarkup(inline_keyboard=[
+                            [InlineKeyboardButton(text="🔄 Попробовать снова", callback_data="start_analysis")]
+                        ])
+                        await message.answer(
+                            f"❌ Неподдерживаемый формат файла: .{ext}\n\n"
+                            "Поддерживаемые форматы: .ogg, .wav, .mp3, .m4a, .flac",
+                            reply_markup=keyboard
+                        )
+                        return
+            else:
+                # Не голос и не аудио файл
+                keyboard = InlineKeyboardMarkup(inline_keyboard=[
+                    [InlineKeyboardButton(text="🔄 Попробовать снова", callback_data="start_analysis")],
+                    [InlineKeyboardButton(text="🏠 Главное меню", callback_data="main_menu")]
+                ])
                 await message.answer(
-                    "❌ Голосовое сообщение слишком длинное (максимум 60 секунд). "
-                    "Пожалуйста, отправьте более короткое сообщение."
+                    "❌ Пожалуйста, отправьте голосовое сообщение или аудио файл.\n\n"
+                    "Поддерживаемые форматы: голосовые сообщения, .ogg, .wav, .mp3, .m4a, .flac",
+                    reply_markup=keyboard
                 )
                 return
             
             # Отправка сообщения о начале обработки
-            processing_msg = await message.answer("⏳ Обрабатываю ваше голосовое сообщение...")
+            file_type = "голосовое сообщение" if is_voice else "аудио файл"
+            processing_msg = await message.answer(f"⏳ Обрабатываю ваш {file_type}...")
             
             try:
-                # Скачивание голосового файла
-                file_info = await self.bot.get_file(voice.file_id)
+                # Скачивание файла
+                file_info = await self.bot.get_file(file_id)
                 file_path = file_info.file_path
                 
                 # Скачивание файла
@@ -116,8 +372,16 @@ class ParkinsonBot:
                 # Генерация уникального ID для результата
                 result_id = f"{user_id}_{timestamp.strftime('%Y%m%d_%H%M%S_%f')[:-3]}"
                 
+                # Определение расширения файла
+                if is_voice:
+                    file_ext = "ogg"
+                elif file_name:
+                    file_ext = file_name.lower().split('.')[-1]
+                else:
+                    file_ext = "ogg"
+                
                 # Сохранение во временный файл
-                temp_file = f"temp_voice_{result_id}.ogg"
+                temp_file = f"temp_voice_{result_id}.{file_ext}"
                 with open(temp_file, 'wb') as f:
                     f.write(file_data.read())
                 
@@ -180,14 +444,89 @@ class ParkinsonBot:
                 await state.clear()
                 
             except Exception as e:
-                logger.error(f"Ошибка обработки голоса: {e}")
+                logger.error(f"Ошибка обработки аудио: {e}")
                 await processing_msg.delete()
+                keyboard = InlineKeyboardMarkup(inline_keyboard=[
+                    [InlineKeyboardButton(text="🔄 Попробовать снова", callback_data="start_analysis")],
+                    [InlineKeyboardButton(text="🏠 Главное меню", callback_data="main_menu")]
+                ])
                 await message.answer(
-                    f"❌ Произошла ошибка при обработке голосового сообщения: {str(e)}\n\n"
-                    "Попробуйте еще раз, отправив команду /analyze"
+                    f"❌ Произошла ошибка при обработке аудио: {str(e)}\n\n"
+                    "Попробуйте еще раз или используйте кнопки ниже.",
+                    reply_markup=keyboard
                 )
                 await state.clear()
         
+    
+    def _get_main_keyboard(self) -> InlineKeyboardMarkup:
+        """Создание стандартной клавиатуры главного меню"""
+        return InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(text="🔍 Начать анализ", callback_data="start_analysis")],
+            [InlineKeyboardButton(text="📋 История отчетов", callback_data="history")],
+            [InlineKeyboardButton(text="ℹ️ О боте", callback_data="about")]
+        ])
+    
+    def _get_navigation_keyboard(self) -> InlineKeyboardMarkup:
+        """Создание стандартной клавиатуры навигации"""
+        return InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(text="🔄 Новый анализ", callback_data="start_analysis")],
+            [InlineKeyboardButton(text="🏠 Главное меню", callback_data="main_menu")]
+        ])
+    
+    def _get_reference_ranges(self) -> dict:
+        """Получение референсных значений для всех показателей"""
+        return {
+            'dsi_score': {'normal': (2.0, 5.0), 'unit': '', 'name': 'DSI Score'},
+            'mpt_sec': {'normal': (15.0, 30.0), 'unit': 'сек', 'name': 'MPT'},
+            'f0_high_hz': {'normal': (400.0, 600.0), 'unit': 'Гц', 'name': 'F0-High'},
+            'i_low_db': {'normal': (25.0, 45.0), 'unit': 'дБ', 'name': 'I-Low'},
+            'jitter_percent': {'normal': (0.0, 1.0), 'unit': '%', 'name': 'Jitter'},
+            'shimmer_percent': {'normal': (2.0, 4.0), 'unit': '%', 'name': 'Shimmer'},
+            'hnr_db': {'normal': (20.0, 25.0), 'unit': 'дБ', 'name': 'HNR'},
+            'f0_mean_hz': {'normal': (100.0, 300.0), 'unit': 'Гц', 'name': 'F0 Mean'},
+            'f0_sd_hz': {'normal': (10.0, 50.0), 'unit': 'Гц', 'name': 'F0 SD'},
+            'rate_syl_sec': {'normal': (4.5, 7.0), 'unit': 'сл/сек', 'name': 'Скорость речи'},
+            'pause_ratio': {'normal': (0.0, 0.30), 'unit': '%', 'name': 'Паузы', 'multiply': 100}
+        }
+    
+    def _format_with_reference(self, value: float, param_name: str, ref_ranges: dict) -> str:
+        """Форматирование значения с референсным диапазоном"""
+        if param_name not in ref_ranges:
+            return f"{value:.2f}"
+        
+        ref = ref_ranges[param_name]
+        unit = ref.get('unit', '')
+        normal_min, normal_max = ref['normal']
+        
+        # Для пауз умножаем на 100 для отображения в процентах
+        if ref.get('multiply'):
+            value_display = value * ref['multiply']
+            # Для сравнения также умножаем нормальные значения
+            normal_min_display = normal_min * ref['multiply']
+            normal_max_display = normal_max * ref['multiply']
+        else:
+            value_display = value
+            normal_min_display = normal_min
+            normal_max_display = normal_max
+        
+        # Определяем статус
+        if normal_min_display <= value_display <= normal_max_display:
+            status_emoji = "🟢"
+            status_text = "норма"
+        elif value_display < normal_min_display:
+            status_emoji = "🔴"
+            status_text = "ниже нормы"
+        else:
+            status_emoji = "🔴"
+            status_text = "выше нормы"
+        
+        # Форматируем диапазон
+        if ref.get('multiply'):
+            range_str = f"{normal_min_display:.1f}-{normal_max_display:.1f}"
+        else:
+            range_str = f"{normal_min:.1f}-{normal_max:.1f}"
+        
+        return f"{value_display:.2f} {unit} {status_emoji} (норма: {range_str} {unit})"
     
     def _format_report(self, result: dict) -> list:
         """
@@ -225,14 +564,29 @@ class ParkinsonBot:
             else:
                 dsi_emoji = "🔴"
             
-            report_part1 += f"{dsi_emoji} <b>DSI Score:</b> {dsi_score:.2f}\n"
+            ref_ranges = self._get_reference_ranges()
+            
+            # DSI с референсом
+            dsi_ref = ref_ranges['dsi_score']
+            dsi_normal_min, dsi_normal_max = dsi_ref['normal']
+            if dsi_normal_min <= dsi_score <= dsi_normal_max:
+                dsi_ref_text = f"🟢 (норма: {dsi_normal_min:.1f}-{dsi_normal_max:.1f})"
+            else:
+                dsi_ref_text = f"🔴 (норма: {dsi_normal_min:.1f}-{dsi_normal_max:.1f})"
+            
+            report_part1 += f"{dsi_emoji} <b>DSI Score:</b> {dsi_score:.2f} {dsi_ref_text}\n"
             report_part1 += f"📈 <b>Оценка:</b> {dsi_range}\n\n"
             
             report_part1 += "<b>Параметры DSI:</b>\n"
-            report_part1 += f"  • MPT: {dsi_breakdown.get('mpt_sec', 0):.2f} сек\n"
-            report_part1 += f"  • F0-High: {dsi_breakdown.get('f0_high_hz', 0):.1f} Гц\n"
-            report_part1 += f"  • I-Low: {dsi_breakdown.get('i_low_db', 0):.1f} дБ\n"
-            report_part1 += f"  • Jitter: {dsi_breakdown.get('jitter_percent', 0):.2f}%\n\n"
+            mpt_val = dsi_breakdown.get('mpt_sec', 0)
+            f0_high_val = dsi_breakdown.get('f0_high_hz', 0)
+            i_low_val = dsi_breakdown.get('i_low_db', 0)
+            jitter_val = dsi_breakdown.get('jitter_percent', 0)
+            
+            report_part1 += f"  • MPT: {self._format_with_reference(mpt_val, 'mpt_sec', ref_ranges)}\n"
+            report_part1 += f"  • F0-High: {self._format_with_reference(f0_high_val, 'f0_high_hz', ref_ranges)}\n"
+            report_part1 += f"  • I-Low: {self._format_with_reference(i_low_val, 'i_low_db', ref_ranges)}\n"
+            report_part1 += f"  • Jitter: {self._format_with_reference(jitter_val, 'jitter_percent', ref_ranges)}\n\n"
         
         # Риск ПД
         risk_emoji = "🔴" if "Высокий" in pd_risk else "🟡" if "Умеренный" in pd_risk else "🟢"
@@ -245,13 +599,15 @@ class ParkinsonBot:
         report_part2 += "🔬 <b>АКУСТИЧЕСКИЕ ПРИЗНАКИ</b>\n"
         report_part2 += "━━━━━━━━━━━━━━━━━━━━\n\n"
         
-        report_part2 += f"📊 Jitter: {features.get('jitter_percent', 0):.2f}%\n"
-        report_part2 += f"📊 Shimmer: {features.get('shimmer_percent', 0):.2f}%\n"
-        report_part2 += f"📊 HNR: {features.get('hnr_db', 0):.1f} дБ\n"
-        report_part2 += f"📊 F0 Mean: {features.get('f0_mean_hz', 0):.1f} Гц\n"
-        report_part2 += f"📊 F0 SD: {features.get('f0_sd_hz', 0):.1f} Гц\n"
-        report_part2 += f"📊 Скорость речи: {features.get('rate_syl_sec', 0):.1f} сл/сек\n"
-        report_part2 += f"📊 Паузы: {features.get('pause_ratio', 0)*100:.1f}%\n\n"
+        ref_ranges = self._get_reference_ranges()
+        
+        report_part2 += f"📊 Jitter: {self._format_with_reference(features.get('jitter_percent', 0), 'jitter_percent', ref_ranges)}\n"
+        report_part2 += f"📊 Shimmer: {self._format_with_reference(features.get('shimmer_percent', 0), 'shimmer_percent', ref_ranges)}\n"
+        report_part2 += f"📊 HNR: {self._format_with_reference(features.get('hnr_db', 0), 'hnr_db', ref_ranges)}\n"
+        report_part2 += f"📊 F0 Mean: {self._format_with_reference(features.get('f0_mean_hz', 0), 'f0_mean_hz', ref_ranges)}\n"
+        report_part2 += f"📊 F0 SD: {self._format_with_reference(features.get('f0_sd_hz', 0), 'f0_sd_hz', ref_ranges)}\n"
+        report_part2 += f"📊 Скорость речи: {self._format_with_reference(features.get('rate_syl_sec', 0), 'rate_syl_sec', ref_ranges)}\n"
+        report_part2 += f"📊 Паузы: {self._format_with_reference(features.get('pause_ratio', 0), 'pause_ratio', ref_ranges)}\n\n"
         
         report_part2 += f"⏱ Длительность: {audio_summary.get('duration_sec', 0):.1f} сек\n"
         report_part2 += f"🎵 Частота дискретизации: {audio_summary.get('sample_rate', 0)} Гц\n\n"
@@ -303,8 +659,7 @@ class ParkinsonBot:
         
         # Футер
         report_footer = "\n━━━━━━━━━━━━━━━━━━━━\n"
-        report_footer += "💡 <i>Подробные результаты также доступны на веб-сайте</i>\n"
-        report_footer += "🔄 Для нового анализа отправьте /analyze"
+        report_footer += "💡 <i>Подробные результаты также доступны на веб-сайте</i>"
         
         messages.append(report_footer)
         
@@ -334,15 +689,14 @@ class ParkinsonBot:
             if current_part:
                 combined_parts.append(current_part)
             
-            # Отправляем каждую часть
+            # Кнопки для навигации
+            keyboard = self._get_navigation_keyboard()
+            
+            # Отправляем каждую часть с клавиатурой
             for i, part in enumerate(combined_parts):
-                if i == 0:
-                    # Первое сообщение отправляем как ответ
-                    await message.answer(part, parse_mode="HTML")
-                else:
-                    # Остальные отправляем отдельными сообщениями
-                    await message.answer(part, parse_mode="HTML")
-                    # Небольшая задержка между сообщениями
+                await message.answer(part, parse_mode="HTML", reply_markup=keyboard)
+                # Небольшая задержка между сообщениями
+                if i < len(combined_parts) - 1:
                     await asyncio.sleep(0.5)
             
         except Exception as e:
@@ -352,13 +706,112 @@ class ParkinsonBot:
             dsi_score = dsi.get('dsi_score')
             pd_risk = result.get('symptom_scores', {}).get('pd_risk', 'Не определен')
             
+            keyboard = self._get_navigation_keyboard()
+            
             fallback_text = "✅ Анализ завершен!\n\n"
             if dsi_score is not None:
                 fallback_text += f"📊 DSI Score: {dsi_score:.2f}\n"
             fallback_text += f"⚠️ Риск ПД: {pd_risk}\n\n"
             fallback_text += "📋 Подробные результаты доступны на сайте."
             
-            await message.answer(fallback_text, parse_mode="HTML")
+            await message.answer(fallback_text, parse_mode="HTML", reply_markup=keyboard)
+    
+    async def _show_history_list(self, callback: CallbackQuery, results: list, user_id: int, page: int = 0):
+        """Отображение списка истории отчетов с пагинацией"""
+        ITEMS_PER_PAGE = 5
+        total_pages = (len(results) + ITEMS_PER_PAGE - 1) // ITEMS_PER_PAGE
+        
+        if page < 0:
+            page = 0
+        if page >= total_pages and total_pages > 0:
+            page = total_pages - 1
+        
+        start_idx = page * ITEMS_PER_PAGE
+        end_idx = min(start_idx + ITEMS_PER_PAGE, len(results))
+        page_results = results[start_idx:end_idx]
+        
+        # Формируем текст сообщения
+        text = f"📋 <b>История отчетов</b>\n\n"
+        text += f"Всего отчетов: {len(results)}\n"
+        if total_pages > 0:
+            text += f"Страница {page + 1} из {total_pages}\n\n"
+        text += "━━━━━━━━━━━━━━━━━━━━\n\n"
+        
+        for idx, result in enumerate(page_results):
+            global_idx = start_idx + idx
+            user_info = result.get('user_info', {})
+            dsi = result.get('dsi', {})
+            symptom_scores = result.get('symptom_scores', {})
+            
+            # Форматирование даты
+            timestamp = user_info.get('timestamp', '')
+            try:
+                dt = datetime.fromisoformat(timestamp)
+                date_str = dt.strftime("%d.%m.%Y %H:%M")
+            except:
+                date_str = timestamp
+            
+            dsi_score = dsi.get('dsi_score')
+            pd_risk = symptom_scores.get('pd_risk', 'Не определен')
+            
+            # Эмодзи для статуса
+            if dsi_score is not None:
+                if dsi_score >= 2.0:
+                    status_emoji = "🟢"
+                elif dsi_score >= 0.0:
+                    status_emoji = "🟡"
+                elif dsi_score >= -2.0:
+                    status_emoji = "🟠"
+                else:
+                    status_emoji = "🔴"
+            else:
+                status_emoji = "⚪"
+            
+            text += f"{status_emoji} <b>Отчет #{global_idx + 1}</b>\n"
+            text += f"📅 {date_str}\n"
+            if dsi_score is not None:
+                text += f"📊 DSI: {dsi_score:.2f}\n"
+            text += f"⚠️ Риск: {pd_risk}\n\n"
+        
+        # Формируем кнопки
+        keyboard_buttons = []
+        
+        # Кнопки для каждого отчета на странице
+        for idx, result in enumerate(page_results):
+            global_idx = start_idx + idx
+            user_info = result.get('user_info', {})
+            timestamp = user_info.get('timestamp', '')
+            try:
+                dt = datetime.fromisoformat(timestamp)
+                date_str = dt.strftime("%d.%m %H:%M")
+            except:
+                date_str = f"#{global_idx + 1}"
+            keyboard_buttons.append([
+                InlineKeyboardButton(
+                    text=f"📄 Отчет #{global_idx + 1} ({date_str})",
+                    callback_data=f"view_report_{global_idx}"
+                )
+            ])
+        
+        # Кнопки пагинации
+        nav_buttons = []
+        if page > 0:
+            nav_buttons.append(InlineKeyboardButton(text="◀️ Назад", callback_data=f"history_page_{page - 1}"))
+        if page < total_pages - 1:
+            nav_buttons.append(InlineKeyboardButton(text="Вперед ▶️", callback_data=f"history_page_{page + 1}"))
+        
+        if nav_buttons:
+            keyboard_buttons.append(nav_buttons)
+        
+        # Кнопки навигации
+        keyboard_buttons.append([
+            InlineKeyboardButton(text="🔍 Новый анализ", callback_data="start_analysis"),
+            InlineKeyboardButton(text="🏠 Главное меню", callback_data="main_menu")
+        ])
+        
+        keyboard = InlineKeyboardMarkup(inline_keyboard=keyboard_buttons)
+        
+        await callback.message.edit_text(text, parse_mode="HTML", reply_markup=keyboard)
     
     async def start(self):
         """Запуск бота"""

@@ -113,14 +113,28 @@ sudo apt install nginx
 ```nginx
 server {
     listen 80;
-    server_name yourdomain.com;
-
+    # Для доступа по IP используйте: server_name _;
+    # Для доступа по домену используйте: server_name yourdomain.com;
+    server_name _;  # Принимать запросы с любого домена/IP
+    
+    # Увеличенный размер загружаемых файлов (для аудио)
+    client_max_body_size 50M;
+    
     location / {
         proxy_pass http://localhost:5000;
         proxy_set_header Host $host;
         proxy_set_header X-Real-IP $remote_addr;
         proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
         proxy_set_header X-Forwarded-Proto $scheme;
+        
+        # Таймауты для обработки аудио
+        proxy_connect_timeout 300s;
+        proxy_send_timeout 300s;
+        proxy_read_timeout 300s;
+        
+        # Убираем ограничения буфера
+        proxy_buffering off;
+        proxy_request_buffering off;
     }
 }
 ```
@@ -248,6 +262,46 @@ docker-compose -f docker-compose.prod.yml --env-file .env up -d --build
 ```
 
 ## Устранение неполадок
+
+### Ошибка 403 Forbidden при доступе через порт 80
+
+Если при доступе по внешнему IP на порт 80 вы получаете ошибку 403 Forbidden, а на порт 5000 всё работает, проблема в конфигурации nginx.
+
+**Решение:**
+
+1. Проверьте текущую конфигурацию nginx:
+```bash
+sudo cat /etc/nginx/sites-available/parkinson
+```
+
+2. Убедитесь, что в конфигурации используется `server_name _;` (для доступа по IP) вместо `server_name yourdomain.com;`:
+```nginx
+server {
+    listen 80;
+    server_name _;  # Для доступа по IP
+    # ...
+}
+```
+
+3. Если используете домен, но хотите также разрешить доступ по IP, используйте:
+```nginx
+server {
+    listen 80;
+    server_name _ yourdomain.com;  # И IP, и домен
+    # ...
+}
+```
+
+4. Проверьте конфигурацию и перезагрузите nginx:
+```bash
+sudo nginx -t
+sudo systemctl reload nginx
+```
+
+5. Проверьте логи nginx для диагностики:
+```bash
+sudo tail -f /var/log/nginx/error.log
+```
 
 ### Бот не может подключиться к API
 

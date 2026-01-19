@@ -37,6 +37,7 @@ Thumbs.db
 .docker-compose.env
 .env.production
 .env.prod
+env
 
 # Логи
 *.log

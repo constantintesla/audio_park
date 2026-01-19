@@ -3,8 +3,13 @@
 
 server {
     listen 80;
-    server_name yourdomain.com;  # Замените на ваш домен
-
+    # Для доступа по IP используйте: server_name _;
+    # Для доступа по домену используйте: server_name yourdomain.com;
+    server_name _;  # Принимать запросы с любого домена/IP
+    
+    # Увеличенный размер загружаемых файлов (для аудио)
+    client_max_body_size 50M;
+    
     # Редирект на HTTPS (раскомментируйте после настройки SSL)
     # return 301 https://$server_name$request_uri;
 
@@ -19,6 +24,10 @@ server {
         proxy_connect_timeout 300s;
         proxy_send_timeout 300s;
         proxy_read_timeout 300s;
+        
+        # Убираем ограничения буфера
+        proxy_buffering off;
+        proxy_request_buffering off;
     }
 }
 

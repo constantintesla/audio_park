@@ -38,12 +38,40 @@ class AudioProcessor:
         
         Returns:
             Очищенный аудиомассив
+        
+        Примечание: Используется мягкая фильтрация, чтобы не искажать речевой сигнал.
+        Для анализа голоса важно сохранить естественные характеристики сигнала.
         """
-        # Простая фильтрация высокочастотного шума
-        from scipy import signal
-        b, a = signal.butter(3, 0.05, 'high')
-        filtered_audio = signal.filtfilt(b, a, audio)
-        return filtered_audio
+        try:
+            from scipy import signal
+            
+            # Мягкая фильтрация очень низкочастотного шума (ниже 50 Гц)
+            # Это удаляет гул и низкочастотные артефакты, не затрагивая речевой сигнал
+            # Речь обычно находится в диапазоне 80-8000 Гц
+            nyquist = self.target_sr / 2
+            low_cutoff = 50.0 / nyquist  # 50 Гц high-pass фильтр
+            
+            # Используем более мягкий фильтр (2-й порядок вместо 3-го)
+            # и более низкую частоту среза, чтобы не искажать речь
+            b, a = signal.butter(2, low_cutoff, 'high')
+            filtered_audio = signal.filtfilt(b, a, audio)
+            
+            # Нормализация для сохранения динамического диапазона
+            # Не перенормализуем слишком сильно, чтобы сохранить естественную громкость
+            max_val = np.max(np.abs(filtered_audio))
+            if max_val > 0:
+                # Мягкая нормализация: масштабируем только если сигнал слишком тихий
+                if max_val < 0.1:
+                    filtered_audio = filtered_audio * (0.5 / max_val)
+                else:
+                    # Если сигнал уже достаточно громкий, только слегка нормализуем
+                    filtered_audio = filtered_audio * min(1.0, 0.95 / max_val)
+            
+            return filtered_audio
+        except Exception as e:
+            # Если фильтрация не удалась, возвращаем исходный сигнал
+            print(f"Предупреждение: ошибка фильтрации шума: {str(e)}")
+            return audio
     
     def segment_utterances(self, audio: np.ndarray, sr: int, 
                           min_duration: float = 0.5,

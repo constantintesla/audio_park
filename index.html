@@ -823,31 +823,41 @@
                             <div class="text-center mb-3">
                                 <h2 class="display-4 ${dsiColorClass}">${dsiScore.toFixed(2)}</h2>
                                 <p class="lead">${dsiRange}</p>
+                                <p class="text-muted"><small>${dsiScore >= 2.0 ? '🟢' : dsiScore >= 0.0 ? '🟡' : dsiScore >= -2.0 ? '🟠' : '🔴'} Референсный диапазон: 2.0-5.0 (нормальный голос)</small></p>
                             </div>
                             <div class="row">
                                 <div class="col-md-6">
                                     <h6>Параметры DSI:</h6>
-                                    <table class="table table-sm">
-                                        <tr>
-                                            <td><strong>MPT (сек)</strong></td>
-                                            <td>${(breakdown.mpt_sec || 0).toFixed(2)}</td>
-                                            <td><span class="badge ${(breakdown.mpt_sec || 0) < 10 ? 'bg-danger' : (breakdown.mpt_sec || 0) >= 15 ? 'bg-success' : 'bg-warning'}">${interpretation.mpt_status || 'N/A'}</span></td>
-                                        </tr>
-                                        <tr>
-                                            <td><strong>F0-High (Гц)</strong></td>
-                                            <td>${(breakdown.f0_high_hz || 0).toFixed(1)}</td>
-                                            <td><span class="badge ${(breakdown.f0_high_hz || 0) < 300 ? 'bg-danger' : (breakdown.f0_high_hz || 0) >= 400 ? 'bg-success' : 'bg-warning'}">${interpretation.f0_high_status || 'N/A'}</span></td>
-                                        </tr>
-                                        <tr>
-                                            <td><strong>I-Low (дБ)</strong></td>
-                                            <td>${(breakdown.i_low_db || 0).toFixed(1)}</td>
-                                            <td><span class="badge ${(breakdown.i_low_db || 0) > 55 ? 'bg-danger' : (breakdown.i_low_db || 0) < 45 ? 'bg-success' : 'bg-warning'}">${interpretation.i_low_status || 'N/A'}</span></td>
-                                        </tr>
-                                        <tr>
-                                            <td><strong>Jitter (%)</strong></td>
-                                            <td>${(breakdown.jitter_percent || 0).toFixed(2)}</td>
-                                            <td><span class="badge ${(breakdown.jitter_percent || 0) > 1.5 ? 'bg-danger' : (breakdown.jitter_percent || 0) < 1.0 ? 'bg-success' : 'bg-warning'}">${interpretation.jitter_status || 'N/A'}</span></td>
-                                        </tr>
+                                    <table class="table table-sm table-bordered">
+                                        <thead class="table-light">
+                                            <tr>
+                                                <th>Параметр</th>
+                                                <th>Значение</th>
+                                                <th>Референс</th>
+                                            </tr>
+                                        </thead>
+                                        <tbody>
+                                            <tr>
+                                                <td><strong>MPT (сек)</strong></td>
+                                                <td>${(breakdown.mpt_sec || 0).toFixed(2)}</td>
+                                                <td><small class="${(breakdown.mpt_sec || 0) >= 15 ? 'text-success' : (breakdown.mpt_sec || 0) < 10 ? 'text-danger' : 'text-warning'}">${(breakdown.mpt_sec || 0) >= 15 ? '🟢' : (breakdown.mpt_sec || 0) < 10 ? '🔴' : '🟡'} норма: 15-30 сек</small></td>
+                                            </tr>
+                                            <tr>
+                                                <td><strong>F0-High (Гц)</strong></td>
+                                                <td>${(breakdown.f0_high_hz || 0).toFixed(1)}</td>
+                                                <td><small class="${(breakdown.f0_high_hz || 0) >= 400 ? 'text-success' : (breakdown.f0_high_hz || 0) < 300 ? 'text-danger' : 'text-warning'}">${(breakdown.f0_high_hz || 0) >= 400 ? '🟢' : (breakdown.f0_high_hz || 0) < 300 ? '🔴' : '🟡'} норма: 400-600 Гц</small></td>
+                                            </tr>
+                                            <tr>
+                                                <td><strong>I-Low (дБ)</strong></td>
+                                                <td>${(breakdown.i_low_db || 0).toFixed(1)}</td>
+                                                <td><small class="${(breakdown.i_low_db || 0) <= 45 && (breakdown.i_low_db || 0) >= 25 ? 'text-success' : (breakdown.i_low_db || 0) > 55 ? 'text-danger' : 'text-warning'}">${(breakdown.i_low_db || 0) <= 45 && (breakdown.i_low_db || 0) >= 25 ? '🟢' : (breakdown.i_low_db || 0) > 55 ? '🔴' : '🟡'} норма: 25-45 дБ</small></td>
+                                            </tr>
+                                            <tr>
+                                                <td><strong>Jitter (%)</strong></td>
+                                                <td>${(breakdown.jitter_percent || 0).toFixed(2)}</td>
+                                                <td><small class="${(breakdown.jitter_percent || 0) <= 1.0 ? 'text-success' : (breakdown.jitter_percent || 0) > 1.5 ? 'text-danger' : 'text-warning'}">${(breakdown.jitter_percent || 0) <= 1.0 ? '🟢' : (breakdown.jitter_percent || 0) > 1.5 ? '🔴' : '🟡'} норма: 0.0-1.0 %</small></td>
+                                            </tr>
+                                        </tbody>
                                     </table>
                                 </div>
                                 <div class="col-md-6">
@@ -860,23 +870,72 @@
                 `;
             }
             
+            function formatWithReference(value, paramName) {
+                const refRanges = getReferenceRanges();
+                if (!refRanges[paramName]) return value.toFixed(2);
+                
+                const ref = refRanges[paramName];
+                const [normalMin, normalMax] = ref.normal;
+                const unit = ref.unit;
+                
+                let statusIcon = '';
+                let statusClass = '';
+                if (normalMin <= value && value <= normalMax) {
+                    statusIcon = '🟢';
+                    statusClass = 'text-success';
+                } else if (value < normalMin) {
+                    statusIcon = '🔴';
+                    statusClass = 'text-danger';
+                } else {
+                    statusIcon = '🔴';
+                    statusClass = 'text-danger';
+                }
+                
+                return `<span class="${statusClass}">${value.toFixed(2)} ${unit} ${statusIcon}</span> <small class="text-muted">(норма: ${normalMin.toFixed(1)}-${normalMax.toFixed(1)} ${unit})</small>`;
+            }
+            
             // Features Table
             html += `
                 <h5>Акустические признаки</h5>
-                <table class="feature-table table table-sm">
-                    <thead>
+                <table class="feature-table table table-sm table-bordered">
+                    <thead class="table-light">
                         <tr>
                             <th>Признак</th>
                             <th>Значение</th>
+                            <th>Референсный диапазон</th>
                         </tr>
                     </thead>
                     <tbody>
-                        <tr><td>Jitter (%)</td><td>${(features.jitter_percent || 0).toFixed(2)}</td></tr>
-                        <tr><td>Shimmer (%)</td><td>${(features.shimmer_percent || 0).toFixed(2)}</td></tr>
-                        <tr><td>HNR (dB)</td><td>${(features.hnr_db || 0).toFixed(1)}</td></tr>
-                        <tr><td>F0 Mean (Hz)</td><td>${(features.f0_mean_hz || 0).toFixed(1)}</td></tr>
-                        <tr><td>F0 SD (Hz)</td><td>${(features.f0_sd_hz || 0).toFixed(1)}</td></tr>
-                        <tr><td>Скорость речи (сл/сек)</td><td>${(features.rate_syl_sec || 0).toFixed(1)}</td></tr>
+                        <tr>
+                            <td><strong>Jitter</strong></td>
+                            <td>${formatWithReference(features.jitter_percent || 0, 'jitter_percent')}</td>
+                            <td><small class="text-muted">0.0-1.0 %</small></td>
+                        </tr>
+                        <tr>
+                            <td><strong>Shimmer</strong></td>
+                            <td>${formatWithReference(features.shimmer_percent || 0, 'shimmer_percent')}</td>
+                            <td><small class="text-muted">2.0-4.0 %</small></td>
+                        </tr>
+                        <tr>
+                            <td><strong>HNR</strong></td>
+                            <td>${formatWithReference(features.hnr_db || 0, 'hnr_db')}</td>
+                            <td><small class="text-muted">20.0-25.0 дБ</small></td>
+                        </tr>
+                        <tr>
+                            <td><strong>F0 Mean</strong></td>
+                            <td>${formatWithReference(features.f0_mean_hz || 0, 'f0_mean_hz')}</td>
+                            <td><small class="text-muted">100.0-300.0 Гц</small></td>
+                        </tr>
+                        <tr>
+                            <td><strong>F0 SD</strong></td>
+                            <td>${formatWithReference(features.f0_sd_hz || 0, 'f0_sd_hz')}</td>
+                            <td><small class="text-muted">10.0-50.0 Гц</small></td>
+                        </tr>
+                        <tr>
+                            <td><strong>Скорость речи</strong></td>
+                            <td>${formatWithReference(features.rate_syl_sec || 0, 'rate_syl_sec')}</td>
+                            <td><small class="text-muted">4.5-7.0 сл/сек</small></td>
+                        </tr>
                     </tbody>
                 </table>
             `;
@@ -946,6 +1005,50 @@
         let currentSortColumn = -1;
         let sortDirection = 1; // 1 = по возрастанию, -1 = по убыванию
         
+        // Reference ranges function (глобальная)
+        function getReferenceRanges() {
+            return {
+                'jitter_percent': {normal: [0.0, 1.0], unit: '%'},
+                'shimmer_percent': {normal: [2.0, 4.0], unit: '%'},
+                'hnr_db': {normal: [20.0, 25.0], unit: 'дБ'},
+                'f0_mean_hz': {normal: [100.0, 300.0], unit: 'Гц'},
+                'f0_sd_hz': {normal: [10.0, 50.0], unit: 'Гц'},
+                'rate_syl_sec': {normal: [4.5, 7.0], unit: 'сл/сек'},
+                'mpt_sec': {normal: [15.0, 30.0], unit: 'сек'},
+                'f0_high_hz': {normal: [400.0, 600.0], unit: 'Гц'},
+                'i_low_db': {normal: [25.0, 45.0], unit: 'дБ'},
+                'dsi_score': {normal: [2.0, 5.0], unit: ''}
+            };
+        }
+        
+        // Функция форматирования значения с референсом для таблицы
+        function formatTableValueWithRef(value, paramName) {
+            if (value === 'N/A' || value === undefined || value === null) return 'N/A';
+            const refRanges = getReferenceRanges();
+            if (!refRanges[paramName]) {
+                return typeof value === 'number' ? value.toFixed(2) : value;
+            }
+            
+            const ref = refRanges[paramName];
+            const [normalMin, normalMax] = ref.normal;
+            const unit = ref.unit;
+            
+            let statusIcon = '';
+            let statusClass = '';
+            if (normalMin <= value && value <= normalMax) {
+                statusIcon = '🟢';
+                statusClass = 'text-success';
+            } else {
+                statusIcon = '🔴';
+                statusClass = 'text-danger';
+            }
+            
+            const numDecimals = paramName.includes('percent') ? 2 : (paramName.includes('db') || paramName.includes('hz')) ? 1 : 2;
+            const valueStr = typeof value === 'number' ? value.toFixed(numDecimals) : value;
+            
+            return `<div><strong class="${statusClass}">${valueStr} ${statusIcon}</strong><br><small class="text-muted">(норма: ${normalMin.toFixed(numDecimals)}-${normalMax.toFixed(numDecimals)} ${unit})</small></div>`;
+        }
+        
         function displaySummaryTable(results) {
             const tableContainer = document.getElementById('summary-table-container');
             const tableBody = document.getElementById('summary-table-body');
@@ -1005,11 +1108,19 @@
                     riskClass = 'table-badge-low';
                 }
                 
-                // Признаки
-                const jitter = features.jitter_percent !== undefined ? features.jitter_percent.toFixed(2) : 'N/A';
-                const shimmer = features.shimmer_percent !== undefined ? features.shimmer_percent.toFixed(2) : 'N/A';
-                const hnr = features.hnr_db !== undefined ? features.hnr_db.toFixed(1) : 'N/A';
-                const f0sd = features.f0_sd_hz !== undefined ? features.f0_sd_hz.toFixed(1) : 'N/A';
+                // Признаки с референсами
+                const jitter = features.jitter_percent !== undefined 
+                    ? formatTableValueWithRef(features.jitter_percent, 'jitter_percent')
+                    : 'N/A';
+                const shimmer = features.shimmer_percent !== undefined 
+                    ? formatTableValueWithRef(features.shimmer_percent, 'shimmer_percent')
+                    : 'N/A';
+                const hnr = features.hnr_db !== undefined 
+                    ? formatTableValueWithRef(features.hnr_db, 'hnr_db')
+                    : 'N/A';
+                const f0sd = features.f0_sd_hz !== undefined 
+                    ? formatTableValueWithRef(features.f0_sd_hz, 'f0_sd_hz')
+                    : 'N/A';
                 
                 const row = document.createElement('tr');
                 row.setAttribute('data-index', index);
@@ -1864,34 +1975,53 @@
         }
         
         function calculateLowestIntensity(audioData, sampleRate) {
-            // Calculate intensity frames
+            // Calculate intensity frames using RMS
             const frameLength = Math.floor(0.01 * sampleRate);
             const hopLength = Math.floor(0.01 * sampleRate);
-            const intensityFrames = [];
+            const rmsFrames = [];
             
             for (let i = 0; i < audioData.length - frameLength; i += hopLength) {
                 const frame = audioData.slice(i, i + frameLength);
                 const rms = Math.sqrt(frame.reduce((sum, x) => sum + x * x, 0) / frame.length);
-                // Convert to dB
-                const db = 20 * Math.log10(rms + 1e-10);
-                intensityFrames.push(db);
+                rmsFrames.push(rms);
             }
             
-            if (intensityFrames.length === 0) return 0;
+            if (rmsFrames.length === 0) return 0;
             
-            // Filter only vocalization (30% of max)
-            const maxIntensity = Math.max(...intensityFrames);
-            const threshold = maxIntensity * 0.3;
-            const vocalIntensities = intensityFrames.filter(i => i >= threshold);
+            // Filter only vocalization (20% of max, same as Python)
+            const maxRms = Math.max(...rmsFrames);
+            if (maxRms <= 0) return 0;
             
-            if (vocalIntensities.length === 0) {
-                return Math.min(...intensityFrames);
+            const threshold = maxRms * 0.20;
+            const vocalRms = rmsFrames.filter(rms => rms >= threshold);
+            
+            if (vocalRms.length === 0) {
+                // If no vocalization, use minimum
+                const minRms = Math.min(...rmsFrames.filter(r => r > 0));
+                if (minRms > 0 && maxRms > 0) {
+                    const relativeIntensity = minRms / maxRms;
+                    const iLowDb = 30 + (relativeIntensity * 30);
+                    return Math.max(25, Math.min(65, iLowDb));
+                }
+                return 0;
             }
             
             // Use 5th percentile as I-Low (lowest intensity during vocalization)
-            const sorted = [...vocalIntensities].sort((a, b) => a - b);
+            const sorted = [...vocalRms].sort((a, b) => a - b);
             const index = Math.floor(sorted.length * 0.05);
-            return sorted[index];
+            const iLowRms = sorted[index];
+            
+            // For DSI, I-Low should be in range 30-60 dB for normal speech
+            // Use relative intensity and scale to correct range
+            if (iLowRms > 0 && maxRms > 0) {
+                const relativeIntensity = iLowRms / maxRms;
+                // Scale to range 30-60 dB: 30 + (relative * 30)
+                const iLowDb = 30 + (relativeIntensity * 30);
+                // Limit to range 25-65 dB
+                return Math.max(25, Math.min(65, iLowDb));
+            }
+            
+            return 0;
         }
         
         function calculateDSI(features) {

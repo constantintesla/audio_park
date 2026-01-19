@@ -14,8 +14,8 @@ logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 app = Flask(__name__)
-# Разрешить CORS для веб-интерфейса со всех источников
-CORS(app, resources={r"/api/*": {"origins": "*"}})
+# Разрешить CORS для веб-интерфейса со всех источников для всех маршрутов
+CORS(app, resources={r"/*": {"origins": "*"}})
 
 # Путь к файлу для хранения результатов
 RESULTS_FILE = "results.json"
@@ -184,6 +184,11 @@ def get_results():
     """Получение всех результатов"""
     try:
         results = load_results()
+        
+        # Фильтрация по user_id, если указан
+        user_id = request.args.get('user_id', type=int)
+        if user_id:
+            results = [r for r in results if r.get('user_info', {}).get('tg_user_id') == user_id]
         
         # Сортировка по дате (новые первыми)
         results.sort(key=lambda x: x.get('user_info', {}).get('timestamp', ''), reverse=True)
@@ -625,7 +630,18 @@ def generate_html_report(results: List[Dict]) -> str:
 @app.route('/<path:path>')
 def serve_static(path):
     """Отдача статических файлов"""
-    return send_from_directory('.', path)
+    try:
+        # Игнорируем запросы к API маршрутам
+        if path.startswith('api/'):
+            return jsonify({"error": "Неверный маршрут"}), 404
+        
+        return send_from_directory('.', path)
+    except Exception as e:
+        logger.error(f"Ошибка при отдаче статического файла {path}: {e}")
+        # Для несуществующих файлов возвращаем 404, а не 500
+        if hasattr(e, 'code') and e.code == 404:
+            return jsonify({"error": "Файл не найден"}), 404
+        return jsonify({"error": "Ошибка сервера"}), 500
 
 
 if __name__ == '__main__':
