@@ -8,10 +8,11 @@ import numpy as np
 import os
 import shutil
 from datetime import datetime
-from typing import Dict, Optional, List, Tuple
+from typing import Dict, Optional, List, Tuple, Any
 import argparse
 import sys
 import logging
+import math
 
 # Настройка логирования
 logger = logging.getLogger(__name__)
@@ -47,6 +48,43 @@ class ParkinsonAnalyzer:
         # Всегда создаем директорию для результатов, даже если сохранение отключено
         os.makedirs(self.raw_data_dir, exist_ok=True)
         logger.info(f"📁 Директория для сырых данных: {self.raw_data_dir} (save_raw_data={save_raw_data})")
+    
+    def _clean_json_values(self, obj: Any) -> Any:
+        """
+        Рекурсивная очистка значений от inf, -inf и NaN для JSON сериализации
+        
+        Args:
+            obj: Объект для очистки (dict, list, или примитив)
+        
+        Returns:
+            Очищенный объект с заменой недопустимых значений на None или 0.0
+        """
+        if isinstance(obj, dict):
+            return {key: self._clean_json_values(value) for key, value in obj.items()}
+        elif isinstance(obj, list):
+            return [self._clean_json_values(item) for item in obj]
+        elif isinstance(obj, (float, np.floating)):
+            # Проверяем на inf, -inf и nan
+            if math.isinf(obj) or math.isnan(obj):
+                logger.warning(f"Обнаружено недопустимое значение float: {obj}, заменяю на 0.0")
+                return 0.0
+            # Проверяем на очень большие числа, которые могут вызвать проблемы
+            if abs(obj) > 1e10:
+                logger.warning(f"Обнаружено очень большое значение: {obj}, ограничиваю до 1e10")
+                return 1e10 if obj > 0 else -1e10
+            return float(obj)
+        elif isinstance(obj, (int, np.integer)):
+            # Проверяем на очень большие целые числа
+            if abs(obj) > 2**31 - 1:  # Максимальное значение для JSON int
+                logger.warning(f"Обнаружено очень большое целое: {obj}, конвертирую в float")
+                return float(obj)
+            return int(obj)
+        elif isinstance(obj, np.ndarray):
+            # Конвертируем numpy массивы в списки
+            return self._clean_json_values(obj.tolist())
+        else:
+            # Для остальных типов (str, None, bool) возвращаем как есть
+            return obj
     
     def analyze_audio_file(self, file_path: str, save_raw: Optional[bool] = None, result_id: Optional[str] = None) -> Dict:
         """
@@ -85,7 +123,7 @@ class ParkinsonAnalyzer:
                     logger.error(f"⚠️  ОШИБКА при создании директории {result_dir}: {e}")
                     result_dir = None
             
-            # 1. Загрузка и предобработка аудио
+            # 1. Загрузка аудио
             audio, sr = self.audio_processor.load_audio(file_path)
             
             # Сохранение исходного аудиофайла
@@ -103,70 +141,9 @@ class ParkinsonAnalyzer:
                 except Exception as e:
                     logger.error(f"⚠️  Ошибка при сохранении исходного файла: {e}")
             
-            # Редукция шума
-            audio_cleaned = self.audio_processor.noise_reduction(audio)
-            
-            # Сохранение обработанного аудио
-            if should_save_raw and result_dir:
-                try:
-                    import soundfile as sf
-                    processed_path = os.path.join(result_dir, "processed_audio.wav")
-                    sf.write(processed_path, audio_cleaned, sr)
-                    if os.path.exists(processed_path):
-                        raw_data_paths['processed_audio'] = processed_path
-                        logger.info(f"✅ Сохранен обработанный аудио: {processed_path}")
-                    else:
-                        logger.error(f"⚠️  Ошибка: файл не создан {processed_path}")
-                except Exception as e:
-                    logger.error(f"⚠️  Ошибка при сохранении обработанного аудио: {e}")
-            
-            # Сегментация
-            segments = self.audio_processor.segment_utterances(audio_cleaned, sr)
-            
-            # Сохранение сегментов
-            segment_paths = []
-            if should_save_raw and result_dir and len(segments) > 0:
-                import soundfile as sf
-                segments_dir = os.path.join(result_dir, "segments")
-                os.makedirs(segments_dir, exist_ok=True)
-                for i, segment in enumerate(segments):
-                    segment_path = os.path.join(segments_dir, f"segment_{i:03d}.wav")
-                    sf.write(segment_path, segment, sr)
-                    segment_paths.append(segment_path)
-                raw_data_paths['segments'] = segment_paths
-            
             # 2. Извлечение признаков
-            # ВАЖНО: Основные акустические признаки (jitter, shimmer, HNR, F0) должны 
-            # извлекаться из всего файла целиком, а не усредняться по сегментам.
-            # Сегментация используется только для анализа артикуляции (скорость речи, паузы).
-            
-            # Извлекаем основные признаки из всего файла
-            all_features = self.feature_extractor.extract_all_features(audio_cleaned)
-            
-            # Дополнительно анализируем сегменты для артикуляции и сохранения сырых данных
-            raw_segment_features = []
-            if len(segments) > 0:
-                segment_features = []
-                for i, segment in enumerate(segments):
-                    segment_feat = self.feature_extractor.extract_all_features(segment)
-                    segment_features.append(segment_feat)
-                    # Сохраняем сырые признаки каждого сегмента
-                    if should_save_raw:
-                        raw_segment_features.append({
-                            'segment_index': i,
-                            'features': segment_feat,
-                            'duration_sec': len(segment) / sr
-                        })
-                
-                # Для артикуляции используем усредненные значения из сегментов
-                # (скорость речи, паузы - эти признаки зависят от сегментации)
-                if segment_features:
-                    segment_avg = self._average_features(segment_features)
-                    # Обновляем только артикуляционные признаки из сегментов
-                    if 'rate_syl_sec' in segment_avg:
-                        all_features['rate_syl_sec'] = segment_avg['rate_syl_sec']
-                    if 'pause_ratio' in segment_avg:
-                        all_features['pause_ratio'] = segment_avg['pause_ratio']
+            # Извлекаем признаки из исходного аудио без предобработки
+            all_features = self.feature_extractor.extract_all_features(audio)
             
             # 3. Анализ симптомов
             analysis = self.symptom_analyzer.analyze(all_features)
@@ -175,8 +152,8 @@ class ParkinsonAnalyzer:
             dsi_result = self._calculate_dsi(all_features)
             
             # 5. Получение визуализаций
-            waveform_data = self.audio_processor.get_waveform(audio_cleaned)
-            freqs, times, spectrogram = self.audio_processor.get_spectrogram(audio_cleaned, sr)
+            waveform_data = self.audio_processor.get_waveform(audio)
+            freqs, times, spectrogram = self.audio_processor.get_spectrogram(audio, sr)
             
             # Сохранение сырых данных визуализаций
             if should_save_raw and result_dir:
@@ -215,14 +192,6 @@ class ParkinsonAnalyzer:
                         raw_data_paths['spectrogram_meta'] = spectrogram_meta_file
                         logger.info(f"✅ Сохранены метаданные спектрограммы: {spectrogram_meta_file}")
                     
-                    # Сохраняем сырые признаки сегментов
-                    if raw_segment_features:
-                        segment_features_file = os.path.join(result_dir, "segment_features.json")
-                        with open(segment_features_file, 'w', encoding='utf-8') as f:
-                            json_lib.dump(raw_segment_features, f, ensure_ascii=False, indent=2)
-                        if os.path.exists(segment_features_file):
-                            raw_data_paths['segment_features'] = segment_features_file
-                            logger.info(f"✅ Сохранены признаки сегментов: {segment_features_file}")
                 except Exception as e:
                     logger.error(f"⚠️  Ошибка при сохранении данных визуализаций: {e}")
                     import traceback
@@ -230,7 +199,7 @@ class ParkinsonAnalyzer:
             
             # Генерация base64 визуализаций (опционально)
             try:
-                waveform_base64 = self._generate_waveform_base64(audio_cleaned, sr)
+                waveform_base64 = self._generate_waveform_base64(audio, sr)
                 spectrogram_base64 = self._generate_spectrogram_base64(freqs, times, spectrogram)
             except:
                 waveform_base64 = None
@@ -258,7 +227,7 @@ class ParkinsonAnalyzer:
                 "audio_summary": {
                     "duration_sec": round(len(audio) / sr, 2),
                     "sample_rate": sr,
-                    "segments": len(segments)
+                    "segments": 1
                 },
                 "features": {
                     "jitter_percent": round(all_features.get('jitter_percent', 0.0), 2),
@@ -302,15 +271,9 @@ class ParkinsonAnalyzer:
                     # Проверяем, что файлы действительно существуют
                     existing_files = {}
                     for key, path in raw_data_paths.items():
-                        if key == 'segments':
-                            # Для сегментов проверяем каждый файл
-                            existing_segments = [p for p in path if os.path.exists(p)]
-                            if existing_segments:
-                                existing_files['segments'] = existing_segments
-                        else:
-                            # Для остальных файлов проверяем существование
-                            if os.path.exists(path):
-                                existing_files[key] = path
+                        # Для всех файлов проверяем существование
+                        if os.path.exists(path):
+                            existing_files[key] = path
                     
                     if existing_files:
                         result['raw_data'] = {
@@ -319,8 +282,6 @@ class ParkinsonAnalyzer:
                             'files': existing_files
                         }
                         saved_files = list(existing_files.keys())
-                        if 'segments' in existing_files:
-                            saved_files.append(f"segments ({len(existing_files['segments'])} файлов)")
                         logger.info(f"✅ Сырые данные сохранены в: {result_dir}")
                         logger.info(f"   Сохраненные файлы: {', '.join(saved_files)}")
                     else:
@@ -331,6 +292,9 @@ class ParkinsonAnalyzer:
                     logger.warning(f"   Отладка: result_dir={result_dir}, should_save_raw={should_save_raw}")
                     if not result_dir:
                         logger.error(f"   ОШИБКА: result_dir не создан! Проверьте права доступа к директории {self.raw_data_dir}")
+            
+            # Очистка результата от недопустимых значений (inf, nan) перед возвратом
+            result = self._clean_json_values(result)
             
             return result
         
@@ -399,15 +363,32 @@ class ParkinsonAnalyzer:
         """Добавление информации о DSI в отчет"""
         updated_report = report.copy()
         
-        if dsi_result.get('dsi_score') is not None:
-            dsi_score = dsi_result['dsi_score']
-            dsi_range = dsi_result['dsi_range']
+        dsi_score = dsi_result.get('dsi_score')
+        
+        # Проверяем, что dsi_score не None и не nan/inf
+        if dsi_score is not None:
+            # Дополнительная проверка на nan и inf
+            try:
+                dsi_score_float = float(dsi_score)
+                if math.isnan(dsi_score_float) or math.isinf(dsi_score_float):
+                    # Если значение недопустимое, показываем ошибку
+                    error_msg = dsi_result.get('error', 'Недопустимое значение DSI (nan/inf)')
+                    updated_report.append(f"\nDSI: {error_msg}")
+                    return updated_report
+            except (ValueError, TypeError):
+                # Если не удалось конвертировать, показываем ошибку
+                error_msg = dsi_result.get('error', 'Некорректное значение DSI')
+                updated_report.append(f"\nDSI: {error_msg}")
+                return updated_report
+            
+            # Если значение валидное, показываем нормальный отчет
+            dsi_range = dsi_result.get('dsi_range', 'N/A')
             breakdown = dsi_result.get('dsi_breakdown', {})
             interpretation = dsi_result.get('interpretation', {})
             
             dsi_info = [
                 f"\n=== DSI (Dysphonia Severity Index) ===",
-                f"DSI Score: {dsi_score} ({dsi_range})",
+                f"DSI Score: {dsi_score:.2f} ({dsi_range})",
                 f"Параметры:",
                 f"  - MPT: {breakdown.get('mpt_sec', 0):.2f}с ({interpretation.get('mpt_status', 'N/A')})",
                 f"  - F0-High: {breakdown.get('f0_high_hz', 0):.1f} Гц ({interpretation.get('f0_high_status', 'N/A')})",
@@ -418,7 +399,15 @@ class ParkinsonAnalyzer:
             ]
             updated_report.extend(dsi_info)
         elif dsi_result.get('error'):
-            updated_report.append(f"\nDSI: {dsi_result.get('error', 'Не удалось рассчитать')}")
+            error_msg = dsi_result.get('error', 'Не удалось рассчитать')
+            updated_report.append(f"\nDSI: {error_msg}")
+            # Показываем параметры для отладки
+            breakdown = dsi_result.get('dsi_breakdown', {})
+            if breakdown:
+                updated_report.append(f"  Параметры: MPT={breakdown.get('mpt_sec', 0):.2f}с, "
+                                    f"F0-High={breakdown.get('f0_high_hz', 0):.1f}Гц, "
+                                    f"I-Low={breakdown.get('i_low_db', 0):.1f}дБ, "
+                                    f"Jitter={breakdown.get('jitter_percent', 0):.2f}%")
         
         return updated_report
     
@@ -447,8 +436,44 @@ class ParkinsonAnalyzer:
             i_low_db = features.get('i_low_db', 0.0)
             jitter_percent = features.get('jitter_percent', 0.0)
             
-            # Проверка наличия всех параметров
-            if mpt_sec == 0.0 or f0_high_hz == 0.0 or i_low_db == 0.0:
+            # Конвертация в float и проверка на недопустимые значения
+            try:
+                mpt_sec = float(mpt_sec) if mpt_sec is not None else 0.0
+                f0_high_hz = float(f0_high_hz) if f0_high_hz is not None else 0.0
+                i_low_db = float(i_low_db) if i_low_db is not None else 0.0
+                jitter_percent = float(jitter_percent) if jitter_percent is not None else 0.0
+            except (ValueError, TypeError):
+                return {
+                    "dsi_score": None,
+                    "dsi_range": "Ошибка конвертации параметров DSI",
+                    "dsi_breakdown": {
+                        "mpt_sec": 0.0,
+                        "f0_high_hz": 0.0,
+                        "i_low_db": 0.0,
+                        "jitter_percent": 0.0
+                    },
+                    "error": "Некорректные типы параметров для расчета DSI"
+                }
+            
+            # Проверка на недопустимые значения (nan, inf, -inf)
+            if (math.isnan(mpt_sec) or math.isinf(mpt_sec) or
+                math.isnan(f0_high_hz) or math.isinf(f0_high_hz) or
+                math.isnan(i_low_db) or math.isinf(i_low_db) or
+                math.isnan(jitter_percent) or math.isinf(jitter_percent)):
+                return {
+                    "dsi_score": None,
+                    "dsi_range": "Недопустимые значения параметров DSI",
+                    "dsi_breakdown": {
+                        "mpt_sec": round(mpt_sec, 2) if not (math.isnan(mpt_sec) or math.isinf(mpt_sec)) else 0.0,
+                        "f0_high_hz": round(f0_high_hz, 1) if not (math.isnan(f0_high_hz) or math.isinf(f0_high_hz)) else 0.0,
+                        "i_low_db": round(i_low_db, 1) if not (math.isnan(i_low_db) or math.isinf(i_low_db)) else 0.0,
+                        "jitter_percent": round(jitter_percent, 2) if not (math.isnan(jitter_percent) or math.isinf(jitter_percent)) else 0.0
+                    },
+                    "error": "Обнаружены недопустимые значения (nan/inf) в параметрах DSI"
+                }
+            
+            # Проверка наличия всех параметров (должны быть > 0)
+            if mpt_sec <= 0.0 or f0_high_hz <= 0.0 or i_low_db <= 0.0:
                 return {
                     "dsi_score": None,
                     "dsi_range": "Недостаточно данных для расчета DSI",
@@ -458,7 +483,7 @@ class ParkinsonAnalyzer:
                         "i_low_db": round(i_low_db, 1),
                         "jitter_percent": round(jitter_percent, 2)
                     },
-                    "error": "Отсутствуют необходимые параметры для расчета DSI"
+                    "error": "Отсутствуют необходимые параметры для расчета DSI (один или несколько параметров равны 0)"
                 }
             
             # Расчет DSI по формуле
@@ -468,7 +493,21 @@ class ParkinsonAnalyzer:
                         1.18 * jitter_percent + 
                         12.4)
             
-            # Интерпретация DSI
+            # Проверка результата на недопустимые значения
+            if math.isnan(dsi_score) or math.isinf(dsi_score):
+                return {
+                    "dsi_score": None,
+                    "dsi_range": "Ошибка расчета DSI",
+                    "dsi_breakdown": {
+                        "mpt_sec": round(mpt_sec, 2),
+                        "f0_high_hz": round(f0_high_hz, 1),
+                        "i_low_db": round(i_low_db, 1),
+                        "jitter_percent": round(jitter_percent, 2)
+                    },
+                    "error": f"Результат расчета DSI недопустим (nan/inf). Параметры: MPT={mpt_sec:.2f}, F0-High={f0_high_hz:.1f}, I-Low={i_low_db:.1f}, Jitter={jitter_percent:.2f}%"
+                }
+            
+            # Интерпретация DSI (только если значение валидное)
             if dsi_score >= 2.0:
                 dsi_range = "Нормальный голос"
                 pd_risk_note = "Низкий риск ПД"
@@ -493,8 +532,12 @@ class ParkinsonAnalyzer:
                 },
                 "interpretation": {
                     "mpt_status": "Низкий" if mpt_sec < 10 else "Нормальный" if mpt_sec >= 15 else "Снижен",
-                    "f0_high_status": "Низкий" if f0_high_hz < 300 else "Нормальный" if f0_high_hz >= 400 else "Снижен",
-                    "i_low_status": "Повышен" if i_low_db > 55 else "Нормальный" if i_low_db < 45 else "Повышен",
+                    # F0-High: норма для мужчин 150-300 Гц, для женщин 250-500 Гц
+                    # Используем более широкий диапазон: <250 Гц - низкий, >=400 Гц - нормальный
+                    "f0_high_status": "Низкий" if f0_high_hz < 250 else "Нормальный" if f0_high_hz >= 400 else "Снижен",
+                    # I-Low: норма <45 дБ, повышен >55 дБ, пограничный 45-55 дБ
+                    "i_low_status": "Повышен" if i_low_db > 55 else "Нормальный" if i_low_db <= 45 else "Пограничный",
+                    # Jitter: норма <1.0%, повышен 1.0-1.5%, высокий >1.5%
                     "jitter_status": "Высокий" if jitter_percent > 1.5 else "Нормальный" if jitter_percent < 1.0 else "Повышен",
                     "pd_risk_note": pd_risk_note
                 },
@@ -600,7 +643,9 @@ class ParkinsonAnalyzer:
             JSON строка с результатами анализа
         """
         result = self.analyze_audio_file(file_path)
-        return json.dumps(result, ensure_ascii=False, indent=2)
+        # Результат уже очищен в analyze_audio_file, но дополнительно проверяем перед сериализацией
+        cleaned_result = self._clean_json_values(result)
+        return json.dumps(cleaned_result, ensure_ascii=False, indent=2)
 
 
 def main():

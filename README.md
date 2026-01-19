@@ -133,6 +133,36 @@ python parkinson_analyzer.py audio_file.wav
 python parkinson_analyzer.py audio_file.wav -o report.json
 ```
 
+### Локальное тестирование с отправкой на сервер:
+
+Для тестирования обработки аудио с автоматической отправкой результатов на API сервер используйте скрипт `test_local.py`:
+
+```bash
+# Базовое использование
+python test_local.py audio.wav
+
+# С указанием URL сервера
+python test_local.py audio.wav --api-url http://localhost:5000
+
+# Только локальная обработка (без отправки на сервер)
+python test_local.py audio.wav --no-send
+
+# С сохранением результата в файл
+python test_local.py audio.wav --output result.json
+```
+
+**Windows:**
+```cmd
+TEST_LOCAL.bat audio.wav
+```
+
+**Linux/Mac:**
+```bash
+./TEST_LOCAL.sh audio.wav
+```
+
+Подробная документация: [TEST_LOCAL_README.md](TEST_LOCAL_README.md)
+
 ### 4. Программное использование:
 
 ```python

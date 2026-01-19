@@ -4,11 +4,13 @@ API сервер для сохранения и получения резуль�
 import os
 import json
 import csv
+import math
 from datetime import datetime
-from typing import List, Dict
+from typing import List, Dict, Any
 from flask import Flask, request, jsonify, send_from_directory, Response
 from flask_cors import CORS
 import logging
+import numpy as np
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -52,6 +54,44 @@ def load_results() -> List[Dict]:
         return []
 
 
+def clean_json_values(obj: Any) -> Any:
+    """
+    Рекурсивная очистка значений от inf, -inf и NaN для JSON сериализации
+    
+    Args:
+        obj: Объект для очистки (dict, list, или примитив)
+    
+    Returns:
+        Очищенный объект с заменой недопустимых значений на None или 0.0
+    """
+    if isinstance(obj, dict):
+        return {key: clean_json_values(value) for key, value in obj.items()}
+    elif isinstance(obj, list):
+        return [clean_json_values(item) for item in obj]
+    elif isinstance(obj, (float, np.floating)):
+        # Проверяем на inf, -inf и nan
+        if math.isinf(obj) or math.isnan(obj):
+            logger.warning(f"Обнаружено недопустимое значение float: {obj}, заменяю на 0.0")
+            return 0.0
+        # Проверяем на очень большие числа, которые могут вызвать проблемы
+        if abs(obj) > 1e10:
+            logger.warning(f"Обнаружено очень большое значение: {obj}, ограничиваю до 1e10")
+            return 1e10 if obj > 0 else -1e10
+        return float(obj)
+    elif isinstance(obj, (int, np.integer)):
+        # Проверяем на очень большие целые числа
+        if abs(obj) > 2**31 - 1:  # Максимальное значение для JSON int
+            logger.warning(f"Обнаружено очень большое целое: {obj}, конвертирую в float")
+            return float(obj)
+        return int(obj)
+    elif isinstance(obj, np.ndarray):
+        # Конвертируем numpy массивы в списки
+        return clean_json_values(obj.tolist())
+    else:
+        # Для остальных типов (str, None, bool) возвращаем как есть
+        return obj
+
+
 def save_results(results: List[Dict]):
     """Сохранение результатов в файл"""
     try:
@@ -59,8 +99,11 @@ def save_results(results: List[Dict]):
         file_path = os.path.abspath(RESULTS_FILE)
         logger.info(f"Сохранение результатов в файл: {file_path} (количество записей: {len(results)})")
         
+        # Очищаем результаты от недопустимых значений перед сохранением
+        cleaned_results = clean_json_values(results)
+        
         with open(RESULTS_FILE, 'w', encoding='utf-8') as f:
-            json.dump(results, f, ensure_ascii=False, indent=2)
+            json.dump(cleaned_results, f, ensure_ascii=False, indent=2)
         
         # Проверяем, что файл создан
         if os.path.exists(RESULTS_FILE):
@@ -114,8 +157,10 @@ def analyze_audio():
             }
             
             # Сохранение результата
+            # Результат уже очищен в parkinson_analyzer, но дополнительно проверяем
+            cleaned_result = clean_json_values(result)
             results = load_results()
-            results.append(result)
+            results.append(cleaned_result)
             save_results(results)
             
             # Проверяем наличие сырых данных в результате
@@ -158,8 +203,11 @@ def save_result():
         results = load_results()
         logger.info(f"Загружено существующих результатов: {len(results)}")
         
+        # Очистка данных от недопустимых значений перед добавлением
+        cleaned_data = clean_json_values(data)
+        
         # Добавление нового результата
-        results.append(data)
+        results.append(cleaned_data)
         logger.info(f"Добавлен новый результат. Всего результатов: {len(results)}")
         
         # Сохранение
@@ -221,6 +269,302 @@ def get_result(index: int):
         return jsonify({"error": str(e)}), 500
 
 
+@app.route('/api/visualization/<int:index>', methods=['GET'])
+def get_visualization_data(index: int):
+    """Получение данных для визуализации параметров"""
+    try:
+        results = load_results()
+        
+        if index < 0 or index >= len(results):
+            return jsonify({"error": "Индекс вне диапазона"}), 404
+        
+        result = results[index]
+        
+        # Проверяем наличие сырых данных
+        raw_data = result.get('raw_data', {})
+        if not raw_data:
+            return jsonify({"error": "Сырые данные не найдены для этого результата"}), 404
+        
+        data_directory = raw_data.get('data_directory')
+        if not data_directory or not os.path.exists(data_directory):
+            return jsonify({"error": "Директория с сырыми данными не найдена"}), 404
+        
+        # Загрузка waveform данных
+        waveform_data = None
+        waveform_file = raw_data.get('files', {}).get('waveform_data')
+        if waveform_file and os.path.exists(waveform_file):
+            try:
+                with open(waveform_file, 'r', encoding='utf-8') as f:
+                    waveform_data = json.load(f)
+                # Очистка от NaN
+                waveform_data = clean_json_values(waveform_data) if waveform_data else None
+            except Exception as e:
+                logger.warning(f"Ошибка загрузки waveform данных: {e}")
+        
+        # Загрузка данных сегментов
+        segments_data = []
+        segment_features_file = raw_data.get('files', {}).get('segment_features')
+        if segment_features_file and os.path.exists(segment_features_file):
+            try:
+                with open(segment_features_file, 'r', encoding='utf-8') as f:
+                    segments_data = json.load(f)
+                # Очистка от NaN
+                segments_data = clean_json_values(segments_data) if segments_data else []
+            except Exception as e:
+                logger.warning(f"Ошибка загрузки данных сегментов: {e}")
+        
+        # Загрузка метаданных спектрограммы
+        spectrogram_meta = None
+        spectrogram_meta_file = raw_data.get('files', {}).get('spectrogram_meta')
+        if spectrogram_meta_file and os.path.exists(spectrogram_meta_file):
+            try:
+                with open(spectrogram_meta_file, 'r', encoding='utf-8') as f:
+                    spectrogram_meta = json.load(f)
+            except Exception as e:
+                logger.warning(f"Ошибка загрузки метаданных спектрограммы: {e}")
+        
+        # Получение пути к обработанному аудио
+        audio_url = None
+        processed_audio = raw_data.get('files', {}).get('processed_audio')
+        if processed_audio and os.path.exists(processed_audio):
+            # Возвращаем относительный путь для доступа через статический сервер
+            audio_url = f"/api/audio/{index}"
+        else:
+            # Пробуем исходный файл
+            original_audio = raw_data.get('files', {}).get('original_audio')
+            if original_audio and os.path.exists(original_audio):
+                audio_url = f"/api/audio/{index}"
+        
+        # Вычисление F0 данных из аудио (если доступно)
+        f0_data = None
+        intensity_data = None
+        spectrogram_data = None
+        
+        # Используем обработанное аудио, если доступно, иначе исходное
+        audio_file_for_f0 = None
+        if processed_audio and os.path.exists(processed_audio):
+            audio_file_for_f0 = processed_audio
+        else:
+            original_audio = raw_data.get('files', {}).get('original_audio')
+            if original_audio and os.path.exists(original_audio):
+                audio_file_for_f0 = original_audio
+        
+        if audio_file_for_f0:
+            try:
+                from audio_processor import AudioProcessor
+                from feature_extractor import FeatureExtractor
+                import librosa
+                import numpy as np
+                
+                audio_processor = AudioProcessor(target_sr=16000)
+                feature_extractor = FeatureExtractor(sample_rate=16000)
+                
+                # Загрузка аудио
+                audio, sr = audio_processor.load_audio(audio_file_for_f0)
+                
+                # Извлечение F0
+                try:
+                    import parselmouth
+                    audio_normalized = audio / (np.max(np.abs(audio)) + 1e-10)
+                    sound = parselmouth.Sound(audio_normalized, sampling_frequency=sr)
+                    pitch = sound.to_pitch_ac(time_step=0.01)
+                    
+                    f0_times = pitch.xs()
+                    f0_values = pitch.selected_array['frequency']
+                    
+                    # Фильтруем валидные значения (исключаем NaN и inf)
+                    valid_indices = (f0_values > 0) & np.isfinite(f0_values)
+                    if np.any(valid_indices):
+                        f0_times_valid = f0_times[valid_indices]
+                        f0_values_valid = f0_values[valid_indices]
+                        f0_mean = float(np.mean(f0_values_valid))
+                        # Проверяем на NaN и inf
+                        if not (math.isnan(f0_mean) or math.isinf(f0_mean)):
+                            f0_data = {
+                                'time': [float(t) for t in f0_times_valid if np.isfinite(t)],
+                                'values': [float(v) for v in f0_values_valid if np.isfinite(v)],
+                                'mean': f0_mean
+                            }
+                        else:
+                            f0_data = None
+                    else:
+                        f0_data = None
+                except Exception as e:
+                    logger.warning(f"Ошибка извлечения F0 через parselmouth: {e}")
+                    # Fallback на librosa
+                    f0 = librosa.pyin(audio, fmin=50, fmax=500)
+                    f0_times = librosa.frames_to_time(np.arange(len(f0[0])), sr=sr)
+                    valid_indices = ~np.isnan(f0[0]) & np.isfinite(f0[0])
+                    if np.any(valid_indices):
+                        f0_values_valid = f0[0][valid_indices]
+                        f0_times_valid = f0_times[valid_indices]
+                        f0_mean = float(np.mean(f0_values_valid))
+                        # Проверяем на NaN и inf
+                        if not (math.isnan(f0_mean) or math.isinf(f0_mean)):
+                            f0_data = {
+                                'time': [float(t) for t in f0_times_valid if np.isfinite(t)],
+                                'values': [float(v) for v in f0_values_valid if np.isfinite(v)],
+                                'mean': f0_mean
+                            }
+                        else:
+                            f0_data = None
+                    else:
+                        f0_data = None
+                
+                # Извлечение интенсивности
+                try:
+                    import parselmouth
+                    audio_normalized = audio / (np.max(np.abs(audio)) + 1e-10)
+                    sound = parselmouth.Sound(audio_normalized, sampling_frequency=sr)
+                    intensity = sound.to_intensity(time_step=0.01)
+                    intensity_times = intensity.xs()
+                    intensity_values = intensity.values[0]
+                    
+                    # Фильтруем NaN и inf значения
+                    valid_indices = np.isfinite(intensity_values)
+                    if np.any(valid_indices):
+                        intensity_data = {
+                            'time': [float(t) for t in intensity_times if np.isfinite(t)],
+                            'values': [float(v) for v in intensity_values[valid_indices] if np.isfinite(v)]
+                        }
+                    else:
+                        intensity_data = None
+                except Exception as e:
+                    logger.warning(f"Ошибка извлечения интенсивности: {e}")
+                    # Fallback через RMS
+                    frame_length = int(0.025 * sr)
+                    hop_length = int(0.010 * sr)
+                    rms = librosa.feature.rms(y=audio, frame_length=frame_length, hop_length=hop_length)[0]
+                    rms_times = librosa.frames_to_time(np.arange(len(rms)), sr=sr, hop_length=hop_length)
+                    # Конвертация в dB
+                    rms_db = 20 * np.log10(rms + 1e-10)
+                    # Фильтруем NaN и inf значения
+                    valid_indices = np.isfinite(rms_db)
+                    if np.any(valid_indices):
+                        intensity_data = {
+                            'time': [float(t) for t in rms_times if np.isfinite(t)],
+                            'values': [float(v) for v in rms_db[valid_indices] if np.isfinite(v)]
+                        }
+                    else:
+                        intensity_data = None
+                
+                # Извлечение спектрограммы
+                freqs, times, spectrogram = audio_processor.get_spectrogram(audio, sr)
+                # Ограничиваем частоты до 5kHz для визуализации
+                freq_mask = freqs <= 5000
+                freqs_filtered = freqs[freq_mask]
+                spectrogram_filtered = spectrogram[freq_mask, :]
+                
+                # Очистка от NaN и inf
+                # Фильтруем частоты
+                freq_valid = [float(f) for f in freqs_filtered if np.isfinite(f)]
+                # Фильтруем времена
+                times_valid = [float(t) for t in times if np.isfinite(t)]
+                # Фильтруем magnitude (заменяем NaN и inf на -80 dB)
+                magnitude_cleaned = []
+                for row in spectrogram_filtered:
+                    cleaned_row = []
+                    for val in row:
+                        if np.isfinite(val):
+                            cleaned_row.append(float(val))
+                        else:
+                            cleaned_row.append(-80.0)  # Минимальное значение для визуализации
+                    magnitude_cleaned.append(cleaned_row)
+                
+                spectrogram_data = {
+                    'frequencies': freq_valid,
+                    'times': times_valid,
+                    'magnitude': magnitude_cleaned
+                }
+                
+            except Exception as e:
+                logger.error(f"Ошибка обработки аудио для визуализации: {e}")
+                import traceback
+                traceback.print_exc()
+        
+        # Подготовка данных сегментов с временными метками
+        segments_with_time = []
+        if segments_data:
+            current_time = 0
+            for seg_data in segments_data:
+                duration = seg_data.get('duration_sec', 0)
+                # Очищаем features от NaN
+                features = seg_data.get('features', {})
+                cleaned_features = clean_json_values(features) if features else {}
+                
+                segments_with_time.append({
+                    'segment_index': seg_data.get('segment_index', len(segments_with_time)),
+                    'start_time': float(current_time) if np.isfinite(current_time) else 0.0,
+                    'end_time': float(current_time + duration) if np.isfinite(current_time + duration) else 0.0,
+                    'duration_sec': float(duration) if np.isfinite(duration) else 0.0,
+                    'features': cleaned_features
+                })
+                current_time += duration + 0.1  # Небольшая пауза между сегментами
+        
+        # Формирование ответа
+        visualization_data = {
+            'waveform': waveform_data or {},
+            'f0_data': f0_data or {},
+            'intensity': intensity_data or {},
+            'spectrogram': spectrogram_data or {},
+            'segments': segments_with_time,
+            'audio_url': audio_url,
+            'spectrogram_meta': spectrogram_meta or {}
+        }
+        
+        # Очистка данных от NaN и inf перед отправкой
+        cleaned_data = clean_json_values(visualization_data)
+        
+        return jsonify(cleaned_data), 200
+        
+    except Exception as e:
+        logger.error(f"Ошибка получения данных визуализации: {e}", exc_info=True)
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route('/api/audio/<int:index>', methods=['GET'])
+def get_audio_file(index: int):
+    """Получение аудиофайла для воспроизведения"""
+    try:
+        results = load_results()
+        
+        if index < 0 or index >= len(results):
+            return jsonify({"error": "Индекс вне диапазона"}), 404
+        
+        result = results[index]
+        raw_data = result.get('raw_data', {})
+        
+        if not raw_data:
+            return jsonify({"error": "Сырые данные не найдены"}), 404
+        
+        # Пробуем обработанный аудио
+        processed_audio = raw_data.get('files', {}).get('processed_audio')
+        if processed_audio and os.path.exists(processed_audio):
+            return send_from_directory(os.path.dirname(processed_audio), 
+                                     os.path.basename(processed_audio),
+                                     mimetype='audio/wav')
+        
+        # Пробуем исходный файл
+        original_audio = raw_data.get('files', {}).get('original_audio')
+        if original_audio and os.path.exists(original_audio):
+            ext = os.path.splitext(original_audio)[1].lower()
+            mimetype_map = {
+                '.wav': 'audio/wav',
+                '.ogg': 'audio/ogg',
+                '.mp3': 'audio/mpeg'
+            }
+            mimetype = mimetype_map.get(ext, 'audio/wav')
+            return send_from_directory(os.path.dirname(original_audio),
+                                     os.path.basename(original_audio),
+                                     mimetype=mimetype)
+        
+        return jsonify({"error": "Аудиофайл не найден"}), 404
+        
+    except Exception as e:
+        logger.error(f"Ошибка получения аудиофайла: {e}")
+        return jsonify({"error": str(e)}), 500
+
+
 @app.route('/api/stats', methods=['GET'])
 def get_stats():
     """Получение статистики"""
@@ -258,6 +602,12 @@ def is_recent(result: Dict, days: int = 7) -> bool:
 def index():
     """Главная страница - отдача index.html"""
     return send_from_directory('.', 'index.html')
+
+
+@app.route('/visualization')
+def visualization():
+    """Страница визуализации параметров"""
+    return send_from_directory('.', 'visualization.html')
 
 
 @app.route('/api/export/csv', methods=['GET'])

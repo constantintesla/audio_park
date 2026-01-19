@@ -1,0 +1,1034 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Визуализация параметров анализа голоса</title>
+    
+    <!-- Chart.js для графиков -->
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-zoom@2.0.1/dist/chartjs-plugin-zoom.min.js"></script>
+    
+    <!-- Wavesurfer.js для аудио -->
+    <script src="https://cdn.jsdelivr.net/npm/wavesurfer.js@7/dist/wavesurfer.min.js"></script>
+    
+    <style>
+        :root {
+            --medical-blue: #2c5f8d;
+            --medical-light-blue: #4a90c2;
+            --medical-grey: #6c757d;
+            --medical-light-grey: #e9ecef;
+            --risk-high: #dc3545;
+            --risk-medium: #ffc107;
+            --risk-low: #28a745;
+        }
+        
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background: linear-gradient(135deg, #f5f7fa 0%, #e9ecef 100%);
+            min-height: 100vh;
+            padding: 20px;
+        }
+        
+        .container {
+            max-width: 1400px;
+            margin: 0 auto;
+        }
+        
+        .header {
+            background: linear-gradient(135deg, var(--medical-blue) 0%, var(--medical-light-blue) 100%);
+            color: white;
+            padding: 30px;
+            border-radius: 15px;
+            margin-bottom: 30px;
+            box-shadow: 0 4px 6px rgba(0,0,0,0.1);
+        }
+        
+        .header h1 {
+            margin: 0;
+            font-size: 2rem;
+            font-weight: 600;
+        }
+        
+        .header p {
+            margin: 10px 0 0 0;
+            opacity: 0.9;
+        }
+        
+        .controls {
+            background: white;
+            padding: 20px;
+            border-radius: 15px;
+            margin-bottom: 20px;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+        }
+        
+        .controls select, .controls input {
+            padding: 10px;
+            border: 2px solid var(--medical-light-grey);
+            border-radius: 8px;
+            font-size: 1rem;
+            margin-right: 10px;
+            margin-bottom: 10px;
+        }
+        
+        .controls button {
+            background: var(--medical-blue);
+            color: white;
+            border: none;
+            padding: 10px 20px;
+            border-radius: 8px;
+            font-size: 1rem;
+            cursor: pointer;
+            transition: background 0.3s;
+        }
+        
+        .controls button:hover {
+            background: var(--medical-light-blue);
+        }
+        
+        .card {
+            background: white;
+            border-radius: 15px;
+            padding: 20px;
+            margin-bottom: 20px;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+        }
+        
+        .card-header {
+            font-size: 1.3rem;
+            font-weight: 600;
+            color: var(--medical-blue);
+            margin-bottom: 15px;
+            padding-bottom: 10px;
+            border-bottom: 2px solid var(--medical-light-grey);
+        }
+        
+        .audio-player {
+            margin-bottom: 20px;
+        }
+        
+        .waveform-container {
+            background: #f8f9fa;
+            border-radius: 10px;
+            padding: 15px;
+            margin-bottom: 20px;
+        }
+        
+        .chart-container {
+            position: relative;
+            height: 300px;
+            margin-bottom: 20px;
+        }
+        
+        .chart-container.tall {
+            height: 400px;
+        }
+        
+        .parameter-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+            gap: 15px;
+            margin-bottom: 20px;
+        }
+        
+        .parameter-card {
+            background: linear-gradient(135deg, #f8f9fa 0%, #e9ecef 100%);
+            padding: 15px;
+            border-radius: 10px;
+            border-left: 4px solid var(--medical-blue);
+        }
+        
+        .parameter-card h4 {
+            font-size: 0.9rem;
+            color: var(--medical-grey);
+            margin-bottom: 5px;
+        }
+        
+        .parameter-card .value {
+            font-size: 1.5rem;
+            font-weight: 600;
+            color: var(--medical-blue);
+        }
+        
+        .parameter-card .unit {
+            font-size: 0.9rem;
+            color: var(--medical-grey);
+            margin-left: 5px;
+        }
+        
+        .parameter-card .description {
+            font-size: 0.85rem;
+            color: var(--medical-grey);
+            margin-top: 5px;
+        }
+        
+        .segment-list {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+            gap: 10px;
+        }
+        
+        .segment-item {
+            background: #f8f9fa;
+            padding: 10px;
+            border-radius: 8px;
+            border: 2px solid transparent;
+            cursor: pointer;
+            transition: all 0.3s;
+        }
+        
+        .segment-item:hover {
+            border-color: var(--medical-blue);
+            background: #e9ecef;
+        }
+        
+        .segment-item.active {
+            border-color: var(--medical-blue);
+            background: var(--medical-light-grey);
+        }
+        
+        .loading {
+            text-align: center;
+            padding: 40px;
+            color: var(--medical-grey);
+        }
+        
+        .error {
+            background: #f8d7da;
+            color: #721c24;
+            padding: 15px;
+            border-radius: 8px;
+            margin-bottom: 20px;
+        }
+        
+        .info-box {
+            background: #d1ecf1;
+            color: #0c5460;
+            padding: 15px;
+            border-radius: 8px;
+            margin-bottom: 20px;
+            border-left: 4px solid #17a2b8;
+        }
+        
+        .legend {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 15px;
+            margin-top: 10px;
+        }
+        
+        .legend-item {
+            display: flex;
+            align-items: center;
+            gap: 5px;
+        }
+        
+        .legend-color {
+            width: 20px;
+            height: 20px;
+            border-radius: 4px;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h1>🎯 Визуализация параметров анализа голоса</h1>
+            <p>Интерактивная визуализация извлеченных параметров с привязкой к аудиозаписи</p>
+        </div>
+        
+        <div class="controls">
+            <label for="result-select">Выберите результат анализа:</label>
+            <select id="result-select">
+                <option value="">Загрузка...</option>
+            </select>
+            <button onclick="loadVisualization()">Загрузить визуализацию</button>
+            <button onclick="syncAllCharts()">Синхронизировать графики</button>
+        </div>
+        
+        <div id="error-container"></div>
+        <div id="loading" class="loading" style="display: none;">
+            <p>Загрузка данных...</p>
+        </div>
+        
+        <div id="content" style="display: none;">
+            <!-- Параметры -->
+            <div class="card">
+                <div class="card-header">📊 Извлеченные параметры</div>
+                <div class="parameter-grid" id="parameters-grid"></div>
+            </div>
+            
+            <!-- Аудио плеер -->
+            <div class="card">
+                <div class="card-header">🎵 Аудиозапись</div>
+                <div class="audio-player">
+                    <div class="waveform-container">
+                        <div id="waveform"></div>
+                    </div>
+                    <div style="text-align: center; margin-top: 10px;">
+                        <button onclick="wavesurfer.playPause()">▶️ Воспроизвести / ⏸️ Пауза</button>
+                        <button onclick="wavesurfer.stop()">⏹️ Стоп</button>
+                    </div>
+                </div>
+            </div>
+            
+            <!-- Waveform -->
+            <div class="card">
+                <div class="card-header">📈 Волновая форма (Waveform)</div>
+                <div class="info-box">
+                    <strong>Описание:</strong> Волновая форма показывает изменение амплитуды сигнала во времени. 
+                    Отсюда извлекаются параметры <strong>Shimmer</strong> (вариация амплитуды) и <strong>I-Low</strong> (низшая интенсивность).
+                </div>
+                <div class="chart-container">
+                    <canvas id="waveform-chart"></canvas>
+                </div>
+            </div>
+            
+            <!-- F0 (Pitch) -->
+            <div class="card">
+                <div class="card-header">🎵 Основная частота (F0 / Pitch)</div>
+                <div class="info-box">
+                    <strong>Описание:</strong> F0 (основная частота) показывает высоту тона голоса во времени. 
+                    Отсюда извлекаются параметры <strong>Jitter</strong> (вариация периода), <strong>F0 Mean</strong>, <strong>F0 SD</strong> и <strong>F0-High</strong>.
+                </div>
+                <div class="chart-container tall">
+                    <canvas id="f0-chart"></canvas>
+                </div>
+            </div>
+            
+            <!-- Спектрограмма -->
+            <div class="card">
+                <div class="card-header">🌈 Спектрограмма</div>
+                <div class="info-box">
+                    <strong>Описание:</strong> Спектрограмма показывает распределение энергии по частотам во времени. 
+                    Отсюда извлекается параметр <strong>HNR</strong> (отношение гармоник к шуму) и другие спектральные признаки.
+                </div>
+                <div class="chart-container tall">
+                    <canvas id="spectrogram-chart"></canvas>
+                </div>
+            </div>
+            
+            <!-- Интенсивность -->
+            <div class="card">
+                <div class="card-header">🔊 Интенсивность сигнала</div>
+                <div class="info-box">
+                    <strong>Описание:</strong> Интенсивность показывает громкость сигнала во времени. 
+                    Используется для расчета <strong>MPT</strong> (максимальное время фонации) и <strong>I-Low</strong>.
+                </div>
+                <div class="chart-container">
+                    <canvas id="intensity-chart"></canvas>
+                </div>
+            </div>
+            
+            <!-- Сегменты -->
+            <div class="card">
+                <div class="card-header">📑 Сегменты аудио</div>
+                <div class="info-box">
+                    <strong>Описание:</strong> Аудио разбито на сегменты по паузам. Каждый сегмент анализируется отдельно для оценки артикуляции.
+                </div>
+                <div class="segment-list" id="segments-list"></div>
+            </div>
+            
+            <!-- Параметры по сегментам -->
+            <div class="card">
+                <div class="card-header">📊 Параметры по сегментам</div>
+                <div class="chart-container tall">
+                    <canvas id="segments-chart"></canvas>
+                </div>
+            </div>
+        </div>
+    </div>
+    
+    <script>
+        let wavesurfer = null;
+        let charts = {};
+        let currentData = null;
+        let currentTime = 0;
+        
+        // Загрузка списка результатов
+        async function loadResults() {
+            try {
+                const response = await fetch('/api/results');
+                const data = await response.json();
+                const select = document.getElementById('result-select');
+                select.innerHTML = '<option value="">Выберите результат...</option>';
+                
+                data.results.forEach((result, index) => {
+                    const userInfo = result.user_info || {};
+                    const timestamp = userInfo.timestamp || '';
+                    const username = userInfo.tg_username || 'Unknown';
+                    const date = timestamp ? new Date(timestamp).toLocaleString('ru-RU') : `#${index}`;
+                    const option = document.createElement('option');
+                    option.value = index;
+                    option.textContent = `${date} - ${username}`;
+                    select.appendChild(option);
+                });
+            } catch (error) {
+                showError('Ошибка загрузки списка результатов: ' + error.message);
+            }
+        }
+        
+        // Загрузка визуализации
+        async function loadVisualization() {
+            const select = document.getElementById('result-select');
+            const index = select.value;
+            
+            if (!index) {
+                showError('Пожалуйста, выберите результат для визуализации');
+                return;
+            }
+            
+            document.getElementById('loading').style.display = 'block';
+            document.getElementById('content').style.display = 'none';
+            document.getElementById('error-container').innerHTML = '';
+            
+            try {
+                // Загрузка результата
+                const resultResponse = await fetch(`/api/results/${index}`);
+                const result = await resultResponse.json();
+                currentData = result;
+                
+                // Загрузка данных визуализации
+                const vizResponse = await fetch(`/api/visualization/${index}`);
+                const vizData = await vizResponse.json();
+                
+                if (vizData.error) {
+                    throw new Error(vizData.error);
+                }
+                
+                // Отображение данных
+                displayVisualization(result, vizData);
+                
+            } catch (error) {
+                showError('Ошибка загрузки визуализации: ' + error.message);
+                console.error(error);
+            } finally {
+                document.getElementById('loading').style.display = 'none';
+            }
+        }
+        
+        // Отображение визуализации
+        function displayVisualization(result, vizData) {
+            document.getElementById('content').style.display = 'block';
+            
+            // Отображение параметров
+            displayParameters(result);
+            
+            // Инициализация аудио плеера
+            if (vizData.audio_url) {
+                initAudioPlayer(vizData.audio_url);
+            } else {
+                document.querySelector('.audio-player').innerHTML = 
+                    '<div class="error">Аудиофайл недоступен</div>';
+            }
+            
+            // Создание графиков
+            if (vizData.waveform && vizData.waveform.time && vizData.waveform.amplitude) {
+                createWaveformChart(vizData.waveform);
+            }
+            
+            if (vizData.f0_data && vizData.f0_data.time && vizData.f0_data.values) {
+                createF0Chart(vizData.f0_data);
+            }
+            
+            if (vizData.spectrogram) {
+                createSpectrogramChart(vizData.spectrogram);
+            }
+            
+            if (vizData.intensity && vizData.intensity.time && vizData.intensity.values) {
+                createIntensityChart(vizData.intensity);
+            }
+            
+            if (vizData.segments && vizData.segments.length > 0) {
+                createSegmentsChart(vizData.segments);
+                displaySegments(vizData.segments);
+            }
+        }
+        
+        // Отображение параметров
+        function displayParameters(result) {
+            const grid = document.getElementById('parameters-grid');
+            grid.innerHTML = '';
+            
+            const features = result.features || {};
+            const dsi = result.dsi || {};
+            const dsiBreakdown = dsi.dsi_breakdown || {};
+            
+            const parameters = [
+                {
+                    name: 'Jitter',
+                    value: features.jitter_percent || 0,
+                    unit: '%',
+                    description: 'Вариация периода F0. Норма: <1.0%'
+                },
+                {
+                    name: 'Shimmer',
+                    value: features.shimmer_percent || 0,
+                    unit: '%',
+                    description: 'Вариация амплитуды. Норма: 2-4%'
+                },
+                {
+                    name: 'HNR',
+                    value: features.hnr_db || 0,
+                    unit: 'dB',
+                    description: 'Отношение гармоник к шуму. Норма: 20-25 dB'
+                },
+                {
+                    name: 'F0 Mean',
+                    value: features.f0_mean_hz || 0,
+                    unit: 'Hz',
+                    description: 'Средняя основная частота'
+                },
+                {
+                    name: 'F0 SD',
+                    value: features.f0_sd_hz || 0,
+                    unit: 'Hz',
+                    description: 'Стандартное отклонение F0'
+                },
+                {
+                    name: 'F0-High',
+                    value: dsiBreakdown.f0_high_hz || 0,
+                    unit: 'Hz',
+                    description: 'Высшая частота F0 (98-й перцентиль)'
+                },
+                {
+                    name: 'MPT',
+                    value: dsiBreakdown.mpt_sec || 0,
+                    unit: 'сек',
+                    description: 'Максимальное время фонации'
+                },
+                {
+                    name: 'I-Low',
+                    value: dsiBreakdown.i_low_db || 0,
+                    unit: 'dB',
+                    description: 'Низшая интенсивность (5-й перцентиль)'
+                },
+                {
+                    name: 'DSI Score',
+                    value: dsi.dsi_score || 0,
+                    unit: '',
+                    description: dsi.dsi_range || 'Dysphonia Severity Index'
+                }
+            ];
+            
+            parameters.forEach(param => {
+                const card = document.createElement('div');
+                card.className = 'parameter-card';
+                card.innerHTML = `
+                    <h4>${param.name}</h4>
+                    <div>
+                        <span class="value">${param.value.toFixed(2)}</span>
+                        <span class="unit">${param.unit}</span>
+                    </div>
+                    <div class="description">${param.description}</div>
+                `;
+                grid.appendChild(card);
+            });
+        }
+        
+        // Инициализация аудио плеера
+        function initAudioPlayer(audioUrl) {
+            if (wavesurfer) {
+                wavesurfer.destroy();
+            }
+            
+            wavesurfer = WaveSurfer.create({
+                container: '#waveform',
+                waveColor: '#2c5f8d',
+                progressColor: '#4a90c2',
+                cursorColor: '#dc3545',
+                barWidth: 2,
+                barRadius: 3,
+                responsive: true,
+                height: 100,
+                normalize: true
+            });
+            
+            wavesurfer.load(audioUrl);
+            
+            wavesurfer.on('timeupdate', (time) => {
+                currentTime = time;
+                updateChartsTime(time);
+            });
+        }
+        
+        // Создание графика waveform
+        function createWaveformChart(waveformData) {
+            const ctx = document.getElementById('waveform-chart').getContext('2d');
+            
+            if (charts.waveform) {
+                charts.waveform.destroy();
+            }
+            
+            charts.waveform = new Chart(ctx, {
+                type: 'line',
+                data: {
+                    labels: waveformData.time,
+                    datasets: [{
+                        label: 'Амплитуда',
+                        data: waveformData.amplitude,
+                        borderColor: '#2c5f8d',
+                        backgroundColor: 'rgba(44, 95, 141, 0.1)',
+                        borderWidth: 1,
+                        pointRadius: 0,
+                        tension: 0.1
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    interaction: {
+                        intersect: false,
+                        mode: 'index'
+                    },
+                    plugins: {
+                        legend: {
+                            display: true
+                        },
+                        tooltip: {
+                            enabled: true
+                        },
+                        zoom: {
+                            zoom: {
+                                wheel: {
+                                    enabled: true
+                                },
+                                pinch: {
+                                    enabled: true
+                                },
+                                mode: 'x'
+                            },
+                            pan: {
+                                enabled: true,
+                                mode: 'x'
+                            }
+                        }
+                    },
+                    scales: {
+                        x: {
+                            title: {
+                                display: true,
+                                text: 'Время (сек)'
+                            }
+                        },
+                        y: {
+                            title: {
+                                display: true,
+                                text: 'Амплитуда'
+                            }
+                        }
+                    }
+                }
+            });
+        }
+        
+        // Создание графика F0
+        function createF0Chart(f0Data) {
+            const ctx = document.getElementById('f0-chart').getContext('2d');
+            
+            if (charts.f0) {
+                charts.f0.destroy();
+            }
+            
+            const datasets = [{
+                label: 'F0 (Основная частота)',
+                data: f0Data.values.map((v, i) => ({x: f0Data.time[i], y: v})),
+                borderColor: '#28a745',
+                backgroundColor: 'rgba(40, 167, 69, 0.1)',
+                borderWidth: 2,
+                pointRadius: 0,
+                tension: 0.1
+            }];
+            
+            // Добавляем среднее значение
+            if (f0Data.mean) {
+                datasets.push({
+                    label: 'F0 Mean',
+                    data: f0Data.values.map((v, i) => ({x: f0Data.time[i], y: f0Data.mean})),
+                    borderColor: '#ffc107',
+                    borderWidth: 2,
+                    borderDash: [5, 5],
+                    pointRadius: 0
+                });
+            }
+            
+            charts.f0 = new Chart(ctx, {
+                type: 'line',
+                data: { datasets },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    interaction: {
+                        intersect: false,
+                        mode: 'index'
+                    },
+                    plugins: {
+                        legend: {
+                            display: true
+                        },
+                        tooltip: {
+                            enabled: true
+                        },
+                        zoom: {
+                            zoom: {
+                                wheel: {
+                                    enabled: true
+                                },
+                                pinch: {
+                                    enabled: true
+                                },
+                                mode: 'x'
+                            },
+                            pan: {
+                                enabled: true,
+                                mode: 'x'
+                            }
+                        }
+                    },
+                    scales: {
+                        x: {
+                            type: 'linear',
+                            title: {
+                                display: true,
+                                text: 'Время (сек)'
+                            }
+                        },
+                        y: {
+                            title: {
+                                display: true,
+                                text: 'Частота (Hz)'
+                            }
+                        }
+                    }
+                }
+            });
+        }
+        
+        // Создание спектрограммы
+        function createSpectrogramChart(spectrogramData) {
+            const ctx = document.getElementById('spectrogram-chart').getContext('2d');
+            
+            if (charts.spectrogram) {
+                charts.spectrogram.destroy();
+            }
+            
+            if (!spectrogramData || !spectrogramData.times || !spectrogramData.frequencies) {
+                ctx.fillStyle = '#999';
+                ctx.font = '16px Arial';
+                ctx.fillText('Данные спектрограммы недоступны', 10, 50);
+                return;
+            }
+            
+            // Подготовка данных для тепловой карты (упрощенная версия)
+            // Берем каждый 10-й элемент для производительности
+            const data = [];
+            const step = Math.max(1, Math.floor(spectrogramData.times.length / 500)); // Максимум 500 точек
+            for (let i = 0; i < spectrogramData.times.length; i += step) {
+                for (let j = 0; j < spectrogramData.frequencies.length; j += 5) { // Каждая 5-я частота
+                    if (spectrogramData.magnitude && 
+                        spectrogramData.magnitude[j] && 
+                        spectrogramData.magnitude[j][i] !== undefined) {
+                        const value = spectrogramData.magnitude[j][i];
+                        if (value > -80) { // Фильтр шума
+                            data.push({
+                                x: spectrogramData.times[i],
+                                y: spectrogramData.frequencies[j],
+                                v: value
+                            });
+                        }
+                    }
+                }
+            }
+            
+            if (data.length === 0) {
+                ctx.fillStyle = '#999';
+                ctx.font = '16px Arial';
+                ctx.fillText('Нет данных для отображения', 10, 50);
+                return;
+            }
+            
+            charts.spectrogram = new Chart(ctx, {
+                type: 'scatter',
+                data: {
+                    datasets: [{
+                        label: 'Спектрограмма',
+                        data: data,
+                        backgroundColor: (ctx) => {
+                            const value = ctx.raw.v;
+                            const alpha = Math.max(0, Math.min(1, (value + 80) / 80)); // Нормализация -80 до 0 dB
+                            return `rgba(44, 95, 141, ${alpha})`;
+                        },
+                        pointRadius: 2
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    plugins: {
+                        legend: {
+                            display: false
+                        },
+                        tooltip: {
+                            enabled: true,
+                            callbacks: {
+                                label: (ctx) => {
+                                    return `Время: ${ctx.raw.x.toFixed(2)}с, Частота: ${ctx.raw.y.toFixed(0)}Hz, Уровень: ${ctx.raw.v.toFixed(1)}dB`;
+                                }
+                            }
+                        },
+                        zoom: {
+                            zoom: {
+                                wheel: {
+                                    enabled: true
+                                },
+                                pinch: {
+                                    enabled: true
+                                },
+                                mode: 'xy'
+                            },
+                            pan: {
+                                enabled: true,
+                                mode: 'xy'
+                            }
+                        }
+                    },
+                    scales: {
+                        x: {
+                            type: 'linear',
+                            title: {
+                                display: true,
+                                text: 'Время (сек)'
+                            }
+                        },
+                        y: {
+                            type: 'linear',
+                            title: {
+                                display: true,
+                                text: 'Частота (Hz)'
+                            },
+                            max: 5000 // Ограничиваем до 5kHz для читаемости
+                        }
+                    }
+                }
+            });
+        }
+        
+        // Создание графика интенсивности
+        function createIntensityChart(intensityData) {
+            const ctx = document.getElementById('intensity-chart').getContext('2d');
+            
+            if (charts.intensity) {
+                charts.intensity.destroy();
+            }
+            
+            charts.intensity = new Chart(ctx, {
+                type: 'line',
+                data: {
+                    labels: intensityData.time,
+                    datasets: [{
+                        label: 'Интенсивность',
+                        data: intensityData.values,
+                        borderColor: '#dc3545',
+                        backgroundColor: 'rgba(220, 53, 69, 0.1)',
+                        borderWidth: 2,
+                        pointRadius: 0,
+                        tension: 0.1,
+                        fill: true
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    interaction: {
+                        intersect: false,
+                        mode: 'index'
+                    },
+                    plugins: {
+                        legend: {
+                            display: true
+                        },
+                        tooltip: {
+                            enabled: true
+                        },
+                        zoom: {
+                            zoom: {
+                                wheel: {
+                                    enabled: true
+                                },
+                                pinch: {
+                                    enabled: true
+                                },
+                                mode: 'x'
+                            },
+                            pan: {
+                                enabled: true,
+                                mode: 'x'
+                            }
+                        }
+                    },
+                    scales: {
+                        x: {
+                            title: {
+                                display: true,
+                                text: 'Время (сек)'
+                            }
+                        },
+                        y: {
+                            title: {
+                                display: true,
+                                text: 'Интенсивность (дБ)'
+                            }
+                        }
+                    }
+                }
+            });
+        }
+        
+        // Создание графика параметров по сегментам
+        function createSegmentsChart(segmentsData) {
+            const ctx = document.getElementById('segments-chart').getContext('2d');
+            
+            if (charts.segments) {
+                charts.segments.destroy();
+            }
+            
+            const datasets = [];
+            const segmentIndices = segmentsData.map((s, i) => i);
+            
+            // Jitter по сегментам
+            datasets.push({
+                label: 'Jitter (%)',
+                data: segmentsData.map(s => s.features?.jitter_percent || 0),
+                borderColor: '#28a745',
+                backgroundColor: 'rgba(40, 167, 69, 0.1)',
+                borderWidth: 2,
+                yAxisID: 'y'
+            });
+            
+            // Shimmer по сегментам
+            datasets.push({
+                label: 'Shimmer (%)',
+                data: segmentsData.map(s => s.features?.shimmer_percent || 0),
+                borderColor: '#ffc107',
+                backgroundColor: 'rgba(255, 193, 7, 0.1)',
+                borderWidth: 2,
+                yAxisID: 'y'
+            });
+            
+            // HNR по сегментам
+            datasets.push({
+                label: 'HNR (dB)',
+                data: segmentsData.map(s => s.features?.hnr_db || 0),
+                borderColor: '#dc3545',
+                backgroundColor: 'rgba(220, 53, 69, 0.1)',
+                borderWidth: 2,
+                yAxisID: 'y1'
+            });
+            
+            charts.segments = new Chart(ctx, {
+                type: 'bar',
+                data: {
+                    labels: segmentIndices.map(i => `Сегмент ${i}`),
+                    datasets
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    interaction: {
+                        intersect: false,
+                        mode: 'index'
+                    },
+                    plugins: {
+                        legend: {
+                            display: true
+                        },
+                        tooltip: {
+                            enabled: true
+                        }
+                    },
+                    scales: {
+                        x: {
+                            title: {
+                                display: true,
+                                text: 'Сегмент'
+                            }
+                        },
+                        y: {
+                            type: 'linear',
+                            position: 'left',
+                            title: {
+                                display: true,
+                                text: 'Jitter / Shimmer (%)'
+                            }
+                        },
+                        y1: {
+                            type: 'linear',
+                            position: 'right',
+                            title: {
+                                display: true,
+                                text: 'HNR (dB)'
+                            },
+                            grid: {
+                                drawOnChartArea: false
+                            }
+                        }
+                    }
+                }
+            });
+        }
+        
+        // Отображение сегментов
+        function displaySegments(segmentsData) {
+            const list = document.getElementById('segments-list');
+            list.innerHTML = '';
+            
+            segmentsData.forEach((segment, index) => {
+                const item = document.createElement('div');
+                item.className = 'segment-item';
+                item.innerHTML = `
+                    <strong>Сегмент ${index}</strong><br>
+                    <small>Длительность: ${segment.duration_sec?.toFixed(2) || 0}с</small><br>
+                    <small>Jitter: ${segment.features?.jitter_percent?.toFixed(2) || 0}%</small>
+                `;
+                item.onclick = () => {
+                    document.querySelectorAll('.segment-item').forEach(el => el.classList.remove('active'));
+                    item.classList.add('active');
+                    // Переход к сегменту в аудио
+                    if (wavesurfer && segment.start_time) {
+                        wavesurfer.seekTo(segment.start_time / wavesurfer.getDuration());
+                    }
+                };
+                list.appendChild(item);
+            });
+        }
+        
+        // Обновление времени на графиках
+        function updateChartsTime(time) {
+            // Можно добавить вертикальную линию на графиках
+        }
+        
+        // Синхронизация всех графиков
+        function syncAllCharts() {
+            // Синхронизация масштаба по оси X
+        }
+        
+        // Показать ошибку
+        function showError(message) {
+            const container = document.getElementById('error-container');
+            container.innerHTML = `<div class="error">${message}</div>`;
+        }
+        
+        // Инициализация при загрузке
+        window.addEventListener('DOMContentLoaded', () => {
+            loadResults();
+        });
+    </script>
+</body>
+</html>

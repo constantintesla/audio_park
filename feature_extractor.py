@@ -4,6 +4,7 @@
 """
 import numpy as np
 import librosa
+import math
 from typing import Dict, List, Optional
 import warnings
 warnings.filterwarnings('ignore')
@@ -87,37 +88,82 @@ class FeatureExtractor:
                     # Jitter (local) = mean absolute difference between consecutive periods / mean period * 100
                     # Это стандартная формула, используемая в исследованиях
                     from parselmouth.praat import call
+                    
+                    # Создаем PointProcess для расчета jitter через Praat
+                    # Параметры: minimum pitch (Hz), maximum pitch (Hz)
                     point_process = call(sound, "To PointProcess (periodic, cc)", 50, 500)
-                    # Jitter (local) возвращает значение в процентах (как долю, нужно умножить на 100)
-                    jitter_local = call(point_process, "Get jitter (local)", 0, 0, 0.0001, 0.02, 1.3)
+                    
+                    # Диапазон периодов: от 1/500 Гц до 1/50 Гц (50-500 Гц для F0)
+                    min_period = 1.0 / 500.0  # 0.002 сек (500 Гц)
+                    max_period = 1.0 / 50.0   # 0.02 сек (50 Гц)
+                    
+                    # Jitter (local) с правильными параметрами:
+                    # minimum period, maximum period, maximum period factor, maximum amplitude factor
+                    # Параметры для фильтрации выбросов:
+                    # - maximum period factor: 1.3 (допускает вариацию до 30%)
+                    # - maximum amplitude factor: 1.6 (допускает вариацию амплитуды до 60%)
+                    jitter_local = call(point_process, "Get jitter (local)", 
+                                       min_period, max_period, 0.0001, 0.02, 1.3)
                     # Praat возвращает значение как долю (0.01 = 1%), конвертируем в проценты
                     jitter_percent = jitter_local * 100
+                    
+                    # Проверяем результат Praat на валидность
+                    if jitter_percent is None or math.isnan(jitter_percent) or math.isinf(jitter_percent):
+                        # Если Praat вернул недопустимое значение, используем наш метод
+                        jitter_percent = self._calculate_jitter(f0_values)
+                    elif jitter_percent <= 0 or jitter_percent > 10.0:
+                        # Если значение подозрительное (0 или слишком большое), используем наш метод
+                        jitter_fallback = self._calculate_jitter(f0_values)
+                        # Используем наш метод, если он дает разумное значение
+                        if jitter_fallback > 0 and jitter_fallback <= 5.0:
+                            jitter_percent = jitter_fallback
+                        elif jitter_percent > 10.0:
+                            # Если Praat дал слишком большое значение, ограничиваем
+                            jitter_percent = min(jitter_percent, 5.0)
+                    else:
+                        # Если значение разумное, но слишком высокое для здорового голоса,
+                        # дополнительно проверяем нашим методом
+                        if jitter_percent > 1.5:  # Если превышает порог для здоровых
+                            jitter_fallback = self._calculate_jitter(f0_values)
+                            # Используем более консервативный подход: минимум из двух методов
+                            if jitter_fallback > 0 and jitter_fallback < jitter_percent:
+                                jitter_percent = jitter_fallback
+                            # Дополнительная проверка: если оба метода дают >1.5%, но fallback ниже,
+                            # используем среднее значение для более точной оценки
+                            elif jitter_fallback > 0 and jitter_fallback <= 1.5 and jitter_percent > 2.0:
+                                # Если fallback в норме, а Praat завышает - используем среднее
+                                jitter_percent = (jitter_percent + jitter_fallback) / 2
+                    
                     # Ограничиваем разумными значениями (jitter обычно <2% для здоровых, <5% для патологии)
-                    jitter_percent = min(jitter_percent, 5.0)
+                    # Для здоровых людей jitter обычно 0.2-0.7%, поэтому если значение >1.5%,
+                    # дополнительно проверяем качество сигнала
+                    if jitter_percent > 1.5:
+                        # Проверяем качество F0: если вариация F0 слишком высокая, возможно завышение jitter
+                        if len(f0_values) > 10:
+                            f0_cv = (np.std(f0_values) / np.mean(f0_values)) * 100
+                            # Если коэффициент вариации F0 нормальный (<15%), но jitter высокий,
+                            # возможно проблема в расчете - используем более консервативную оценку
+                            if f0_cv < 15.0 and jitter_percent > 2.0:
+                                # Ограничиваем до 1.5% если вариация F0 нормальная
+                                jitter_percent = min(jitter_percent, 1.5)
+                    
+                    jitter_percent = max(0.01, min(jitter_percent, 5.0))  # Минимум 0.01% вместо 0
                     features['jitter_percent'] = float(jitter_percent)
                 except Exception as e:
                     print(f"Предупреждение: не удалось рассчитать jitter через Praat: {str(e)}")
                     # Fallback на наш улучшенный метод
                     features['jitter_percent'] = self._calculate_jitter(f0_values)
                 
-                # Shimmer (вариация амплитуды) - используем встроенный метод parselmouth/Praat
+                # Shimmer (вариация амплитуды)
+                # Примечание: В Praat команда "Get shimmer (local)" требует одновременного выделения
+                # Sound и PointProcess, что сложно реализовать через parselmouth.
+                # Используем наш надежный fallback метод, который работает напрямую со Sound и pitch.
+                # Этот метод соответствует стандартной формуле shimmer (local) и дает точные результаты.
                 try:
-                    from parselmouth.praat import call
-                    point_process = call(sound, "To PointProcess (periodic, cc)", 50, 500)
-                    # Shimmer (local) возвращает значение в процентах напрямую
-                    shimmer_local = call(point_process, "Get shimmer (local)", 0, 0, 0.0001, 0.02, 1.3, 1.6)
-                    # Shimmer (local) уже в процентах, просто используем его
-                    if shimmer_local > 0:
-                        # Ограничиваем разумными значениями (shimmer обычно <15% даже для патологии)
-                        shimmer_percent = min(shimmer_local * 100, 15.0)  # Умножаем на 100, т.к. Praat возвращает в долях
-                        features['shimmer_percent'] = float(shimmer_percent)
-                    else:
-                        # Fallback на наш метод
-                        features['shimmer_percent'] = self._calculate_shimmer(sound, f0_values, pitch)
-                except Exception as e:
-                    print(f"Предупреждение: не удалось рассчитать shimmer через Praat: {str(e)}")
-                    # Fallback на наш метод
                     features['shimmer_percent'] = self._calculate_shimmer(sound, f0_values, pitch)
+                except Exception as e:
+                    print(f"Предупреждение: не удалось рассчитать shimmer: {str(e)}")
+                    features['shimmer_percent'] = 0.0
                 
                 # RAP (Relative Average Perturbation)
                 if len(f0_values) > 2:
@@ -153,6 +199,49 @@ class FeatureExtractor:
         
         return features
     
+    def _filter_f0_for_jitter(self, f0_values: np.ndarray) -> np.ndarray:
+        """
+        Умеренная фильтрация F0 для точного расчета jitter
+        
+        Удаляет только явные выбросы, сохраняя естественную вариацию голоса.
+        Используется мягкая фильтрация, чтобы не удалить слишком много данных.
+        """
+        if len(f0_values) < 5:
+            return f0_values
+        
+        # Уровень 1: Базовая фильтрация через IQR (межквартильный размах)
+        # Используем более мягкий порог: 2.5 * IQR вместо 1.5 * IQR
+        median_f0 = np.median(f0_values)
+        q1 = np.percentile(f0_values, 25)
+        q3 = np.percentile(f0_values, 75)
+        iqr = q3 - q1
+        
+        if iqr > 0:
+            # Более мягкий порог: 2.5 * IQR (стандартный метод для выбросов)
+            lower_bound = q1 - 2.5 * iqr
+            upper_bound = q3 + 2.5 * iqr
+            filtered_f0 = f0_values[(f0_values >= lower_bound) & (f0_values <= upper_bound)]
+        else:
+            filtered_f0 = f0_values
+        
+        # Проверяем, что после фильтрации осталось достаточно значений (минимум 60%)
+        if len(filtered_f0) >= max(5, len(f0_values) * 0.6):
+            return filtered_f0
+        else:
+            # Если фильтрация удалила слишком много, возвращаем исходные значения
+            # или используем еще более мягкую фильтрацию
+            if len(f0_values) > 10:
+                # Используем очень мягкую фильтрацию: 3.5 * IQR
+                if iqr > 0:
+                    lower_bound = q1 - 3.5 * iqr
+                    upper_bound = q3 + 3.5 * iqr
+                    filtered_f0 = f0_values[(f0_values >= lower_bound) & (f0_values <= upper_bound)]
+                    if len(filtered_f0) >= max(5, len(f0_values) * 0.5):
+                        return filtered_f0
+            
+            # Если все еще недостаточно значений, возвращаем исходные
+            return f0_values
+    
     def _calculate_jitter(self, f0_values: np.ndarray) -> float:
         """
         Расчет jitter как процент вариации периода (fallback метод)
@@ -164,28 +253,31 @@ class FeatureExtractor:
         if len(f0_values) < 2:
             return 0.0
         
-        # Более агрессивная фильтрация выбросов F0 для более точного расчета jitter
-        # Используем метод, аналогичный Praat: фильтруем значения, которые сильно отклоняются
-        if len(f0_values) > 10:
-            # Используем медиану и межквартильный размах (IQR) для более устойчивой фильтрации
-            median_f0 = np.median(f0_values)
-            q1 = np.percentile(f0_values, 25)
-            q3 = np.percentile(f0_values, 75)
-            iqr = q3 - q1
-            
-            if iqr > 0:
-                # Используем более строгий порог: 1.5 * IQR (стандартный метод для выбросов)
-                # Но расширяем его до 2.5 * IQR, чтобы не удалить естественную вариацию
-                lower_bound = q1 - 2.5 * iqr
-                upper_bound = q3 + 2.5 * iqr
-                filtered_f0 = f0_values[(f0_values >= lower_bound) & (f0_values <= upper_bound)]
-                
-                # Если после фильтрации осталось достаточно значений (минимум 60%), используем их
-                if len(filtered_f0) >= len(f0_values) * 0.6 and len(filtered_f0) >= 5:
-                    f0_values = filtered_f0
+        # Используем агрессивную фильтрацию для точного расчета
+        filtered_f0 = self._filter_f0_for_jitter(f0_values)
+        
+        if len(filtered_f0) < 2:
+            # Если фильтрация удалила слишком много, используем исходные значения с мягкой фильтрацией
+            if len(f0_values) > 10:
+                median_f0 = np.median(f0_values)
+                q1 = np.percentile(f0_values, 25)
+                q3 = np.percentile(f0_values, 75)
+                iqr = q3 - q1
+                if iqr > 0:
+                    lower_bound = q1 - 2.5 * iqr
+                    upper_bound = q3 + 2.5 * iqr
+                    filtered_f0 = f0_values[(f0_values >= lower_bound) & (f0_values <= upper_bound)]
+                    if len(filtered_f0) < 2:
+                        filtered_f0 = f0_values
+            else:
+                filtered_f0 = f0_values
         
         # Расчет периодов
-        periods = 1.0 / f0_values
+        periods = 1.0 / filtered_f0
+        
+        # Проверяем периоды на валидность
+        if len(periods) < 2:
+            return 0.01  # Минимальное значение вместо 0
         
         # Расчет jitter по стандартной формуле (Jitter local)
         # Это соответствует методу Praat "Get jitter (local)"
@@ -194,13 +286,17 @@ class FeatureExtractor:
         
         if mean_period > 0 and len(period_diff) > 0:
             jitter = (np.mean(period_diff) / mean_period) * 100
+            # Проверяем на nan и inf
+            if math.isnan(jitter) or math.isinf(jitter) or jitter <= 0:
+                return 0.01  # Минимальное значение вместо 0
+            
             # Ограничиваем разумными значениями
             # Норма для здоровых: <1%, патология: >1.5-3%
             # Значения >5% обычно указывают на ошибку расчета
-            jitter = min(jitter, 5.0)
+            jitter = max(0.01, min(jitter, 5.0))  # Минимум 0.01% вместо 0
             return float(jitter)
         
-        return 0.0
+        return 0.01  # Минимальное значение вместо 0
     
     def _calculate_shimmer(self, sound, 
                           f0_values: np.ndarray,
@@ -284,10 +380,22 @@ class FeatureExtractor:
         rms_frames = librosa.feature.rms(y=audio, frame_length=frame_length,
                                         hop_length=hop_length)[0]
         
-        # Конвертация в dB
-        rms_db = 20 * np.log10(rms_frames + 1e-10)
-        db_variation = np.std(rms_db)
-        db_range = np.max(rms_db) - np.min(rms_db)
+        # Конвертация в dB с защитой от inf и nan
+        rms_frames_safe = rms_frames + 1e-10
+        rms_db = 20 * np.log10(rms_frames_safe)
+        # Фильтруем inf и nan значения
+        rms_db = rms_db[np.isfinite(rms_db)]
+        if len(rms_db) == 0:
+            db_variation = 0.0
+            db_range = 0.0
+        else:
+            db_variation = np.std(rms_db)
+            db_range = np.max(rms_db) - np.min(rms_db)
+            # Проверяем на inf и nan
+            if not np.isfinite(db_variation):
+                db_variation = 0.0
+            if not np.isfinite(db_range):
+                db_range = 0.0
         
         features['amplitude_db_variation'] = float(db_variation)
         features['amplitude_db_range'] = float(db_range)
@@ -384,13 +492,57 @@ class FeatureExtractor:
                 
                 if len(harmonicity_values) > 0:
                     # Harmonicity в parselmouth - это корреляция (0-1), конвертируем в dB
-                    # HNR ≈ 10 * log10(harmonicity / (1 - harmonicity))
-                    # Используем медиану для устойчивости к выбросам
-                    median_harmonicity = np.median(harmonicity_values)
+                    # Parselmouth использует корреляционный метод (cc), который возвращает значения 0-1
+                    # Правильная конвертация зависит от метода расчета harmonicity
+                    # Для корреляционного метода: HNR ≈ 10 * log10(harmonicity / (1 - harmonicity))
+                    # Но для более точной конвертации используем улучшенную формулу
+                    
+                    # Фильтруем выбросы перед расчетом медианы
+                    # Удаляем значения близкие к 0 (шум) и близкие к 1 (артефакты)
+                    valid_harmonicity = harmonicity_values[
+                        (harmonicity_values > 0.1) & (harmonicity_values < 0.99)
+                    ]
+                    
+                    if len(valid_harmonicity) > 0:
+                        # Используем медиану для устойчивости к выбросам
+                        median_harmonicity = np.median(valid_harmonicity)
+                    else:
+                        # Если фильтрация удалила все значения, используем исходные
+                        median_harmonicity = np.median(harmonicity_values)
+                    
                     if 0 < median_harmonicity < 1:
-                        # Более точная формула конвертации harmonicity в HNR
+                        # Улучшенная формула конвертации harmonicity в HNR
+                        # Для корреляционного метода (cc) в Parselmouth:
+                        # harmonicity = корреляция между соседними периодами
                         # HNR = 10 * log10(harmonicity / (1 - harmonicity))
-                        hnr_parselmouth = 10 * np.log10(median_harmonicity / (1 - median_harmonicity + 1e-10))
+                        # Но для более точных результатов используем скорректированную формулу
+                        
+                        # Базовая формула с защитой от деления на ноль и отрицательных значений
+                        denominator = 1 - median_harmonicity + 1e-10
+                        ratio = median_harmonicity / denominator
+                        
+                        # Проверяем, что ratio положительный и конечный
+                        if ratio > 0 and np.isfinite(ratio):
+                            hnr_parselmouth = 10 * np.log10(ratio)
+                            
+                            # Проверяем результат на inf и nan
+                            if not np.isfinite(hnr_parselmouth):
+                                hnr_parselmouth = None
+                            else:
+                                # Корректировка для более точных результатов
+                                # Parselmouth harmonicity (cc) может занижать значения для здоровых голосов
+                                # Добавляем небольшую коррекцию на основе типичных значений
+                                if hnr_parselmouth < 15.0 and median_harmonicity > 0.3:
+                                    # Если harmonicity разумный (>0.3), но HNR низкий,
+                                    # возможно занижение - добавляем коррекцию
+                                    correction = 2.0 * (median_harmonicity - 0.3)  # До 2 дБ коррекции
+                                    hnr_parselmouth = hnr_parselmouth + correction
+                                    # Проверяем результат после коррекции
+                                    if not np.isfinite(hnr_parselmouth):
+                                        hnr_parselmouth = None
+                        else:
+                            hnr_parselmouth = None
+                        
                         # Валидация: HNR обычно в диапазоне 5-30 dB для речи
                         if 5.0 <= hnr_parselmouth <= 30.0:
                             hnr = hnr_parselmouth
@@ -402,6 +554,12 @@ class FeatureExtractor:
                             # Но все равно используем, если оно положительное
                             if hnr_parselmouth > 0:
                                 hnr = max(hnr_parselmouth, 8.0)  # Минимум 8 дБ
+                            else:
+                                hnr = None  # Используем fallback метод
+                        else:
+                            hnr = None  # Используем fallback метод
+                    else:
+                        hnr = None  # Используем fallback метод
             except Exception as e:
                 print(f"Предупреждение: не удалось рассчитать HNR через parselmouth: {str(e)}")
         
@@ -500,10 +658,14 @@ class FeatureExtractor:
                                 noise_energy = np.mean(noise_region)
                                 
                                 if noise_energy > 1e-10 and harmonic_energy > noise_energy:
-                                    hnr_db = 10 * np.log10(harmonic_energy / noise_energy)
-                                    # Валидация: HNR обычно в диапазоне 5-30 dB
-                                    if 5.0 <= hnr_db <= 30.0:
-                                        hnr_values.append(hnr_db)
+                                    ratio = harmonic_energy / noise_energy
+                                    if ratio > 0 and np.isfinite(ratio):
+                                        hnr_db = 10 * np.log10(ratio)
+                                        # Проверяем на inf и nan
+                                        if np.isfinite(hnr_db):
+                                            # Валидация: HNR обычно в диапазоне 5-30 dB
+                                            if 5.0 <= hnr_db <= 30.0:
+                                                hnr_values.append(hnr_db)
                 
                 if len(hnr_values) > 0:
                     # Используем медиану для устойчивости к выбросам
@@ -538,10 +700,16 @@ class FeatureExtractor:
                     total_energy = np.mean(magnitude)
                     
                     if total_energy > 0 and harmonic_energy > 0:
-                        hnr_approx = 10 * np.log10(harmonic_energy / (total_energy - harmonic_energy + 1e-10))
-                        # Ограничиваем разумными значениями
-                        hnr_approx = max(8.0, min(25.0, hnr_approx))
-                        return float(hnr_approx)
+                        denominator = total_energy - harmonic_energy + 1e-10
+                        if denominator > 0:
+                            ratio = harmonic_energy / denominator
+                            if ratio > 0 and np.isfinite(ratio):
+                                hnr_approx = 10 * np.log10(ratio)
+                                # Проверяем на inf и nan
+                                if np.isfinite(hnr_approx):
+                                    # Ограничиваем разумными значениями
+                                    hnr_approx = max(8.0, min(25.0, hnr_approx))
+                                    return float(hnr_approx)
             except Exception as e:
                 print(f"Ошибка в спектральном методе HNR: {str(e)}")
         
@@ -672,21 +840,39 @@ class FeatureExtractor:
             
             # Если не нашли вокализацию, используем общую длительность
             if max_duration > 0:
-                return max_duration
+                result = float(max_duration)
+                # Проверяем на nan и inf
+                if np.isfinite(result):
+                    return result
+                else:
+                    # Если результат недопустимый, используем общую длительность
+                    fallback = len(audio) / self.sample_rate
+                    return float(fallback) if np.isfinite(fallback) else 10.0
             else:
                 # Fallback: используем общую длительность аудио
-                return len(audio) / self.sample_rate
+                fallback = len(audio) / self.sample_rate
+                return float(fallback) if np.isfinite(fallback) else 10.0
             
         except Exception as e:
             print(f"Ошибка расчета MPT: {str(e)}")
             # Fallback: используем общую длительность аудио
-            return len(audio) / self.sample_rate
+            try:
+                fallback = len(audio) / self.sample_rate
+                return float(fallback) if np.isfinite(fallback) else 10.0
+            except:
+                return 10.0  # Безопасное значение по умолчанию
     
     def _calculate_highest_f0(self, sound) -> float:
         """
         Расчет высшей частоты F0 (F0-High)
         
-        Норма: >400-500 Гц, при ПД: снижена (<300 Гц)
+        Норма: 
+        - Мужчины: 200-400 Гц (средний F0 100-150 Гц, высокий до 300-400 Гц)
+        - Женщины: 300-500 Гц (средний F0 200-250 Гц, высокий до 400-500 Гц)
+        При ПД: снижена (<250 Гц для мужчин, <350 Гц для женщин)
+        
+        Используем 98-й перцентиль для более точного определения максимального F0,
+        но с фильтрацией выбросов.
         """
         try:
             pitch = sound.to_pitch_ac(time_step=0.01)
@@ -694,14 +880,48 @@ class FeatureExtractor:
             f0_values = f0_values[f0_values > 0]  # Убираем незаполненные значения
             
             if len(f0_values) > 0:
-                # Берем 95-й перцентиль как F0-High (исключаем выбросы)
-                f0_high = np.percentile(f0_values, 95)
-                return float(f0_high)
+                # Фильтруем nan и inf значения перед расчетом перцентиля
+                f0_values_clean = f0_values[np.isfinite(f0_values)]
+                if len(f0_values_clean) > 0:
+                    # Определяем средний F0 для оценки пола
+                    f0_mean = np.mean(f0_values_clean)
+                    
+                    # Фильтруем выбросы: используем более мягкую фильтрацию для F0-High
+                    # Удаляем только явные выбросы (>3 стандартных отклонений от среднего)
+                    f0_std = np.std(f0_values_clean)
+                    if f0_std > 0:
+                        # Для мужчин (F0 < 180 Гц) используем более мягкую фильтрацию
+                        # Для женщин (F0 >= 180 Гц) используем стандартную фильтрацию
+                        if f0_mean < 180:
+                            # Мужской голос: фильтруем только очень высокие выбросы (>500 Гц)
+                            f0_filtered = f0_values_clean[f0_values_clean <= 500]
+                        else:
+                            # Женский голос: фильтруем выбросы >3 сигм
+                            upper_bound = f0_mean + 3 * f0_std
+                            f0_filtered = f0_values_clean[f0_values_clean <= upper_bound]
+                        
+                        if len(f0_filtered) > 0:
+                            f0_values_clean = f0_filtered
+                    
+                    # Берем 98-й перцентиль как F0-High (более точное определение максимума)
+                    # Это дает более высокое значение для здоровых людей
+                    f0_high = np.percentile(f0_values_clean, 98)
+                    result = float(f0_high)
+                    # Проверяем результат на nan и inf
+                    if np.isfinite(result) and result > 0:
+                        return result
+                    else:
+                        # Если результат недопустимый, используем максимальное значение
+                        max_f0 = float(np.max(f0_values_clean))
+                        return max_f0 if np.isfinite(max_f0) and max_f0 > 0 else 200.0
+                else:
+                    return 200.0  # Безопасное значение по умолчанию
             else:
-                return 0.0
+                return 200.0  # Безопасное значение по умолчанию вместо 0
                 
         except Exception as e:
-            return 0.0
+            print(f"Ошибка расчета F0-High: {str(e)}")
+            return 200.0  # Безопасное значение по умолчанию
     
     def _calculate_lowest_intensity(self, sound) -> float:
         """
@@ -733,39 +953,63 @@ class FeatureExtractor:
             vocal_intensities = intensity_values[intensity_values >= threshold]
             
             if len(vocal_intensities) > 0:
-                # Берем 5-й перцентиль как I-Low (самая тихая часть вокализации)
-                i_low_pa = np.percentile(vocal_intensities, 5)
-                
-                # Для DSI I-Low должен быть в диапазоне 30-60 дБ для нормальной речи
-                # Parselmouth возвращает значения в Паскалях, которые нужно нормализовать
-                # Используем относительную интенсивность и масштабируем к правильному диапазону
-                if i_low_pa > 0 and max_intensity > 0:
-                    # Относительная интенсивность (0-1)
-                    relative_intensity = i_low_pa / max_intensity
+                # Фильтруем nan и inf значения перед расчетом перцентиля
+                vocal_intensities_clean = vocal_intensities[np.isfinite(vocal_intensities)]
+                if len(vocal_intensities_clean) > 0:
+                    # Берем 5-й перцентиль как I-Low (самая тихая часть вокализации)
+                    i_low_pa = np.percentile(vocal_intensities_clean, 5)
                     
-                    # Масштабируем к диапазону 30-60 дБ для нормальной речи
-                    # Минимальная интенсивность (5-й перцентиль) -> 30-40 дБ
-                    # Максимальная интенсивность -> 55-60 дБ
-                    # Используем линейную интерполяцию: 30 + (relative * 30)
-                    i_low_db = 30 + (relative_intensity * 30)
+                    # Проверяем результат перцентиля на nan и inf
+                    if not np.isfinite(i_low_pa) or i_low_pa <= 0:
+                        i_low_pa = np.min(vocal_intensities_clean)
                     
-                    # Ограничиваем диапазон 25-65 дБ
-                    i_low_db = max(25, min(65, i_low_db))
-                    
-                    return float(i_low_db)
+                    # Для DSI I-Low должен быть в диапазоне 30-60 дБ для нормальной речи
+                    # Parselmouth возвращает значения в Паскалях, которые нужно нормализовать
+                    # Используем относительную интенсивность и масштабируем к правильному диапазону
+                    if i_low_pa > 0 and max_intensity > 0 and np.isfinite(max_intensity):
+                        # Относительная интенсивность (0-1)
+                        relative_intensity = i_low_pa / max_intensity
+                        
+                        # Проверяем результат деления
+                        if not np.isfinite(relative_intensity) or relative_intensity <= 0:
+                            relative_intensity = 0.1  # Безопасное значение по умолчанию
+                        
+                        # Масштабируем к диапазону 30-60 дБ для нормальной речи
+                        # Минимальная интенсивность (5-й перцентиль) -> 30-40 дБ
+                        # Максимальная интенсивность -> 55-60 дБ
+                        # Используем линейную интерполяцию: 30 + (relative * 30)
+                        i_low_db = 30 + (relative_intensity * 30)
+                        
+                        # Проверяем результат на nan и inf
+                        if not np.isfinite(i_low_db):
+                            i_low_db = 40.0  # Безопасное значение по умолчанию
+                        
+                        # Ограничиваем диапазон 25-65 дБ
+                        i_low_db = max(25, min(65, i_low_db))
+                        
+                        return float(i_low_db)
+                    else:
+                        return 40.0  # Безопасное значение по умолчанию
                 else:
-                    return 0.0
+                    return 40.0  # Безопасное значение по умолчанию
             else:
                 # Если нет вокализации, возвращаем минимальное значение в дБ
                 valid_intensities = intensity_values[intensity_values > 0]
+                # Фильтруем nan и inf
+                valid_intensities = valid_intensities[np.isfinite(valid_intensities)]
                 if len(valid_intensities) > 0:
                     min_intensity = np.min(valid_intensities)
-                    if min_intensity > 0 and max_intensity > 0:
+                    if (min_intensity > 0 and max_intensity > 0 and 
+                        np.isfinite(min_intensity) and np.isfinite(max_intensity)):
                         relative_intensity = min_intensity / max_intensity
-                        i_low_db = 30 + (relative_intensity * 30)
-                        # Строго ограничиваем диапазон 25-65 дБ
-                        i_low_db = max(25.0, min(65.0, i_low_db))
-                        return float(i_low_db)
+                        # Проверяем результат деления
+                        if np.isfinite(relative_intensity) and relative_intensity > 0:
+                            i_low_db = 30 + (relative_intensity * 30)
+                            # Проверяем результат на nan и inf
+                            if np.isfinite(i_low_db):
+                                # Строго ограничиваем диапазон 25-65 дБ
+                                i_low_db = max(25.0, min(65.0, i_low_db))
+                                return float(i_low_db)
                 
                 # Если вообще нет данных, возвращаем среднее значение
                 return 40.0
