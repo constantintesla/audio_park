@@ -3,7 +3,7 @@
 
 # Telegram Bot Token (ОБЯЗАТЕЛЬНО)
 # Получите токен у @BotFather в Telegram
-TELEGRAM_BOT_TOKEN=8365860763:AAEPKawMwP4KC_qYE1qcSvi2v2cg2SpUXg8
+TELEGRAM_BOT_TOKEN=8546209595:AAENOzvKZ2utBQ5pFAL0QmuX1rX1X466owg
 # API URL (внешний URL вашего сервера)
 # Для Docker: используйте внутренний URL http://api:5000
 # Для внешнего доступа: https://yourdomain.com или http://your-ip:5000
