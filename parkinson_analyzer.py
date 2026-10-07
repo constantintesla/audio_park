@@ -33,6 +33,8 @@ except ImportError:
 from audio_processor import AudioProcessor
 from feature_extractor import FeatureExtractor
 from symptom_analyzer import SymptomAnalyzer
+from recording_quality import assess_recording_quality
+from robust_features import compute_cpps
 
 
 class ParkinsonAnalyzer:
@@ -86,12 +88,15 @@ class ParkinsonAnalyzer:
             # Для остальных типов (str, None, bool) возвращаем как есть
             return obj
     
-    def analyze_audio_file(self, file_path: str, save_raw: Optional[bool] = None, result_id: Optional[str] = None) -> Dict:
+    def analyze_audio_file(self, file_path: str, save_raw: Optional[bool] = None, result_id: Optional[str] = None,
+                           device_info: Optional[Dict] = None) -> Dict:
         """
         Полный анализ аудиофайла
         
         Args:
             file_path: Путь к аудиофайлу (WAV/MP3)
+            device_info: Метаданные устройства от приложения (модель, режим микрофона,
+                уровень шума по калибровочной тишине и т.п.)
         
         Returns:
             Структурированный JSON отчет
@@ -130,6 +135,18 @@ class ParkinsonAnalyzer:
             logger.info(f"Громкость записи {loudness_info['input_lufs']:.1f} LUFS, "
                         f"усиление {loudness_info['gain_db']:+.1f} дБ")
             
+            # Проверка качества записи (шум, клиппинг, длительность, полоса)
+            device_info = device_info or {}
+            try:
+                import librosa
+                source_sr = librosa.get_samplerate(file_path)
+            except Exception:
+                source_sr = device_info.get('sample_rate')
+            quality = assess_recording_quality(
+                audio, sr,
+                source_sample_rate=source_sr,
+                noise_floor_dbfs=device_info.get('noise_floor_dbfs'))
+            
             # Сохранение исходного аудиофайла
             if should_save_raw and result_dir:
                 try:
@@ -148,6 +165,7 @@ class ParkinsonAnalyzer:
             # 2. Извлечение признаков
             # Извлекаем признаки из исходного аудио без предобработки
             all_features = self.feature_extractor.extract_all_features(audio)
+            all_features['cpps_db'] = compute_cpps(audio, sr)
             
             # 3. Анализ симптомов
             analysis = self.symptom_analyzer.analyze(all_features)
@@ -226,6 +244,12 @@ class ParkinsonAnalyzer:
             recommendation = self._generate_recommendation(risk_level, risk_probability, 
                                                           analysis.get('exceeded_thresholds', []),
                                                           all_features)
+            report = self._add_dsi_to_report(analysis['report'], dsi_result)
+            report = self._add_quality_to_report(report, quality)
+            if quality['verdict'] == 'reject':
+                recommendation = ("Запись непригодна для анализа, результаты ненадежны. "
+                                  "Перезапишите голос: " +
+                                  " ".join(i['message'] for i in quality['issues'] if i['severity'] == 'reject'))
             
             result = {
                 "audio_summary": {
@@ -239,6 +263,7 @@ class ParkinsonAnalyzer:
                     "jitter_percent": round(all_features.get('jitter_percent', 0.0), 2),
                     "shimmer_percent": round(all_features.get('shimmer_percent', 0.0), 2),
                     "hnr_db": round(all_features.get('hnr_db', 0.0), 1),
+                    "cpps_db": round(all_features.get('cpps_db', 0.0), 2),
                     "rate_syl_sec": round(all_features.get('rate_syl_sec', 0.0), 1),
                     "f0_sd_hz": round(all_features.get('f0_sd_hz', 0.0), 1),
                     "f0_mean_hz": round(all_features.get('f0_mean_hz', 0.0), 1),
@@ -264,7 +289,9 @@ class ParkinsonAnalyzer:
                 },
                 "recommendation": recommendation,
                 "confidence": round(pd_risk_data.get('confidence', 0.0), 3),
-                "report": self._add_dsi_to_report(analysis['report'], dsi_result),
+                "report": report,
+                "quality": quality,
+                "device_info": device_info,
                 "visuals": {
                     "waveform": waveform_base64 or f"Данные: {len(waveform_data['amplitude'])} точек, "
                                f"длительность {waveform_data['duration']:.2f}с",
@@ -366,6 +393,18 @@ class ParkinsonAnalyzer:
                 return (f"Низкий риск ПД ({int(risk_probability * 100)}%): "
                        f"незначительные отклонения ({num_exceeded} признак). "
                        f"Рекомендуется мониторинг и повторная оценка при появлении симптомов.")
+    
+    def _add_quality_to_report(self, report: List[str], quality: Dict) -> List[str]:
+        """Добавление предупреждений о качестве записи в начало отчета"""
+        if quality['verdict'] == 'ok':
+            return report
+        lines = []
+        if quality['verdict'] == 'reject':
+            lines.append("⚠️ Запись непригодна для анализа, значения ниже ненадежны.")
+        else:
+            lines.append("⚠️ Качество записи снижено, часть значений может быть неточной.")
+        lines.extend(f"- {issue['message']}" for issue in quality['issues'])
+        return lines + report
     
     def _add_dsi_to_report(self, report: List[str], dsi_result: Dict) -> List[str]:
         """Добавление информации о DSI в отчет"""
