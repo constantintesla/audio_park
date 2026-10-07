@@ -779,9 +779,66 @@ main {
     margin: 0;
 }
 
-.progress-container {
-    display: none;
-    margin: 16px 0;
+.analyze-progress {
+    margin-top: 16px;
+    padding: 14px 16px;
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+    background: var(--surface-muted);
+}
+
+.analyze-progress-head {
+    display: flex;
+    justify-content: space-between;
+    gap: 12px;
+    font-size: 14px;
+    font-weight: 500;
+    margin-bottom: 8px;
+    font-variant-numeric: tabular-nums;
+}
+
+.analyze-progress .progress-bar {
+    transition: width 0.2s linear;
+}
+
+.analyze-steps {
+    display: flex;
+    gap: 6px;
+    list-style: none;
+    padding: 0;
+    margin: 10px 0 0;
+    font-size: 12px;
+    color: var(--text-faint);
+}
+
+.analyze-steps li {
+    flex: 1;
+    padding-top: 6px;
+    border-top: 2px solid var(--border);
+}
+
+.analyze-steps li.active {
+    color: var(--accent);
+    border-top-color: var(--accent);
+    font-weight: 600;
+}
+
+.analyze-steps li.done {
+    color: var(--text-muted);
+    border-top-color: var(--accent);
+}
+
+.analyze-progress.is-error {
+    background: var(--risk-soft);
+    border-color: #f6cfca;
+}
+
+.analyze-progress.is-error #analyze-stage {
+    color: var(--risk);
+}
+
+.analyze-progress.is-error .progress-bar {
+    background: var(--risk);
 }
 
 .progress {

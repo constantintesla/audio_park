@@ -106,6 +106,22 @@
                     <span class="text-muted small">Запись отправляется на сервер и сохраняется в общем списке анализов.</span>
                     <button id="analyze-btn" class="btn btn-primary btn-lg" disabled>Анализировать</button>
                 </div>
+                
+                <div id="analyze-progress" class="analyze-progress" style="display: none;" aria-live="polite">
+                    <div class="analyze-progress-head">
+                        <span id="analyze-stage">Подготовка записи</span>
+                        <span id="analyze-elapsed" class="text-muted">0 с</span>
+                    </div>
+                    <div class="progress" role="progressbar" aria-valuemin="0" aria-valuemax="100">
+                        <div id="analyze-bar" class="progress-bar" style="width: 0%"></div>
+                    </div>
+                    <ol id="analyze-steps" class="analyze-steps">
+                        <li data-stage="prepare">Подготовка</li>
+                        <li data-stage="upload">Отправка</li>
+                        <li data-stage="analyze">Анализ</li>
+                        <li data-stage="done">Готово</li>
+                    </ol>
+                </div>
             </div>
         </div>
         
@@ -181,15 +197,6 @@
             <div class="card-body">
                 <div id="waveform"></div>
             </div>
-        </div>
-        
-        <!-- Progress (for local analysis) -->
-        <div class="progress-container">
-            <div class="progress">
-                <div class="progress-bar progress-bar-striped progress-bar-animated" 
-                     role="progressbar" style="width: 0%"></div>
-            </div>
-            <p class="text-center mt-2" id="progress-text">Обработка...</p>
         </div>
         
         <!-- Local Results Panel (for local analysis) -->
@@ -1797,35 +1804,108 @@
             box.style.display = 'block';
         }
 
+        // ===== Прогресс анализа =====
+        // Отправка файла идет с настоящим процентом загрузки. Сервер не сообщает,
+        // на каком он этапе, поэтому во время анализа полоса движется по времени
+        // (медленнее к концу) и рядом идет счетчик секунд.
+        const ANALYZE_STAGES = ['prepare', 'upload', 'analyze', 'done'];
+        let analyzeProgress = null;
+
+        function showAnalyzeProgress() {
+            const box = document.getElementById('analyze-progress');
+            box.style.display = 'block';
+            box.classList.remove('is-error');
+            box.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+            analyzeProgress = { startedAt: performance.now(), timer: null, percent: 0 };
+            analyzeProgress.timer = setInterval(() => {
+                const seconds = (performance.now() - analyzeProgress.startedAt) / 1000;
+                document.getElementById('analyze-elapsed').textContent = `${seconds.toFixed(0)} с`;
+                if (analyzeProgress.stage === 'analyze') {
+                    // Плавно от 30% к 95%: чем дольше идет анализ, тем медленнее растет полоса
+                    const t = (performance.now() - analyzeProgress.analyzeFrom) / 1000;
+                    setAnalyzePercent(30 + 65 * (1 - Math.exp(-t / analyzeProgress.tau)));
+                }
+            }, 200);
+        }
+
+        function setAnalyzePercent(percent) {
+            analyzeProgress.percent = Math.max(analyzeProgress.percent, percent);
+            const bar = document.getElementById('analyze-bar');
+            bar.style.width = `${analyzeProgress.percent.toFixed(1)}%`;
+            bar.setAttribute('aria-valuenow', analyzeProgress.percent.toFixed(0));
+        }
+
+        function setAnalyzeStage(stage, text) {
+            analyzeProgress.stage = stage;
+            document.getElementById('analyze-stage').textContent = text;
+            const current = ANALYZE_STAGES.indexOf(stage);
+            document.querySelectorAll('#analyze-steps li').forEach(li => {
+                const i = ANALYZE_STAGES.indexOf(li.dataset.stage);
+                li.classList.toggle('done', i < current || stage === 'done');
+                li.classList.toggle('active', i === current && stage !== 'done');
+            });
+        }
+
+        function finishAnalyzeProgress(error) {
+            if (!analyzeProgress) return;
+            clearInterval(analyzeProgress.timer);
+            const box = document.getElementById('analyze-progress');
+            if (error) {
+                box.classList.add('is-error');
+                document.getElementById('analyze-stage').textContent = 'Ошибка: ' + error;
+            } else {
+                setAnalyzePercent(100);
+                setAnalyzeStage('done', 'Готово, результат ниже и в списке анализов');
+                setTimeout(() => { box.style.display = 'none'; }, 4000);
+            }
+            analyzeProgress = null;
+        }
+
+        // POST с процентом отправки (fetch не умеет сообщать прогресс загрузки)
+        function postWithUploadProgress(url, formData, onUploadProgress, onUploaded) {
+            return new Promise((resolve, reject) => {
+                const xhr = new XMLHttpRequest();
+                xhr.open('POST', url);
+                xhr.upload.onprogress = (e) => {
+                    if (e.lengthComputable) onUploadProgress(e.loaded / e.total);
+                };
+                xhr.upload.onload = () => onUploaded();
+                xhr.onload = () => resolve({ ok: xhr.status >= 200 && xhr.status < 300, status: xhr.status, text: xhr.responseText });
+                xhr.onerror = () => reject(new Error('нет связи с сервером'));
+                xhr.ontimeout = () => reject(new Error('сервер не ответил вовремя'));
+                xhr.send(formData);
+            });
+        }
+
         async function analyzeAudio() {
             if (!audioBuffer) {
                 alert('Пожалуйста, загрузите или запишите аудио');
                 return;
             }
-            
-            // Show progress
-            const progressContainer = document.querySelector('.progress-container');
-            const progressBar = document.querySelector('.progress-bar');
-            const progressText = document.getElementById('progress-text');
-            progressContainer.style.display = 'block';
-            progressBar.style.width = '0%';
-            
-            // Disable button
-            document.getElementById('analyze-btn').disabled = true;
-            
+
+            const analyzeBtn = document.getElementById('analyze-btn');
+            analyzeBtn.disabled = true;
+            analyzeBtn.textContent = 'Идет анализ...';
+            showAnalyzeProgress();
+            // Ожидаемое время анализа: секунды анализа на секунду записи,
+            // запоминаем по прошлым анализам в этом браузере (по умолчанию 6)
+            let secondsPerAudioSecond = 6;
             try {
-                // Конвертируем аудио в WAV и отправляем на сервер для анализа
-                progressBar.style.width = '10%';
-                progressText.textContent = 'Подготовка аудио...';
-                
-                // Конвертируем AudioBuffer в WAV Blob
-                progressBar.style.width = '20%';
-                progressText.textContent = 'Конвертация аудио в WAV...';
+                const saved = parseFloat(localStorage.getItem('audio_park_analyze_rate'));
+                if (saved > 0 && isFinite(saved)) secondsPerAudioSecond = saved;
+            } catch (e) {}
+            const audioSeconds = audioBuffer.duration;
+            // К ожидаемому моменту полоса дойдет примерно до 85%
+            analyzeProgress.tau = Math.max(3, secondsPerAudioSecond * audioSeconds / 2);
+
+            try {
+                setAnalyzeStage('prepare', 'Подготовка записи');
+                setAnalyzePercent(3);
                 const wavBlob = audioBufferToWav(audioBuffer, audioBuffer.sampleRate);
-                
-                // Создаем FormData для отправки файла
+
                 const formData = new FormData();
                 formData.append('file', wavBlob, 'audio.wav');
+                formData.append('username', 'Локальный анализ');
                 // Для записи с микрофона добавляем данные устройства и результаты калибровки
                 if (lastRecording && lastRecording.buffer === audioBuffer) {
                     formData.append('device_info', JSON.stringify(lastRecording.deviceInfo));
@@ -1834,115 +1914,48 @@
                         formData.append('calibration_file', lastRecording.calibrationWav, 'calibration.wav');
                     }
                 }
-                
-                // Отправляем на сервер для анализа (это сохранит сырые данные)
-                progressBar.style.width = '40%';
-                progressText.textContent = 'Отправка на сервер для анализа...';
-                
-                const analyzeResponse = await fetch(`${API_URL}/api/analyze`, {
-                    method: 'POST',
-                    body: formData
-                });
-                
-                if (!analyzeResponse.ok) {
-                    const errorText = await analyzeResponse.text();
-                    throw new Error(`Ошибка анализа: ${analyzeResponse.status} ${errorText}`);
-                }
-                
-                progressBar.style.width = '90%';
-                progressText.textContent = 'Получение результатов...';
-                
-                const result = await analyzeResponse.json();
-                
-                // Добавляем информацию о пользователе
-                result.user_info = {
-                    tg_username: 'Локальный анализ',
-                    tg_user_id: 0,
-                    timestamp: new Date().toISOString(),
-                    source: 'web_interface'
-                };
-                
-                // Сохранение результата через API (результат уже содержит raw_data от сервера)
-                try {
-                    progressBar.style.width = '95%';
-                    progressText.textContent = 'Сохранение результата...';
-                    const saveResponse = await fetch(`${API_URL}/api/results`, {
-                        method: 'POST',
-                        headers: {
-                            'Content-Type': 'application/json'
-                        },
-                        body: JSON.stringify(result)
-                    });
-                    
-                    if (saveResponse.ok) {
-                        const saveData = await saveResponse.json();
-                        console.log('✅ Результат успешно сохранен:', saveData);
-                        
-                        // Показываем уведомление
-                        const notification = document.createElement('div');
-                        notification.className = 'alert alert-success alert-dismissible fade show position-fixed';
-                        notification.style.cssText = 'top: 20px; right: 20px; z-index: 9999; min-width: 300px;';
-                        notification.innerHTML = `
-                            <strong>Результат сохранен.</strong> Результат добавлен в общий список анализов.
-                            <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
-                        `;
-                        document.body.appendChild(notification);
-                        setTimeout(() => {
-                            notification.remove();
-                        }, 5000);
-                        
-                        // Обновляем список результатов
-                        await loadResults();
-                        await loadStats();
-                    } else {
-                        const errorText = await saveResponse.text();
-                        console.error('Ошибка сохранения результата:', saveResponse.status, errorText);
-                        
-                        // Показываем предупреждение
-                        const warning = document.createElement('div');
-                        warning.className = 'alert alert-warning alert-dismissible fade show position-fixed';
-                        warning.style.cssText = 'top: 20px; right: 20px; z-index: 9999; min-width: 300px;';
-                        warning.innerHTML = `
-                            <strong>Не удалось сохранить результат.</strong> Анализ выполнен, но результат не добавлен в список.
-                            <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
-                        `;
-                        document.body.appendChild(warning);
-                        setTimeout(() => {
-                            warning.remove();
-                        }, 5000);
+
+                setAnalyzeStage('upload', 'Отправка на сервер');
+                const startAnalyzeStage = () => {
+                    if (analyzeProgress && analyzeProgress.stage === 'upload') {
+                        setAnalyzePercent(30);
+                        analyzeProgress.analyzeFrom = performance.now();
+                        setAnalyzeStage('analyze', 'Анализ голоса на сервере');
                     }
-                } catch (saveError) {
-                    console.error('Ошибка при сохранении результата:', saveError);
-                    
-                    // Показываем предупреждение
-                    const warning = document.createElement('div');
-                    warning.className = 'alert alert-warning alert-dismissible fade show position-fixed';
-                    warning.style.cssText = 'top: 20px; right: 20px; z-index: 9999; min-width: 300px;';
-                    warning.innerHTML = `
-                        <strong>Ошибка сохранения.</strong> ${saveError.message}
-                        <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
-                    `;
-                    document.body.appendChild(warning);
-                    setTimeout(() => {
-                        warning.remove();
-                    }, 5000);
+                };
+                const response = await postWithUploadProgress(
+                    `${API_URL}/api/analyze`, formData,
+                    (fraction) => setAnalyzePercent(5 + 25 * fraction),
+                    startAnalyzeStage);
+                startAnalyzeStage();
+
+                if (!response.ok) {
+                    throw new Error(`сервер ответил ${response.status}: ${response.text.slice(0, 200)}`);
                 }
-                
-                // Display results
+                // Сервер сам сохраняет результат в общий список, отдельное сохранение не нужно
+                const result = JSON.parse(response.text);
+                const analyzeSeconds = (performance.now() - analyzeProgress.analyzeFrom) / 1000;
+                try {
+                    const rate = analyzeSeconds / Math.max(audioSeconds, 1);
+                    const prev = parseFloat(localStorage.getItem('audio_park_analyze_rate'));
+                    const next = prev > 0 && isFinite(prev) ? 0.5 * prev + 0.5 * rate : rate;
+                    localStorage.setItem('audio_park_analyze_rate', next.toFixed(2));
+                } catch (e) {}
+
+                finishAnalyzeProgress(null);
                 displayResults(result);
-                
-                // Store result for export
                 window.lastAnalysisResult = result;
-                
+                await loadResults();
+                await loadStats();
             } catch (e) {
-                alert('Ошибка анализа: ' + e.message);
                 console.error(e);
+                finishAnalyzeProgress(e.message);
             } finally {
-                progressContainer.style.display = 'none';
-                document.getElementById('analyze-btn').disabled = false;
+                analyzeBtn.disabled = false;
+                analyzeBtn.textContent = 'Анализировать';
             }
         }
-        
+
         async function resampleAudio(buffer, targetSampleRate) {
             if (buffer.sampleRate === targetSampleRate) {
                 return buffer;
