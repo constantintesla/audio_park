@@ -127,6 +127,7 @@ DEVICE_INFO_FIELDS = {
     'input_format': str,       # формат записи: 'wav', 'm4a' и т.п.
     'sample_rate': int,        # частота дискретизации записи
     'noise_floor_dbfs': float, # уровень шума по калибровочной тишине перед записью
+    'spl_offset_db': float,    # поправка dBFS -> dB SPL из калибровки устройства
 }
 
 
