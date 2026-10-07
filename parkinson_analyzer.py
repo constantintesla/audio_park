@@ -473,6 +473,22 @@ class ParkinsonAnalyzer:
                 }
             
             # Проверка наличия всех параметров (должны быть > 0)
+            # I-Low в DSI - абсолютный уровень в дБ SPL. Без калибровки устройства
+            # он известен только с точностью до чувствительности микрофона,
+            # поэтому балл DSI не выдаем, а показываем I-Low в dBFS.
+            if features.get('i_low_calibrated', 1.0) == 0.0:
+                return {
+                    "dsi_score": None,
+                    "dsi_range": "Нужна калибровка устройства",
+                    "dsi_breakdown": {
+                        "mpt_sec": round(mpt_sec, 2),
+                        "f0_high_hz": round(f0_high_hz, 1),
+                        "i_low_dbfs": round(float(features.get('i_low_dbfs', 0.0)), 1),
+                        "jitter_percent": round(jitter_percent, 2)
+                    },
+                    "error": "I-Low требует калибровки устройства (дБ SPL), DSI не рассчитан"
+                }
+
             if mpt_sec <= 0.0 or f0_high_hz <= 0.0 or i_low_db <= 0.0:
                 return {
                     "dsi_score": None,

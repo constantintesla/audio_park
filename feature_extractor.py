@@ -20,11 +20,30 @@ except (ImportError, ModuleNotFoundError) as e:
     print(f"Предупреждение: parselmouth недоступен ({e}). Некоторые функции будут ограничены.")
 
 
+# Уровень сигнала с RMS = 1.0 в шкале Praat (дБ re 2e-5, отсчеты = Па):
+# 20 * log10(1 / 2e-5) ~ 93.98 дБ. Нужен для перевода дБ Praat в dBFS (RMS).
+PRAAT_DB_AT_FULL_SCALE = 20.0 * math.log10(1.0 / 2e-5)
+
+# Типичная чувствительность цифрового MEMS-микрофона телефона:
+# 94 дБ SPL дают -26 dBFS, т.е. дБ SPL = dBFS + 120. Используется, пока
+# для устройства нет калибровки.
+DEFAULT_SPL_OFFSET_DB = 120.0
+
+
 class FeatureExtractor:
     """Класс для извлечения акустических признаков"""
     
-    def __init__(self, sample_rate: int = 16000):
+    def __init__(self, sample_rate: int = 16000,
+                 spl_offset_db: Optional[float] = None):
+        """
+        Args:
+            sample_rate: Частота дискретизации
+            spl_offset_db: Калибровка устройства: дБ SPL = dBFS + spl_offset_db.
+                Если не задана, берется типичное значение DEFAULT_SPL_OFFSET_DB.
+        """
         self.sample_rate = sample_rate
+        self.spl_calibrated = spl_offset_db is not None
+        self.spl_offset_db = float(spl_offset_db) if self.spl_calibrated else DEFAULT_SPL_OFFSET_DB
     
     def extract_all_features(self, audio: np.ndarray) -> Dict[str, float]:
         """
@@ -473,72 +492,12 @@ class FeatureExtractor:
                 audio_normalized = audio / (np.max(np.abs(audio)) + 1e-10)
                 sound = parselmouth.Sound(audio_normalized, sampling_frequency=self.sample_rate)
                 
-                # Используем встроенный метод parselmouth для HNR
-                # HNR через гармоничность (harmonicity) - более точный метод
+                # Praat HNR (cc): to_harmonicity_cc возвращает значения уже в дБ,
+                # кадры без вокализации помечены -200 дБ и не учитываются в "Get mean"
                 harmonicity = sound.to_harmonicity_cc(time_step=0.01)
-                harmonicity_values = harmonicity.values[0]
-                harmonicity_values = harmonicity_values[harmonicity_values > 0]  # Убираем незаполненные
-                
-                if len(harmonicity_values) > 0:
-                    # Harmonicity в parselmouth - это корреляция (0-1), конвертируем в dB
-                    # Parselmouth использует корреляционный метод (cc), который возвращает значения 0-1
-                    # Правильная конвертация зависит от метода расчета harmonicity
-                    # Для корреляционного метода: HNR ≈ 10 * log10(harmonicity / (1 - harmonicity))
-                    # Но для более точной конвертации используем улучшенную формулу
-                    
-                    # Фильтруем выбросы перед расчетом медианы
-                    # Удаляем значения близкие к 0 (шум) и близкие к 1 (артефакты)
-                    valid_harmonicity = harmonicity_values[
-                        (harmonicity_values > 0.1) & (harmonicity_values < 0.99)
-                    ]
-                    
-                    if len(valid_harmonicity) > 0:
-                        # Используем медиану для устойчивости к выбросам
-                        median_harmonicity = np.median(valid_harmonicity)
-                    else:
-                        # Если фильтрация удалила все значения, используем исходные
-                        median_harmonicity = np.median(harmonicity_values)
-                    
-                    if 0 < median_harmonicity < 1:
-                        # Улучшенная формула конвертации harmonicity в HNR
-                        # Для корреляционного метода (cc) в Parselmouth:
-                        # harmonicity = корреляция между соседними периодами
-                        # HNR = 10 * log10(harmonicity / (1 - harmonicity))
-                        # Но для более точных результатов используем скорректированную формулу
-                        
-                        # Базовая формула с защитой от деления на ноль и отрицательных значений
-                        denominator = 1 - median_harmonicity + 1e-10
-                        ratio = median_harmonicity / denominator
-                        
-                        # Проверяем, что ratio положительный и конечный
-                        if ratio > 0 and np.isfinite(ratio):
-                            hnr_parselmouth = 10 * np.log10(ratio)
-                            
-                            # Проверяем результат на inf и nan
-                            if not np.isfinite(hnr_parselmouth):
-                                hnr_parselmouth = None
-                            else:
-                                # Корректировка для более точных результатов
-                                # Parselmouth harmonicity (cc) может занижать значения для здоровых голосов
-                                # Добавляем небольшую коррекцию на основе типичных значений
-                                if hnr_parselmouth < 15.0 and median_harmonicity > 0.3:
-                                    # Если harmonicity разумный (>0.3), но HNR низкий,
-                                    # возможно занижение - добавляем коррекцию
-                                    correction = 2.0 * (median_harmonicity - 0.3)  # До 2 дБ коррекции
-                                    hnr_parselmouth = hnr_parselmouth + correction
-                                    # Проверяем результат после коррекции
-                                    if not np.isfinite(hnr_parselmouth):
-                                        hnr_parselmouth = None
-                        else:
-                            hnr_parselmouth = None
-                        
-                        # Используем настоящие значения без капов
-                        if np.isfinite(hnr_parselmouth) and hnr_parselmouth > 0:
-                            hnr = hnr_parselmouth
-                        else:
-                            hnr = None  # Используем fallback метод
-                    else:
-                        hnr = None  # Используем fallback метод
+                hnr_praat = call(harmonicity, "Get mean", 0, 0)
+                if hnr_praat is not None and np.isfinite(hnr_praat):
+                    hnr = float(hnr_praat)
             except Exception as e:
                 print(f"Предупреждение: не удалось рассчитать HNR через parselmouth: {str(e)}")
         
@@ -763,9 +722,8 @@ class FeatureExtractor:
             f0_high = self._calculate_highest_f0(sound)
             features['f0_high_hz'] = float(f0_high)
             
-            # 3. I-Low - низшая интенсивность в дБ
-            i_low = self._calculate_lowest_intensity(sound)
-            features['i_low_db'] = float(i_low)
+            # 3. I-Low - низшая интенсивность в дБ (по исходному сигналу)
+            features.update(self._calculate_lowest_intensity(audio))
             
         except Exception as e:
             print(f"Ошибка извлечения параметров DSI: {str(e)}")
@@ -898,98 +856,57 @@ class FeatureExtractor:
             print(f"Ошибка расчета F0-High: {str(e)}")
             return 200.0  # Безопасное значение по умолчанию
     
-    def _calculate_lowest_intensity(self, sound) -> float:
+    def _calculate_lowest_intensity(self, audio: np.ndarray) -> Dict[str, float]:
         """
         Расчет низшей интенсивности в дБ (I-Low)
         
         Норма: <45 дБ, при ПД: повышена (>55 дБ, тихий голос)
         Примечание: I-Low - это минимальная интенсивность во время вокализации
         
-        Parselmouth возвращает интенсивность в Паскалях.
-        Для DSI I-Low должен быть в дБ SPL (Sound Pressure Level).
-        Используем правильную конвертацию: I_dB = 20 * log10(I_Pa / I_ref)
-        где I_ref = 2e-5 Па, но нормализуем значения к правильному диапазону.
+        Praat (to_intensity) возвращает интенсивность уже в дБ относительно 2e-5,
+        считая значения отсчетов давлением в Па. Поэтому:
+            уровень в dBFS = дБ_Praat - PRAAT_DB_AT_FULL_SCALE
+            уровень в дБ SPL = dBFS + spl_offset_db (чувствительность устройства)
         
-        Типичные значения интенсивности речи в Parselmouth: 0.01-1.0 Па
-        Это соответствует 60-94 дБ SPL, что слишком высоко.
-        Для DSI нужно использовать относительную интенсивность или нормализованные значения.
+        Считается по исходному сигналу (без нормализации по пику и до любой
+        нормализации громкости), иначе абсолютный уровень теряется.
+        Без калибровки устройства значение в дБ SPL - оценка по типичной
+        чувствительности микрофона, на это указывает i_low_calibrated = 0.
         """
+        result = {
+            'i_low_dbfs': 0.0,
+            'i_low_db': 0.0,
+            'i_low_calibrated': 1.0 if self.spl_calibrated else 0.0,
+        }
         try:
-            intensity = sound.to_intensity(time_step=0.01)
-            intensity_values = intensity.values[0]
+            sound = parselmouth.Sound(audio, sampling_frequency=self.sample_rate)
+            intensity = sound.to_intensity(minimum_pitch=75.0, time_step=0.01)
+            intensity_db = intensity.values[0]
+            times = intensity.xs()
             
-            # Фильтруем только вокализацию (исключаем тишину)
-            # Порог для вокализации (20% от максимума)
-            max_intensity = np.max(intensity_values)
-            if max_intensity <= 0:
-                return 0.0
+            # Вокализация = кадры, где Praat нашел основной тон
+            pitch = sound.to_pitch_ac(time_step=0.01, pitch_floor=50.0, pitch_ceiling=500.0)
+            f0_at_frames = np.array([pitch.get_value_at_time(t) for t in times])
+            voiced = np.isfinite(f0_at_frames) & (f0_at_frames > 0) & np.isfinite(intensity_db)
+            vocal_db = intensity_db[voiced]
             
-            threshold = max_intensity * 0.20
-            vocal_intensities = intensity_values[intensity_values >= threshold]
+            # Если тон не найден, берем кадры не тише 30 дБ от максимума
+            if len(vocal_db) < 5:
+                finite_db = intensity_db[np.isfinite(intensity_db)]
+                if len(finite_db) == 0:
+                    return result
+                vocal_db = finite_db[finite_db >= np.max(finite_db) - 30.0]
             
-            if len(vocal_intensities) > 0:
-                # Фильтруем nan и inf значения перед расчетом перцентиля
-                vocal_intensities_clean = vocal_intensities[np.isfinite(vocal_intensities)]
-                if len(vocal_intensities_clean) > 0:
-                    # Берем 5-й перцентиль как I-Low (самая тихая часть вокализации)
-                    i_low_pa = np.percentile(vocal_intensities_clean, 5)
-                    
-                    # Проверяем результат перцентиля на nan и inf
-                    if not np.isfinite(i_low_pa) or i_low_pa <= 0:
-                        i_low_pa = np.min(vocal_intensities_clean)
-                    
-                    # Для DSI I-Low должен быть в диапазоне 30-60 дБ для нормальной речи
-                    # Parselmouth возвращает значения в Паскалях, которые нужно нормализовать
-                    # Используем относительную интенсивность и масштабируем к правильному диапазону
-                    if i_low_pa > 0 and max_intensity > 0 and np.isfinite(max_intensity):
-                        # Относительная интенсивность (0-1)
-                        relative_intensity = i_low_pa / max_intensity
-                        
-                        # Проверяем результат деления
-                        if not np.isfinite(relative_intensity) or relative_intensity <= 0:
-                            relative_intensity = 0.1  # Безопасное значение по умолчанию
-                        
-                        # Масштабируем к диапазону 30-60 дБ для нормальной речи
-                        # Минимальная интенсивность (5-й перцентиль) -> 30-40 дБ
-                        # Максимальная интенсивность -> 55-60 дБ
-                        # Используем линейную интерполяцию: 30 + (relative * 30)
-                        i_low_db = 30 + (relative_intensity * 30)
-                        
-                        # Проверяем результат на nan и inf
-                        if not np.isfinite(i_low_db):
-                            i_low_db = 40.0  # Безопасное значение по умолчанию
-                        
-                        # Ограничиваем диапазон 25-65 дБ
-                        i_low_db = max(25, min(65, i_low_db))
-                        
-                        return float(i_low_db)
-                    else:
-                        return 40.0  # Безопасное значение по умолчанию
-                else:
-                    return 40.0  # Безопасное значение по умолчанию
-            else:
-                # Если нет вокализации, возвращаем минимальное значение в дБ
-                valid_intensities = intensity_values[intensity_values > 0]
-                # Фильтруем nan и inf
-                valid_intensities = valid_intensities[np.isfinite(valid_intensities)]
-                if len(valid_intensities) > 0:
-                    min_intensity = np.min(valid_intensities)
-                    if (min_intensity > 0 and max_intensity > 0 and 
-                        np.isfinite(min_intensity) and np.isfinite(max_intensity)):
-                        relative_intensity = min_intensity / max_intensity
-                        # Проверяем результат деления
-                        if np.isfinite(relative_intensity) and relative_intensity > 0:
-                            i_low_db = 30 + (relative_intensity * 30)
-                            # Проверяем результат на nan и inf
-                            if np.isfinite(i_low_db):
-                                # Строго ограничиваем диапазон 25-65 дБ
-                                i_low_db = max(25.0, min(65.0, i_low_db))
-                                return float(i_low_db)
-                
-                # Если вообще нет данных, возвращаем среднее значение
-                return 40.0
+            # 5-й перцентиль - самая тихая часть вокализации
+            i_low_praat_db = float(np.percentile(vocal_db, 5))
+            if not np.isfinite(i_low_praat_db):
+                return result
+            
+            i_low_dbfs = i_low_praat_db - PRAAT_DB_AT_FULL_SCALE
+            result['i_low_dbfs'] = float(i_low_dbfs)
+            result['i_low_db'] = float(i_low_dbfs + self.spl_offset_db)
+            return result
                 
         except Exception as e:
             print(f"Ошибка расчета I-Low: {str(e)}")
-            # Возвращаем среднее значение вместо 0, чтобы не ломать DSI расчет
-            return 40.0
+            return result
