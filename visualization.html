@@ -378,10 +378,13 @@
             });
         }
         
+        // Префикс пути, чтобы страница работала и в корне, и за прокси (например /audio_park)
+        const API_URL = window.location.pathname.replace(/\/(index\.html|results|visualization)?\/?$/, '');
+
         // Загрузка списка результатов
         async function loadResults(preselectIndex = null) {
             try {
-                const response = await fetch('/api/results');
+                const response = await fetch(`${API_URL}/api/results`);
                 const data = await response.json();
                 
                 const select = document.getElementById('result-select');
@@ -433,12 +436,12 @@
             
             try {
                 // Загрузка результата
-                const resultResponse = await fetch(`/api/results/${index}`);
+                const resultResponse = await fetch(`${API_URL}/api/results/${index}`);
                 const result = await resultResponse.json();
                 currentData = result;
                 
                 // Загрузка данных визуализации
-                const vizResponse = await fetch(`/api/visualization/${index}`);
+                const vizResponse = await fetch(`${API_URL}/api/visualization/${index}`);
                 const vizData = await vizResponse.json();
                 
                 if (vizData.error) {
@@ -465,7 +468,7 @@
             
             // Инициализация аудио плеера
             if (vizData.audio_url) {
-                initAudioPlayer(vizData.audio_url);
+                initAudioPlayer(API_URL + vizData.audio_url);
             } else {
                 document.querySelector('.audio-player').innerHTML = 
                     '<div class="error">Аудиофайл недоступен</div>';
