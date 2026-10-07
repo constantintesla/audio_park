@@ -156,6 +156,37 @@ def parse_device_info(raw: Optional[str]) -> Dict:
     return info
 
 
+MAX_CALIBRATION_JSON = 20000  # байт; результаты калибровки — небольшой словарь
+
+
+def parse_calibration(raw: Optional[str]) -> Optional[Dict]:
+    """
+    Результаты калибровки, которые веб-рекордер измерил перед записью
+    (тишина + тестовый свип + ступенька тона). Сохраняются в результат как есть.
+    """
+    if not raw or len(raw) > MAX_CALIBRATION_JSON:
+        return None
+    try:
+        data = json.loads(raw)
+    except (ValueError, TypeError):
+        logger.warning("Некорректный JSON в calibration, поле проигнорировано")
+        return None
+    return clean_json_values(data) if isinstance(data, dict) else None
+
+
+def save_calibration_audio(file, result: Dict) -> None:
+    """Сохраняет запись калибровки рядом с сырыми данными анализа"""
+    data_dir = result.get('raw_data', {}).get('data_directory')
+    if not file or not data_dir or not os.path.isdir(data_dir):
+        return
+    try:
+        path = os.path.join(data_dir, 'calibration.wav')
+        file.save(path)
+        result['raw_data'].setdefault('files', {})['calibration_audio'] = path
+    except Exception as e:
+        logger.warning(f"Не удалось сохранить запись калибровки: {e}")
+
+
 @app.route('/api/analyze', methods=['POST'])
 def analyze_audio():
     """Анализ аудиофайла с сохранением сырых данных"""
@@ -189,6 +220,10 @@ def analyze_audio():
             analyzer = ParkinsonAnalyzer(save_raw_data=True, raw_data_dir=results_dir_abs)
             result = analyzer.analyze_audio_file(temp_file, save_raw=True, result_id=result_id,
                                                  device_info=device_info)
+            calibration = parse_calibration(request.form.get('calibration'))
+            if calibration:
+                result['calibration'] = calibration
+            save_calibration_audio(request.files.get('calibration_file'), result)
             
             # Добавление информации о пользователе
             result['user_info'] = {
@@ -360,6 +395,8 @@ def recalculate_all():
                 # Сохраняем оригинальные raw_data (пути к файлам)
                 if raw_data:
                     new_result['raw_data'] = raw_data
+                if result.get('calibration'):
+                    new_result['calibration'] = result['calibration']
                 
                 # Обновляем результат в списке
                 results[idx] = clean_json_values(new_result)

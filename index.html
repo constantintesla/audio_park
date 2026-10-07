@@ -130,6 +130,65 @@
             animation: pulse 1.5s infinite;
         }
         
+        #live-recorder {
+            margin: 20px 0;
+        }
+        
+        .rec-status {
+            font-weight: 600;
+            padding: 8px 12px;
+            border-radius: 8px;
+            margin-bottom: 8px;
+            background: #eef3f8;
+        }
+        
+        .rec-status-silence { background: #eef1f4; color: #4a5560; }
+        .rec-status-signal { background: #fff3e0; color: #8a4b00; }
+        .rec-status-speech { background: #fdecee; color: #a71d2a; }
+        
+        #live-wave {
+            width: 100%;
+            height: 120px;
+            display: block;
+            background: #f7f9fb;
+            border-radius: 10px;
+        }
+        
+        .level-meter {
+            height: 8px;
+            background: #e3e8ee;
+            border-radius: 4px;
+            overflow: hidden;
+            margin-top: 8px;
+        }
+        
+        #level-bar {
+            height: 100%;
+            width: 0;
+            transition: width 0.05s linear;
+        }
+        
+        #level-bar.level-low { background: #9aa5b1; }
+        #level-bar.level-ok { background: #28a745; }
+        #level-bar.level-hot { background: #dc3545; }
+        
+        .live-meta {
+            display: flex;
+            justify-content: space-between;
+            font-size: 0.85rem;
+            color: var(--medical-grey);
+            margin-top: 4px;
+        }
+        
+        #clip-indicator {
+            visibility: hidden;
+            color: #fff;
+            background: #dc3545;
+            border-radius: 4px;
+            padding: 0 6px;
+            font-weight: 700;
+        }
+        
         @keyframes pulse {
             0%, 100% { opacity: 1; }
             50% { opacity: 0.6; }
@@ -391,7 +450,24 @@
                 <div class="text-center">
                     <button id="record-btn" class="btn btn-record">🎤 Записать с микрофона</button>
                     <button id="analyze-btn" class="btn btn-primary" disabled>Анализировать</button>
+                    <div class="form-check d-inline-block mt-2 ms-2">
+                        <input class="form-check-input" type="checkbox" id="calibrate-check" checked>
+                        <label class="form-check-label" for="calibrate-check">Калибровка перед записью (тишина + тестовый звук, ~7 с)</label>
+                    </div>
                 </div>
+                
+                <div id="live-recorder" style="display: none;">
+                    <div id="rec-status" class="rec-status"></div>
+                    <canvas id="live-wave"></canvas>
+                    <div class="level-meter"><div id="level-bar"></div></div>
+                    <div class="live-meta">
+                        <span id="level-text">— dBFS</span>
+                        <span id="clip-indicator">ПЕРЕГРУЗ</span>
+                        <span id="rec-timer"></span>
+                    </div>
+                </div>
+                
+                <div id="calibration-info" class="audio-info" style="display: none;"></div>
                 
                 <div id="audio-info" class="audio-info" style="display: none;">
                     <strong>Загружено:</strong> <span id="audio-name"></span><br>
@@ -601,8 +677,6 @@
         let audioContext = null;
         let audioBuffer = null;
         let wavesurfer = null;
-        let mediaRecorder = null;
-        let recordedChunks = [];
         let isRecording = false;
         let featuresChart = null;
         let symptomsChart = null;
@@ -1559,92 +1633,608 @@
             }
         }
         
+        // ===== Запись с микрофона: живая волна + калибровка =====
+        // Перед записью проигрывается калибровочный сигнал и записывается вместе с микрофоном:
+        //   1) 3 с тишины — уровень шума устройства (noise_floor_dbfs);
+        //   2) свип 100 Гц → 8 кГц, 2 с — полоса частот микрофона;
+        //   3) тон 1 кГц со ступенькой −12 дБ — включена ли автоматическая регулировка усиления;
+        //   4) короткий сигнал «говорите» — дальше идет речь.
+        // Абсолютную громкость калибровка не измеряет: громкость динамика у всех разная.
+        const CAL = {
+            silence: 3.0,
+            sweep: 2.0, sweepF0: 100, sweepF1: 8000, sweepGain: 0.3,
+            gap: 0.3,
+            tone: 0.7, toneHz: 1000, toneLow: 0.1, toneHigh: 0.4,  // ступенька +12 дБ
+            tail: 0.5,
+            beep: 0.15, beepHz: 1500
+        };
+        const CAL_BANDS = [[100, 200], [200, 400], [400, 800], [800, 1600], [1600, 3200], [3200, 6400], [6400, 8000]];
+        const RAW_MIC_CONSTRAINTS = {
+            echoCancellation: false,
+            noiseSuppression: false,
+            autoGainControl: false,
+            channelCount: 1
+        };
+        let rec = null;              // состояние текущей записи
+        let lastRecording = null;    // { calibration, deviceInfo, calibrationWav } последней записи с микрофона
+
+        function getUserMediaFn() {
+            if (window.location.protocol === 'file:') {
+                throw new Error('Страница открыта напрямую из файла. Пожалуйста, запустите сервер (python start_api.py) и откройте страницу через http://localhost:5000');
+            }
+            if (navigator.mediaDevices && navigator.mediaDevices.getUserMedia) {
+                return navigator.mediaDevices.getUserMedia.bind(navigator.mediaDevices);
+            }
+            let errorMsg = 'Ваш браузер не поддерживает доступ к микрофону.\n\n';
+            errorMsg += 'Возможные решения:\n';
+            errorMsg += '1. Откройте страницу через HTTPS (или http://localhost)\n';
+            errorMsg += '2. Используйте современный браузер (Chrome, Firefox, Edge, Safari)\n';
+            errorMsg += '3. Проверьте, разрешен ли доступ к микрофону в настройках браузера\n\n';
+            errorMsg += `Диагностика: протокол ${window.location.protocol}, mediaDevices: ${typeof navigator.mediaDevices}`;
+            throw new Error(errorMsg);
+        }
+
         async function startRecording() {
+            if (rec) return;
             try {
-                // Проверка протокола - должен быть http:// или https://, не file://
-                const protocol = window.location.protocol;
-                const hostname = window.location.hostname;
-                
-                if (protocol === 'file:') {
-                    throw new Error('Страница открыта напрямую из файла. Пожалуйста, запустите сервер (python start_api.py) и откройте страницу через http://localhost:5000');
+                const getUserMedia = getUserMediaFn();
+                if (audioContext.state === 'suspended') {
+                    await audioContext.resume();
                 }
-                
-                // Проверка доступности API для работы с микрофоном
-                let getUserMedia = null;
-                
-                if (navigator.mediaDevices && navigator.mediaDevices.getUserMedia) {
-                    // Современный API
-                    getUserMedia = navigator.mediaDevices.getUserMedia.bind(navigator.mediaDevices);
-                } else if (navigator.getUserMedia) {
-                    // Fallback для старых браузеров
-                    getUserMedia = (constraints) => {
-                        return new Promise((resolve, reject) => {
-                            navigator.getUserMedia(constraints, resolve, reject);
-                        });
-                    };
-                } else {
-                    // Детальная диагностика
-                    const diagnostics = [];
-                    diagnostics.push(`Протокол: ${protocol}`);
-                    diagnostics.push(`Hostname: ${hostname}`);
-                    diagnostics.push(`navigator.mediaDevices: ${typeof navigator.mediaDevices}`);
-                    diagnostics.push(`navigator.getUserMedia: ${typeof navigator.getUserMedia}`);
-                    diagnostics.push(`User Agent: ${navigator.userAgent}`);
-                    
-                    console.error('Диагностика доступа к микрофону:', diagnostics);
-                    
-                    let errorMsg = 'Ваш браузер не поддерживает доступ к микрофону.\n\n';
-                    errorMsg += 'Возможные решения:\n';
-                    errorMsg += '1. Убедитесь, что страница открыта через HTTP/HTTPS сервер (не file://)\n';
-                    errorMsg += '2. Запустите сервер: python start_api.py\n';
-                    errorMsg += '3. Откройте страницу: http://localhost:5000\n';
-                    errorMsg += '4. Используйте современный браузер (Chrome, Firefox, Edge)\n';
-                    errorMsg += '5. Проверьте настройки браузера - разрешен ли доступ к микрофону\n\n';
-                    errorMsg += `Диагностика: ${diagnostics.join(', ')}`;
-                    
-                    throw new Error(errorMsg);
+                // Просим «сырой» микрофон: без шумоподавления, эхоподавления и АРУ браузера
+                let stream;
+                try {
+                    stream = await getUserMedia({ audio: RAW_MIC_CONSTRAINTS });
+                } catch (e) {
+                    if (e.name === 'NotAllowedError' || e.name === 'SecurityError') throw e;
+                    stream = await getUserMedia({ audio: true });
                 }
-                
-                const stream = await getUserMedia({ audio: true });
-                mediaRecorder = new MediaRecorder(stream);
-                recordedChunks = [];
-                
-                mediaRecorder.ondataavailable = (e) => {
-                    if (e.data.size > 0) {
-                        recordedChunks.push(e.data);
+                const track = stream.getAudioTracks()[0];
+                const settings = track && track.getSettings ? track.getSettings() : {};
+
+                const source = audioContext.createMediaStreamSource(stream);
+                const analyser = audioContext.createAnalyser();
+                analyser.fftSize = 2048;
+                const processor = audioContext.createScriptProcessor(4096, 1, 1);
+                const mute = audioContext.createGain();
+                mute.gain.value = 0;
+                source.connect(analyser);
+                source.connect(processor);
+                processor.connect(mute);
+                mute.connect(audioContext.destination);
+
+                rec = {
+                    stream, track, settings, source, analyser, processor, mute,
+                    sr: audioContext.sampleRate,
+                    chunks: [], nSamples: 0,
+                    calibrate: document.getElementById('calibrate-check').checked,
+                    phase: 'start', speechStart: null, plan: null,
+                    stopped: false, clipUntil: 0, columns: [], raf: null
+                };
+                processor.onaudioprocess = (e) => {
+                    if (!rec || rec.stopped) return;
+                    const data = new Float32Array(e.inputBuffer.getChannelData(0));
+                    rec.chunks.push(data);
+                    rec.nSamples += data.length;
+                    for (let i = 0; i < data.length; i++) {
+                        if (Math.abs(data[i]) >= 0.98) { rec.clipUntil = performance.now() + 1000; break; }
                     }
                 };
-                
-                mediaRecorder.onstop = async () => {
-                    const blob = new Blob(recordedChunks, { type: 'audio/wav' });
-                    const arrayBuffer = await blob.arrayBuffer();
-                    audioBuffer = await audioContext.decodeAudioData(arrayBuffer);
-                    
-                    displayAudioInfo('Запись с микрофона', audioBuffer);
-                    initWaveform(audioBuffer);
-                    document.getElementById('analyze-btn').disabled = false;
-                    
-                    stream.getTracks().forEach(track => track.stop());
-                };
-                
-                mediaRecorder.start();
+
                 isRecording = true;
-                document.getElementById('record-btn').classList.add('recording');
-                document.getElementById('record-btn').textContent = '⏹ Остановить запись';
+                const recordBtn = document.getElementById('record-btn');
+                recordBtn.classList.add('recording');
+                recordBtn.textContent = '⏹ Остановить запись';
+                document.getElementById('analyze-btn').disabled = true;
+                document.getElementById('calibration-info').style.display = 'none';
+                document.getElementById('live-recorder').style.display = 'block';
+                rec.startedAt = performance.now();
+                drawLive();
+
+                await runRecordingPhases(rec);
             } catch (e) {
+                cleanupRecording();
                 alert('Ошибка доступа к микрофону: ' + e.message);
             }
         }
-        
+
+        function setRecPhase(phase, text) {
+            if (!rec) return;
+            rec.phase = phase;
+            const status = document.getElementById('rec-status');
+            status.textContent = text;
+            status.className = 'rec-status rec-status-' + phase;
+        }
+
+        // Ждем, пока микрофон наберет нужное число отсчетов; false — запись остановили
+        function waitForSample(state, sampleIndex) {
+            return new Promise(resolve => {
+                const check = () => {
+                    if (state.stopped) return resolve(false);
+                    if (state.nSamples >= sampleIndex) return resolve(true);
+                    setTimeout(check, 30);
+                };
+                check();
+            });
+        }
+
+        async function runRecordingPhases(state) {
+            if (!state.calibrate) {
+                state.speechStart = 0;
+                setRecPhase('speech', '🔴 Идет запись. Говорите. Нажмите «Остановить», когда закончите');
+                return;
+            }
+            setRecPhase('silence', '🤫 Калибровка: 3 секунды тишины, пожалуйста, молчите');
+            if (!await waitForSample(state, Math.round(CAL.silence * state.sr))) return;
+            state.silenceEnd = state.nSamples;
+
+            setRecPhase('signal', '🔊 Калибровка: звучит тестовый сигнал, держите устройство как при записи');
+            state.plan = playCalibrationSignal(state);
+            if (!await waitForSample(state, state.plan.end + Math.round(CAL.tail * state.sr))) return;
+
+            const beep = playBeep(state);
+            // С запасом на задержку динамик → микрофон (Bluetooth бывает до ~0.3 с)
+            if (!await waitForSample(state, beep.end + Math.round(0.5 * state.sr))) return;
+            state.speechStart = state.nSamples;
+            setRecPhase('speech', '🔴 Идет запись. Говорите. Нажмите «Остановить», когда закончите');
+        }
+
+        // Время AudioContext -> номер отсчета в записи (с точностью до буфера; задержку уточняем по записи)
+        function timeToSampleMapper(state) {
+            const markSample = state.nSamples;
+            const markTime = audioContext.currentTime;
+            return (time) => Math.round(markSample + (time - markTime) * state.sr);
+        }
+
+        function playCalibrationSignal(state) {
+            const ctx = audioContext;
+            const toSample = timeToSampleMapper(state);
+            const t0 = ctx.currentTime + 0.15;
+            const ramp = 0.02;
+
+            // Экспоненциальный свип: каждая октава звучит одинаковое время
+            const sweep = ctx.createOscillator();
+            sweep.type = 'sine';
+            sweep.frequency.setValueAtTime(CAL.sweepF0, t0);
+            sweep.frequency.exponentialRampToValueAtTime(CAL.sweepF1, t0 + CAL.sweep);
+            const sweepGain = ctx.createGain();
+            sweepGain.gain.setValueAtTime(0, t0);
+            sweepGain.gain.linearRampToValueAtTime(CAL.sweepGain, t0 + ramp);
+            sweepGain.gain.setValueAtTime(CAL.sweepGain, t0 + CAL.sweep - ramp);
+            sweepGain.gain.linearRampToValueAtTime(0, t0 + CAL.sweep);
+            sweep.connect(sweepGain).connect(ctx.destination);
+            sweep.start(t0);
+            sweep.stop(t0 + CAL.sweep + 0.05);
+
+            // Тон: тихая половина, затем громкая. АРУ успевает поднять усиление на тихой
+            // и быстро гасит громкую, поэтому разница выходит заметно меньше 12 дБ
+            const t1 = t0 + CAL.sweep + CAL.gap;
+            const tone = ctx.createOscillator();
+            tone.type = 'sine';
+            tone.frequency.value = CAL.toneHz;
+            const toneGain = ctx.createGain();
+            toneGain.gain.setValueAtTime(0, t1);
+            toneGain.gain.linearRampToValueAtTime(CAL.toneLow, t1 + ramp);
+            toneGain.gain.setValueAtTime(CAL.toneLow, t1 + CAL.tone - ramp);
+            toneGain.gain.linearRampToValueAtTime(CAL.toneHigh, t1 + CAL.tone);
+            toneGain.gain.setValueAtTime(CAL.toneHigh, t1 + 2 * CAL.tone - ramp);
+            toneGain.gain.linearRampToValueAtTime(0, t1 + 2 * CAL.tone);
+            tone.connect(toneGain).connect(ctx.destination);
+            tone.start(t1);
+            tone.stop(t1 + 2 * CAL.tone + 0.05);
+
+            return {
+                sweepStart: toSample(t0),
+                toneStart: toSample(t1),
+                end: toSample(t1 + 2 * CAL.tone)
+            };
+        }
+
+        function playBeep(state) {
+            const ctx = audioContext;
+            const toSample = timeToSampleMapper(state);
+            const t0 = ctx.currentTime + 0.05;
+            const osc = ctx.createOscillator();
+            osc.frequency.value = CAL.beepHz;
+            const g = ctx.createGain();
+            g.gain.setValueAtTime(0, t0);
+            g.gain.linearRampToValueAtTime(0.3, t0 + 0.01);
+            g.gain.setValueAtTime(0.3, t0 + CAL.beep - 0.01);
+            g.gain.linearRampToValueAtTime(0, t0 + CAL.beep);
+            osc.connect(g).connect(ctx.destination);
+            osc.start(t0);
+            osc.stop(t0 + CAL.beep + 0.05);
+            return { end: toSample(t0 + CAL.beep) };
+        }
+
+        // Живая волна: каждый кадр экрана добавляет столбик min/max последних отсчетов
+        function drawLive() {
+            if (!rec) return;
+            const canvas = document.getElementById('live-wave');
+            const dpr = window.devicePixelRatio || 1;
+            const width = canvas.clientWidth;
+            const height = canvas.clientHeight;
+            if (canvas.width !== Math.round(width * dpr) || canvas.height !== Math.round(height * dpr)) {
+                canvas.width = Math.round(width * dpr);
+                canvas.height = Math.round(height * dpr);
+            }
+            const ctx = canvas.getContext('2d');
+            ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+
+            const buf = new Float32Array(rec.analyser.fftSize);
+            rec.analyser.getFloatTimeDomainData(buf);
+            const recent = buf.subarray(buf.length - Math.min(buf.length, Math.round(rec.sr / 60)));
+            let min = 0, max = 0;
+            for (let i = 0; i < recent.length; i++) {
+                if (recent[i] < min) min = recent[i];
+                if (recent[i] > max) max = recent[i];
+            }
+            let sumSq = 0;
+            for (let i = 0; i < buf.length; i++) sumSq += buf[i] * buf[i];
+            const rmsDb = 20 * Math.log10(Math.sqrt(sumSq / buf.length) + 1e-10);
+
+            rec.columns.push({ min, max, phase: rec.phase });
+            const maxColumns = Math.max(1, Math.floor(width / 2));
+            if (rec.columns.length > maxColumns) rec.columns.splice(0, rec.columns.length - maxColumns);
+
+            ctx.clearRect(0, 0, width, height);
+            const mid = height / 2;
+            ctx.strokeStyle = 'rgba(128,128,128,0.4)';
+            ctx.beginPath();
+            ctx.moveTo(0, mid);
+            ctx.lineTo(width, mid);
+            ctx.stroke();
+            const colors = { speech: '#2c5f8d', silence: '#9aa5b1', signal: '#e08a1e', start: '#9aa5b1' };
+            const offset = width - rec.columns.length * 2;
+            rec.columns.forEach((c, i) => {
+                // Масштаб с запасом, чтобы тихая речь тоже была видна
+                const top = Math.max(-1, Math.min(1, c.max * 1.5));
+                const bottom = Math.max(-1, Math.min(1, c.min * 1.5));
+                ctx.fillStyle = colors[c.phase] || '#2c5f8d';
+                ctx.fillRect(offset + i * 2, mid - top * mid, 1.5, Math.max(1, (top - bottom) * mid));
+            });
+
+            // Индикатор уровня: шкала от −60 до 0 dBFS
+            const pct = Math.max(0, Math.min(100, (rmsDb + 60) / 60 * 100));
+            const bar = document.getElementById('level-bar');
+            bar.style.width = pct + '%';
+            bar.className = rmsDb > -6 ? 'level-hot' : (rmsDb > -40 ? 'level-ok' : 'level-low');
+            document.getElementById('level-text').textContent = `${Math.max(rmsDb, -99).toFixed(0)} dBFS`;
+            document.getElementById('clip-indicator').style.visibility =
+                performance.now() < rec.clipUntil ? 'visible' : 'hidden';
+            const seconds = rec.speechStart !== null ? (rec.nSamples - rec.speechStart) / rec.sr : 0;
+            document.getElementById('rec-timer').textContent =
+                rec.phase === 'speech' ? `запись ${Math.max(0, seconds).toFixed(1)} с` : 'калибровка';
+
+            rec.raf = requestAnimationFrame(drawLive);
+        }
+
+        function cleanupRecording() {
+            if (rec) {
+                rec.stopped = true;
+                if (rec.raf) cancelAnimationFrame(rec.raf);
+                try { rec.processor.disconnect(); } catch (e) {}
+                try { rec.source.disconnect(); } catch (e) {}
+                try { rec.mute.disconnect(); } catch (e) {}
+                rec.stream.getTracks().forEach(track => track.stop());
+            }
+            rec = null;
+            isRecording = false;
+            const recordBtn = document.getElementById('record-btn');
+            recordBtn.classList.remove('recording');
+            recordBtn.textContent = '🎤 Записать с микрофона';
+            document.getElementById('live-recorder').style.display = 'none';
+        }
+
         function stopRecording() {
-            if (mediaRecorder && isRecording) {
-                mediaRecorder.stop();
-                isRecording = false;
-                document.getElementById('record-btn').classList.remove('recording');
-                document.getElementById('record-btn').textContent = '🎤 Записать с микрофона';
+            if (!rec) return;
+            const state = rec;
+            state.stopped = true;
+            cleanupRecording();
+
+            const all = new Float32Array(state.nSamples);
+            let pos = 0;
+            for (const chunk of state.chunks) {
+                all.set(chunk, pos);
+                pos += chunk.length;
+            }
+            if (state.speechStart === null) {
+                alert('Запись остановлена во время калибровки. Нажмите «Записать» еще раз и дождитесь сигнала «говорите».');
+                return;
+            }
+            const speech = all.subarray(state.speechStart);
+            if (speech.length < state.sr * 0.5) {
+                alert('Запись слишком короткая. Попробуйте еще раз.');
+                return;
+            }
+
+            audioBuffer = audioContext.createBuffer(1, speech.length, state.sr);
+            audioBuffer.getChannelData(0).set(speech);
+
+            let calibration = null;
+            let calibrationWav = null;
+            if (state.calibrate) {
+                const calSamples = all.subarray(0, state.speechStart);
+                calibration = analyzeCalibration(calSamples, state);
+                const calBuffer = audioContext.createBuffer(1, calSamples.length, state.sr);
+                calBuffer.getChannelData(0).set(calSamples);
+                calibrationWav = audioBufferToWav(calBuffer, state.sr);
+            }
+            lastRecording = {
+                calibration,
+                calibrationWav,
+                deviceInfo: buildDeviceInfo(state, calibration),
+                buffer: audioBuffer
+            };
+
+            displayAudioInfo('Запись с микрофона', audioBuffer);
+            displayCalibration(calibration);
+            initWaveform(audioBuffer);
+            document.getElementById('analyze-btn').disabled = false;
+        }
+
+        // Уровни кадров в dBFS (25 мс, шаг 10 мс — как в recording_quality.py)
+        function frameLevelsDb(samples, start, end, sr, frameSec = 0.025, hopSec = 0.010) {
+            const frame = Math.round(frameSec * sr);
+            const hop = Math.round(hopSec * sr);
+            start = Math.max(0, Math.round(start));
+            end = Math.min(samples.length, Math.round(end));
+            const levels = [];
+            for (let s = start; s + frame <= end; s += hop) {
+                let sum = 0;
+                for (let i = s; i < s + frame; i++) sum += samples[i] * samples[i];
+                levels.push({ start: s, db: 20 * Math.log10(Math.sqrt(sum / frame) + 1e-10) });
+            }
+            return levels;
+        }
+
+        function percentile(values, p) {
+            if (!values.length) return null;
+            const sorted = [...values].sort((a, b) => a - b);
+            const idx = Math.min(sorted.length - 1, Math.max(0, Math.round(p / 100 * (sorted.length - 1))));
+            return sorted[idx];
+        }
+
+        function round1(x) {
+            return x === null || x === undefined || !isFinite(x) ? null : Math.round(x * 10) / 10;
+        }
+
+        // Эталонный экспоненциальный свип — такой же, как его играет Web Audio
+        function referenceSweep(sr) {
+            const n = Math.round(CAL.sweep * sr);
+            const k = CAL.sweep / Math.log(CAL.sweepF1 / CAL.sweepF0);
+            const ref = new Float64Array(n);
+            for (let i = 0; i < n; i++) {
+                ref[i] = Math.sin(2 * Math.PI * CAL.sweepF0 * k * (Math.exp(i / sr / k) - 1));
+            }
+            return ref;
+        }
+
+        // Быстрое преобразование Фурье на месте (radix-2), длина — степень двойки
+        function fft(re, im, inverse) {
+            const n = re.length;
+            for (let i = 1, j = 0; i < n; i++) {
+                let bit = n >> 1;
+                for (; j & bit; bit >>= 1) j ^= bit;
+                j ^= bit;
+                if (i < j) {
+                    [re[i], re[j]] = [re[j], re[i]];
+                    [im[i], im[j]] = [im[j], im[i]];
+                }
+            }
+            for (let len = 2; len <= n; len <<= 1) {
+                const ang = (inverse ? 2 : -2) * Math.PI / len;
+                const wr = Math.cos(ang), wi = Math.sin(ang);
+                for (let i = 0; i < n; i += len) {
+                    let cr = 1, ci = 0;
+                    for (let j = 0; j < len / 2; j++) {
+                        const a = i + j, b = a + len / 2;
+                        const tr = re[b] * cr - im[b] * ci;
+                        const ti = re[b] * ci + im[b] * cr;
+                        re[b] = re[a] - tr; im[b] = im[a] - ti;
+                        re[a] += tr; im[a] += ti;
+                        const ncr = cr * wr - ci * wi;
+                        ci = cr * wi + ci * wr;
+                        cr = ncr;
+                    }
+                }
             }
         }
-        
+
+        // Сдвиг (в отсчетах) записанного свипа относительно запланированного начала
+        function findSweepLag(samples, expectedStart, sr) {
+            const minLag = -Math.round(0.15 * sr);
+            const maxLag = Math.round(0.8 * sr);
+            const ref = referenceSweep(sr);
+            const segStart = Math.max(0, expectedStart + minLag);
+            const segEnd = Math.min(samples.length, expectedStart + maxLag + ref.length);
+            if (segEnd - segStart < ref.length) return 0;
+            let n = 1;
+            while (n < (segEnd - segStart) + ref.length) n <<= 1;
+            const xr = new Float64Array(n), xi = new Float64Array(n);
+            const yr = new Float64Array(n), yi = new Float64Array(n);
+            for (let i = segStart; i < segEnd; i++) xr[i - segStart] = samples[i];
+            yr.set(ref);
+            fft(xr, xi, false);
+            fft(yr, yi, false);
+            // X · conj(Y) -> взаимная корреляция
+            for (let i = 0; i < n; i++) {
+                const r = xr[i] * yr[i] + xi[i] * yi[i];
+                const im = xi[i] * yr[i] - xr[i] * yi[i];
+                xr[i] = r; xi[i] = im;
+            }
+            fft(xr, xi, true);
+            let best = 0, bestValue = -Infinity;
+            for (let shift = 0; shift + ref.length <= segEnd - segStart; shift++) {
+                const v = Math.abs(xr[shift]);
+                if (v > bestValue) { bestValue = v; best = shift; }
+            }
+            return segStart + best - expectedStart;
+        }
+
+        function analyzeCalibration(samples, state) {
+            const sr = state.sr;
+            const plan = state.plan;
+            const warnings = [];
+            const result = {
+                version: 1,
+                sample_rate: sr,
+                signal: {
+                    silence_s: CAL.silence, sweep_s: CAL.sweep, sweep_hz: [CAL.sweepF0, CAL.sweepF1],
+                    tone_hz: CAL.toneHz, tone_step_db: round1(20 * Math.log10(CAL.toneHigh / CAL.toneLow))
+                },
+                browser_settings: {
+                    echoCancellation: state.settings.echoCancellation,
+                    noiseSuppression: state.settings.noiseSuppression,
+                    autoGainControl: state.settings.autoGainControl,
+                    sampleRate: state.settings.sampleRate,
+                    channelCount: state.settings.channelCount
+                }
+            };
+
+            // 1. Шум: медиана уровней тишины, первые 0.5 с пропускаем (щелчок включения микрофона)
+            const silence = frameLevelsDb(samples, 0.5 * sr, state.silenceEnd, sr).map(f => f.db);
+            // Цифровой ноль (−200 dBFS) ограничиваем, чтобы не раздувать SNR
+            const noiseRaw = percentile(silence, 50);
+            const noise = noiseRaw === null ? null : Math.max(noiseRaw, -120);
+            result.noise_floor_dbfs = round1(noise);
+            if (noise !== null && noise > -45) {
+                warnings.push(`Шумно: фон ${noise.toFixed(0)} dBFS. Найдите место потише.`);
+            }
+
+            // 2. Ищем свип в записи взаимной корреляцией с эталоном: так узнаем задержку
+            // динамик → микрофон даже при шуме и завале низких частот у динамика
+            const lag = findSweepLag(samples, plan.sweepStart, sr);
+            const sweepFrames = frameLevelsDb(samples, plan.sweepStart + lag, plan.sweepStart + lag + CAL.sweep * sr, sr).map(f => f.db);
+            const sweepMedian = percentile(sweepFrames, 50);
+            const onset = sweepMedian !== null && sweepMedian > (noise ?? -100) + 6;
+            result.sweep_detected = onset;
+            if (!onset) {
+                warnings.push('Микрофон не услышал тестовый сигнал. Включите звук на устройстве и не используйте наушники.');
+            }
+            result.latency_ms = onset ? Math.round(lag / sr * 1000) : null;
+
+            if (onset) {
+                // 3. АЧХ по свипу: момент времени в свипе однозначно задает частоту
+                const sweepStart = plan.sweepStart + lag;
+                const frames = frameLevelsDb(samples, sweepStart, sweepStart + CAL.sweep * sr, sr, 0.02, 0.01);
+                const points = frames.map(f => {
+                    const tau = (f.start + 0.01 * sr - sweepStart) / sr;
+                    return { hz: CAL.sweepF0 * Math.pow(CAL.sweepF1 / CAL.sweepF0, tau / CAL.sweep), db: f.db };
+                }).filter(p => p.hz >= CAL.sweepF0 && p.hz <= CAL.sweepF1);
+                const bandLevels = CAL_BANDS.map(([lo, hi]) => {
+                    const inBand = points.filter(p => p.hz >= lo && p.hz < hi).map(p => p.db);
+                    return percentile(inBand, 50);
+                });
+                const valid = bandLevels.filter(v => v !== null);
+                const peak = valid.length ? Math.max(...valid) : null;
+                result.sweep_level_dbfs = round1(peak);
+                result.sweep_snr_db = peak !== null && noise !== null ? round1(peak - noise) : null;
+                result.band_response_db = {};
+                CAL_BANDS.forEach(([lo, hi], i) => {
+                    result.band_response_db[`${lo}-${hi}`] = bandLevels[i] !== null && peak !== null
+                        ? round1(bandLevels[i] - peak) : null;
+                });
+                // Полоса: частоты, где отклик не ниже пика −20 дБ и заметно выше шума.
+                // Сигнал проходит через динамик устройства, поэтому нижнюю границу обычно
+                // ограничивает динамик; для микрофона показательна верхняя граница
+                const audible = points.filter(p => peak !== null && p.db >= peak - 20 && p.db >= (noise ?? -100) + 10);
+                result.bandwidth_low_hz = audible.length ? Math.round(Math.min(...audible.map(p => p.hz))) : null;
+                result.bandwidth_high_hz = audible.length ? Math.round(Math.max(...audible.map(p => p.hz))) : null;
+                if (result.bandwidth_high_hz !== null && result.bandwidth_high_hz < 3500) {
+                    warnings.push(`Узкая полоса: микрофон почти не пропускает частоты выше ${result.bandwidth_high_hz} Гц.`);
+                }
+
+                // 4. АРУ: тихая и громкая половины тона должны отличаться на 12 дБ
+                const toneStart = plan.toneStart + lag;
+                const level = (from, to) => percentile(frameLevelsDb(samples, from, to, sr).map(f => f.db), 50);
+                const low = level(toneStart + 0.25 * sr, toneStart + (CAL.tone - 0.05) * sr);
+                const high = level(toneStart + (CAL.tone + 0.25) * sr, toneStart + (2 * CAL.tone - 0.05) * sr);
+                if (high !== null && low !== null && low > (noise ?? -100) + 10) {
+                    const step = high - low;
+                    result.agc_step_measured_db = round1(step);
+                    result.agc_suspected = Math.abs(step - result.signal.tone_step_db) > 4;
+                    if (result.agc_suspected) {
+                        warnings.push(`Похоже, работает автоматическая регулировка громкости: ступенька ${step.toFixed(1)} дБ вместо 12.`);
+                    }
+                } else {
+                    result.agc_step_measured_db = null;
+                    result.agc_suspected = null;
+                }
+            }
+
+            // 5. Клиппинг во время тестового сигнала (слишком громкий динамик)
+            const sigFrom = Math.max(0, plan.sweepStart);
+            const sigTo = Math.min(samples.length, plan.end + Math.round(CAL.tail * sr));
+            let clipped = 0;
+            for (let i = sigFrom; i < sigTo; i++) if (Math.abs(samples[i]) >= 0.98) clipped++;
+            result.calibration_clip_ratio = sigTo > sigFrom ? clipped / (sigTo - sigFrom) : 0;
+            if (result.calibration_clip_ratio > 0.001) {
+                warnings.push('Тестовый сигнал перегрузил микрофон: уменьшите громкость динамика.');
+            }
+            if (state.settings.autoGainControl === true || state.settings.noiseSuppression === true) {
+                warnings.push('Браузер не дал отключить обработку звука (шумоподавление/АРУ).');
+            }
+            result.warnings = warnings;
+            return result;
+        }
+
+        function getBrowserDeviceId() {
+            const key = 'audio_park_device_id';
+            let id = null;
+            try { id = localStorage.getItem(key); } catch (e) {}
+            if (!id) {
+                id = 'web-' + Math.random().toString(36).slice(2, 10);
+                try { localStorage.setItem(key, id); } catch (e) {}
+            }
+            return id;
+        }
+
+        function buildDeviceInfo(state, calibration) {
+            const s = state.settings;
+            const rawHonored = s.autoGainControl === false && s.noiseSuppression === false && s.echoCancellation === false;
+            const micLabel = state.track && state.track.label ? state.track.label : 'microphone';
+            const info = {
+                // Один браузер с разными микрофонами — разные устройства для личной базы
+                device_id: `${getBrowserDeviceId()}:${micLabel}`.slice(0, 200),
+                device_model: micLabel,
+                os: (navigator.userAgentData && navigator.userAgentData.platform) || navigator.platform || '',
+                app_version: 'web-recorder-1',
+                mic_mode: rawHonored ? 'unprocessed' : 'default',
+                input_format: 'wav',
+                sample_rate: state.sr
+            };
+            if (calibration && calibration.noise_floor_dbfs !== null) {
+                info.noise_floor_dbfs = calibration.noise_floor_dbfs;
+            }
+            return info;
+        }
+
+        function displayCalibration(cal) {
+            const box = document.getElementById('calibration-info');
+            if (!cal) {
+                box.style.display = 'none';
+                return;
+            }
+            const fmt = (v, unit) => v === null || v === undefined ? '—' : `${v} ${unit}`;
+            const agc = cal.agc_suspected === null || cal.agc_suspected === undefined ? 'не определено'
+                : (cal.agc_suspected ? `похоже, включена (ступенька ${cal.agc_step_measured_db} дБ)` : 'не обнаружена');
+            let html = '<strong>Калибровка:</strong><br>';
+            html += `Шум: ${fmt(cal.noise_floor_dbfs, 'dBFS')}<br>`;
+            html += `Тестовый сигнал: ${cal.sweep_detected ? `услышан, запас над шумом ${fmt(cal.sweep_snr_db, 'дБ')}` : 'не услышан'}<br>`;
+            if (cal.sweep_detected) {
+                html += `Верхняя граница полосы: ${fmt(cal.bandwidth_high_hz, 'Гц')}<br>`;
+                html += `Автоусиление (АРУ): ${agc}<br>`;
+            }
+            if (cal.warnings.length) {
+                html += '<div class="text-warning-emphasis mt-1">⚠️ ' + cal.warnings.join('<br>⚠️ ') + '</div>';
+            } else {
+                html += '<div class="text-success mt-1">✅ Устройство в порядке</div>';
+            }
+            box.innerHTML = html;
+            box.style.display = 'block';
+        }
+
         async function analyzeAudio() {
             if (!audioBuffer) {
                 alert('Пожалуйста, загрузите или запишите аудио');
@@ -1674,6 +2264,14 @@
                 // Создаем FormData для отправки файла
                 const formData = new FormData();
                 formData.append('file', wavBlob, 'audio.wav');
+                // Для записи с микрофона добавляем данные устройства и результаты калибровки
+                if (lastRecording && lastRecording.buffer === audioBuffer) {
+                    formData.append('device_info', JSON.stringify(lastRecording.deviceInfo));
+                    if (lastRecording.calibration) {
+                        formData.append('calibration', JSON.stringify(lastRecording.calibration));
+                        formData.append('calibration_file', lastRecording.calibrationWav, 'calibration.wav');
+                    }
+                }
                 
                 // Отправляем на сервер для анализа (это сохранит сырые данные)
                 progressBar.style.width = '40%';
