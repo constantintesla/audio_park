@@ -397,6 +397,9 @@ class ParkinsonAnalyzer:
                 f"Интерпретация: {interpretation.get('pd_risk_note', '')}",
                 f"DSI коррелирует с Voice Handicap Index и идеален для мониторинга терапии (LSVT LOUD)."
             ]
+            if dsi_result.get('approximate'):
+                dsi_info.insert(2, "Приблизительно: устройство не откалибровано, I-Low (дБ SPL) "
+                                   "оценен по типичной чувствительности микрофона")
             updated_report.extend(dsi_info)
         elif dsi_result.get('error'):
             error_msg = dsi_result.get('error', 'Не удалось рассчитать')
@@ -474,21 +477,10 @@ class ParkinsonAnalyzer:
             
             # Проверка наличия всех параметров (должны быть > 0)
             # I-Low в DSI - абсолютный уровень в дБ SPL. Без калибровки устройства
-            # он известен только с точностью до чувствительности микрофона,
-            # поэтому балл DSI не выдаем, а показываем I-Low в dBFS.
-            if features.get('i_low_calibrated', 1.0) == 0.0:
-                return {
-                    "dsi_score": None,
-                    "dsi_range": "Нужна калибровка устройства",
-                    "dsi_breakdown": {
-                        "mpt_sec": round(mpt_sec, 2),
-                        "f0_high_hz": round(f0_high_hz, 1),
-                        "i_low_dbfs": round(float(features.get('i_low_dbfs', 0.0)), 1),
-                        "jitter_percent": round(jitter_percent, 2)
-                    },
-                    "error": "I-Low требует калибровки устройства (дБ SPL), DSI не рассчитан"
-                }
-
+            # он оценен по типичной чувствительности микрофона, поэтому DSI
+            # помечается как приблизительный.
+            dsi_approximate = bool(features.get('i_low_calibrated', 1.0) == 0.0)
+            
             if mpt_sec <= 0.0 or f0_high_hz <= 0.0 or i_low_db <= 0.0:
                 return {
                     "dsi_score": None,
@@ -557,7 +549,9 @@ class ParkinsonAnalyzer:
                     "jitter_status": "Высокий" if jitter_percent > 1.5 else "Нормальный" if jitter_percent < 1.0 else "Повышен",
                     "pd_risk_note": pd_risk_note
                 },
-                "formula": "DSI = 0.13 × MPT + 0.0053 × F0-High - 0.26 × I-Low - 1.18 × Jitter(%) + 12.4"
+                "formula": "DSI = 0.13 × MPT + 0.0053 × F0-High - 0.26 × I-Low - 1.18 × Jitter(%) + 12.4",
+                "approximate": dsi_approximate,
+                "i_low_dbfs": round(float(features.get('i_low_dbfs', 0.0)), 1)
             }
             
         except Exception as e:
