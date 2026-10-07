@@ -213,6 +213,9 @@ audio_park/
 ├── feature_extractor.py   # Извлечение признаков
 ├── symptom_analyzer.py    # Анализ симптомов
 ├── audio_processor.py     # Обработка аудио
+├── recording_quality.py   # Проверка качества записи (SNR, клиппинг, длительность)
+├── robust_features.py     # Признаки, устойчивые к устройству (CPPS)
+├── speaker_baseline.py    # Сравнение с прошлыми записями человека на том же устройстве
 ├── start_bot.py          # Запуск бота
 ├── start_api.py          # Запуск API
 ├── index.html            # Главная страница веб-интерфейса
@@ -241,6 +244,7 @@ audio_park/
 
 ## API Endpoints
 
+- `POST /api/analyze` - Анализ аудиофайла (multipart: `file`, `user_id`, `device_info`)
 - `GET /api/results` - Получить все результаты
 - `POST /api/results` - Сохранить результат анализа
 - `GET /api/results/<index>` - Получить конкретный результат
@@ -251,6 +255,38 @@ audio_park/
 - `GET /api/export/csv` - Экспорт результатов в CSV
 - `GET /api/export/json` - Экспорт результатов в JSON
 - `GET /api/export/html` - Экспорт результатов в HTML отчет
+
+## Запись с разных устройств
+
+Чтобы результаты с разных телефонов были сравнимы, приложение передает в
+`POST /api/analyze` поле `device_info` — JSON с метаданными записи:
+
+```json
+{
+  "device_id": "стабильный id устройства в приложении",
+  "device_model": "Pixel 7",
+  "os": "Android 14",
+  "app_version": "1.0.0",
+  "mic_mode": "unprocessed",
+  "input_format": "wav",
+  "sample_rate": 48000,
+  "noise_floor_dbfs": -72.5
+}
+```
+
+`noise_floor_dbfs` — уровень шума, измеренный по 1–2 с тишины перед записью.
+Без него шум оценивается по самым тихим кадрам записи. Неизвестные поля
+отбрасываются.
+
+В ответе появляются блоки:
+- `quality` — вердикт `ok` / `warning` / `reject`, проблемы записи и список
+  признаков, которым нельзя доверять (`unreliable_features`). При `reject`
+  рекомендация заменяется просьбой перезаписать голос.
+- `features.cpps_db` — CPPS, менее зависимая от микрофона альтернатива HNR.
+- `baseline` — отклонения от медианы прошлых записей этого же пользователя
+  на этом же устройстве (нужно не меньше 3 пригодных записей, до этого
+  статус `collecting`). Признаки с `robust_z` по модулю больше 2.5
+  попадают в `flagged_features`.
 
 ## Безопасность
 

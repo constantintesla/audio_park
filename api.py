@@ -6,11 +6,13 @@ import json
 import csv
 import math
 from datetime import datetime
-from typing import List, Dict, Any
+from typing import List, Dict, Any, Optional
 from flask import Flask, request, jsonify, send_from_directory, Response
 from flask_cors import CORS
 import logging
 import numpy as np
+
+from speaker_baseline import compare_to_baseline
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -115,6 +117,44 @@ def save_results(results: List[Dict]):
         logger.error(f"Ошибка сохранения результатов: {e}", exc_info=True)
 
 
+# Поля метаданных устройства, которые принимаются от приложения
+DEVICE_INFO_FIELDS = {
+    'device_id': str,          # стабильный идентификатор устройства в приложении
+    'device_model': str,       # модель телефона
+    'os': str,                 # ОС и версия
+    'app_version': str,
+    'mic_mode': str,           # режим микрофона: 'unprocessed' / 'measurement' / 'default'
+    'input_format': str,       # формат записи: 'wav', 'm4a' и т.п.
+    'sample_rate': int,        # частота дискретизации записи
+    'noise_floor_dbfs': float, # уровень шума по калибровочной тишине перед записью
+}
+
+
+def parse_device_info(raw: Optional[str]) -> Dict:
+    """Разбор JSON с метаданными устройства; неизвестные и некорректные поля отбрасываются"""
+    if not raw:
+        return {}
+    try:
+        data = json.loads(raw)
+    except (ValueError, TypeError):
+        logger.warning("Некорректный JSON в device_info, поле проигнорировано")
+        return {}
+    if not isinstance(data, dict):
+        return {}
+    info = {}
+    for key, cast in DEVICE_INFO_FIELDS.items():
+        if data.get(key) is None:
+            continue
+        try:
+            value = cast(data[key])
+        except (ValueError, TypeError):
+            continue
+        if isinstance(value, float) and not math.isfinite(value):
+            continue
+        info[key] = value[:200] if isinstance(value, str) else value
+    return info
+
+
 @app.route('/api/analyze', methods=['POST'])
 def analyze_audio():
     """Анализ аудиофайла с сохранением сырых данных"""
@@ -144,8 +184,10 @@ def analyze_audio():
             # Используем абсолютный путь для RESULTS_DIR
             results_dir_abs = os.path.abspath(RESULTS_DIR)
             logger.info(f"📁 Сохранение сырых данных в: {results_dir_abs}")
+            device_info = parse_device_info(request.form.get('device_info'))
             analyzer = ParkinsonAnalyzer(save_raw_data=True, raw_data_dir=results_dir_abs)
-            result = analyzer.analyze_audio_file(temp_file, save_raw=True, result_id=result_id)
+            result = analyzer.analyze_audio_file(temp_file, save_raw=True, result_id=result_id,
+                                                 device_info=device_info)
             
             # Добавление информации о пользователе
             result['user_info'] = {
@@ -158,8 +200,13 @@ def analyze_audio():
             
             # Сохранение результата
             # Результат уже очищен в parkinson_analyzer, но дополнительно проверяем
-            cleaned_result = clean_json_values(result)
             results = load_results()
+            if 'error' not in result:
+                result['baseline'] = compare_to_baseline(
+                    result.get('features', {}), results,
+                    result['user_info']['tg_user_id'], device_info,
+                    result.get('quality', {}).get('unreliable_features'))
+            cleaned_result = clean_json_values(result)
             results.append(cleaned_result)
             save_results(results)
             
