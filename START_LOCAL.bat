@@ -16,8 +16,7 @@ REM Проверка наличия .env файла
 if not exist .env (
     echo 📝 Создание .env файла из примера...
     copy env.example .env
-    echo ⚠️  ВАЖНО: Отредактируйте .env и укажите TELEGRAM_BOT_TOKEN
-    pause
+    echo ⚠️  При необходимости отредактируйте .env
 )
 
 REM Загрузка переменных из .env
@@ -29,32 +28,10 @@ for /f "usebackq tokens=1,* delims==" %%a in (".env") do (
 )
 
 echo.
-echo ✅ Запуск сервисов...
-echo.
-echo 📊 API сервер будет запущен на http://localhost:5000
-echo 🤖 Telegram бот будет запущен в отдельном окне
-echo.
-echo ⚠️  Не закрывайте это окно! Для остановки нажмите Ctrl+C
+echo ✅ Запуск веб-интерфейса на http://localhost:5000
+echo ⚠️  Для остановки нажмите Ctrl+C
 echo.
 
-REM Запуск API сервера в текущем окне
-echo [API] Запуск API сервера...
-start "Parkinson API" cmd /k "python start_api.py"
-
-REM Ожидание запуска API
-timeout /t 3 /nobreak >nul
-
-REM Запуск бота в отдельном окне
-echo [BOT] Запуск Telegram бота...
-start "Parkinson Bot" cmd /k "python start_bot.py"
-
-echo.
-echo ✅ Сервисы запущены!
-echo.
-echo 🌐 Веб-интерфейс: http://localhost:5000
-echo 🤖 Проверьте окно с ботом для статуса
-echo.
-echo Для остановки закройте окна с API и ботом
-echo.
+python start_api.py
 
 pause

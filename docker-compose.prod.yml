@@ -25,24 +25,6 @@ services:
       timeout: 10s
       retries: 3
 
-  bot:
-    build: .
-    container_name: parkinson_bot
-    command: python start_bot.py
-    volumes:
-      - ./data/results.json:/app/results.json
-      - ./data/results:/app/results
-    env_file:
-      - .env
-    environment:
-      - TELEGRAM_BOT_TOKEN=${TELEGRAM_BOT_TOKEN}
-      - API_URL=${API_URL:-http://api:5000}
-    depends_on:
-      - api
-    restart: unless-stopped
-    networks:
-      - parkinson_network
-
 networks:
   parkinson_network:
     driver: bridge

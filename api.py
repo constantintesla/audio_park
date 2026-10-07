@@ -764,7 +764,7 @@ def export_csv():
         # Создание CSV в памяти
         output = []
         output.append([
-            'Дата/Время', 'Telegram Username', 'User ID',
+            'Дата/Время', 'Username', 'User ID',
             'DSI Score', 'DSI Range', 'Риск ПД',
             'Jitter (%)', 'Shimmer (%)', 'HNR (dB)',
             'F0 Mean (Hz)', 'F0 SD (Hz)', 'Скорость речи (сл/сек)',

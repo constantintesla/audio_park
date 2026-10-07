@@ -7,7 +7,6 @@
 ```bash
 # Создайте .env файл
 cp env.example .env
-nano .env  # Укажите TELEGRAM_BOT_TOKEN
 
 # Запустите
 docker-compose --env-file .env up -d
@@ -22,23 +21,20 @@ docker-compose down
 ### Структура
 
 - **API контейнер** (`parkinson_api`) - веб-сервер на порту 5000
-- **Bot контейнер** (`parkinson_bot`) - Telegram бот
 
-Оба контейнера используют общий том для `results.json` и директории `results/`.
+Контейнер хранит `results.json` и директорию `results/` в смонтированном томе.
 
 ### Отладка
 
 **Вход в контейнер:**
 ```bash
 docker exec -it parkinson_api bash
-docker exec -it parkinson_bot bash
 ```
 
 **Проверка работы:**
 ```bash
 docker-compose ps
 docker-compose logs api
-docker-compose logs bot
 ```
 
 ---
@@ -67,14 +63,10 @@ nano .env
 3. Заполните переменные окружения:
 
 ```env
-TELEGRAM_BOT_TOKEN=ваш_токен_бота
-API_URL=https://yourdomain.com
 API_PORT=5000
 DEBUG=False
 FLASK_ENV=production
 ```
-
-**Важно**: `API_URL` должен быть внешним URL вашего сервера (с доменом или IP), чтобы бот мог к нему обращаться.
 
 ### 3. Создание директории для данных
 
@@ -147,13 +139,7 @@ sudo nginx -t
 sudo systemctl reload nginx
 ```
 
-4. Обновите `.env`:
-
-```env
-API_URL=https://yourdomain.com
-```
-
-5. Запустите Docker контейнеры:
+4. Запустите Docker контейнеры:
 
 ```bash
 docker-compose -f docker-compose.prod.yml --env-file .env up -d
@@ -173,13 +159,7 @@ sudo apt install certbot python3-certbot-nginx
 sudo certbot --nginx -d yourdomain.com
 ```
 
-3. Обновите `.env`:
-
-```env
-API_URL=https://yourdomain.com
-```
-
-4. Перезапустите контейнеры:
+3. Перезапустите контейнеры:
 
 ```bash
 docker-compose -f docker-compose.prod.yml --env-file .env restart
@@ -195,22 +175,12 @@ curl http://yourdomain.com/api/stats
 2. **Проверьте веб-интерфейс**:
 Откройте в браузере: `http://yourdomain.com`
 
-3. **Проверьте бота**:
-Отправьте `/start` боту в Telegram
-
 ## Мониторинг
 
 ### Просмотр логов
 
 ```bash
-# Все логи
-docker-compose -f docker-compose.prod.yml logs -f
-
-# Только API
 docker-compose -f docker-compose.prod.yml logs -f api
-
-# Только бот
-docker-compose -f docker-compose.prod.yml logs -f bot
 ```
 
 ### Проверка статуса
@@ -303,12 +273,6 @@ sudo systemctl reload nginx
 sudo tail -f /var/log/nginx/error.log
 ```
 
-### Бот не может подключиться к API
-
-- Проверьте, что `API_URL` в `.env` указывает на правильный внешний URL
-- Убедитесь, что порт открыт в firewall
-- Проверьте логи бота: `docker-compose logs bot`
-
 ### API недоступен извне
 
 - Проверьте firewall: `sudo ufw status`
@@ -323,27 +287,13 @@ sudo tail -f /var/log/nginx/error.log
 
 ## Безопасность
 
-### Хранение токенов
+### Хранение секретов
 
-⚠️ **НИКОГДА не храните токены в коде!**
+⚠️ **НИКОГДА не храните секреты в коде!**
 
 - Используйте переменные окружения через файл `.env`
 - Файл `.env` автоматически исключен из Git
 - Для production используйте безопасное хранилище секретов
-
-### Что делать, если токен скомпрометирован
-
-1. **Немедленно отзовите токен:**
-   - Откройте [@BotFather](https://t.me/BotFather) в Telegram
-   - Отправьте `/revoke` и выберите вашего бота
-   - Создайте новый токен
-
-2. **Обновите токен везде:**
-   - В файле `.env` на всех серверах
-   - В переменных окружения Docker
-   - В любых других местах использования
-
-3. **Проверьте логи бота** на подозрительную активность
 
 ### Дополнительные рекомендации
 
