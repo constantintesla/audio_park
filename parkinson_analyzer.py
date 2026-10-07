@@ -130,12 +130,11 @@ class ParkinsonAnalyzer:
             
             # 1. Загрузка аудио и приведение к единой громкости,
             # чтобы признаки не зависели от микрофона и усиления устройства
-            audio, sr = self.audio_processor.load_audio(file_path)
-            audio, loudness_info = self.audio_processor.normalize_loudness(audio, sr)
-            logger.info(f"Громкость записи {loudness_info['input_lufs']:.1f} LUFS, "
-                        f"усиление {loudness_info['gain_db']:+.1f} дБ")
+            raw_audio, sr = self.audio_processor.load_audio(file_path)
             
-            # Проверка качества записи (шум, клиппинг, длительность, полоса)
+            # Проверка качества записи (шум, клиппинг, длительность, полоса).
+            # Делается до нормализации громкости: клиппинг и уровень шума
+            # от приложения (noise_floor_dbfs) заданы в шкале исходного файла.
             device_info = device_info or {}
             try:
                 import librosa
@@ -143,9 +142,13 @@ class ParkinsonAnalyzer:
             except Exception:
                 source_sr = device_info.get('sample_rate')
             quality = assess_recording_quality(
-                audio, sr,
+                raw_audio, sr,
                 source_sample_rate=source_sr,
                 noise_floor_dbfs=device_info.get('noise_floor_dbfs'))
+            
+            audio, loudness_info = self.audio_processor.normalize_loudness(raw_audio, sr)
+            logger.info(f"Громкость записи {loudness_info['input_lufs']:.1f} LUFS, "
+                        f"усиление {loudness_info['gain_db']:+.1f} дБ")
             
             # Сохранение исходного аудиофайла
             if should_save_raw and result_dir:
@@ -163,8 +166,11 @@ class ParkinsonAnalyzer:
                     logger.error(f"⚠️  Ошибка при сохранении исходного файла: {e}")
             
             # 2. Извлечение признаков
-            # Извлекаем признаки из исходного аудио без предобработки
-            all_features = self.feature_extractor.extract_all_features(audio)
+            # I-Low (абсолютный уровень для DSI) считается по исходному сигналу
+            # с калибровкой устройства, если приложение ее передало
+            all_features = self.feature_extractor.extract_all_features(
+                audio, level_audio=raw_audio,
+                spl_offset_db=device_info.get('spl_offset_db'))
             all_features['cpps_db'] = compute_cpps(audio, sr)
             
             # 3. Анализ симптомов

@@ -349,7 +349,9 @@ def recalculate_all():
                 
                 # Пересчитываем анализ
                 logger.info(f"🔄 Пересчет результата {idx + 1}/{len(results)}: {audio_path}")
-                new_result = analyzer.analyze_audio_file(audio_path, save_raw=False, result_id=result_id)
+                # device_info сохраняем, иначе при пересчете теряются калибровки устройства
+                new_result = analyzer.analyze_audio_file(audio_path, save_raw=False, result_id=result_id,
+                                                         device_info=result.get('device_info') or {})
                 
                 # Сохраняем оригинальную информацию о пользователе
                 original_user_info = result.get('user_info', {})
