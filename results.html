@@ -233,88 +233,14 @@
             let html = '';
             
             // DSI Section
-            if (dsiScore !== null && dsiScore !== undefined) {
-                const dsiRange = dsi.dsi_range || '';
-                const breakdown = dsi.dsi_breakdown || {};
-                const interpretation = dsi.interpretation || {};
-                
-                const dsiColorClass = dsiScore >= 2.0 ? 'text-success' : 
-                                     dsiScore >= 0.0 ? 'text-warning' : 
-                                     dsiScore >= -2.0 ? 'text-warning' : 'text-danger';
-                
-                html += `
-                    <div class="card mt-3 mb-3">
-                        <div class="card-header bg-primary text-white">
-                            <h5 class="mb-0">DSI (Dysphonia Severity Index)</h5>
-                        </div>
-                        <div class="card-body">
-                            <div class="text-center mb-3">
-                                <h2 class="display-4 ${dsiColorClass}">${dsiScore.toFixed(2)}</h2>
-                                <p class="lead">${dsiRange}</p>
-                                <p class="text-muted"><small><span class="dot ${dsiScore >= 2.0 ? 'dot-ok' : dsiScore >= 0.0 ? 'dot-warn' : dsiScore >= -2.0 ? 'dot-mid' : 'dot-risk'}"></span> Референсный диапазон: 2.0-5.0 (нормальный голос)</small></p>
-                            </div>
-                            <div class="row">
-                                <div class="col-md-6">
-                                    <h6>Параметры DSI:</h6>
-                                    <table class="table table-sm table-bordered">
-                                        <thead class="table-light">
-                                            <tr>
-                                                <th>Параметр</th>
-                                                <th>Значение</th>
-                                                <th>Референс</th>
-                                            </tr>
-                                        </thead>
-                                        <tbody>
-                                            <tr>
-                                                <td><strong>MPT (гласный, сек)</strong></td>
-                                                <td>${(breakdown.mpt_sec || 0).toFixed(2)}</td>
-                                                <td><small class="${(breakdown.mpt_sec || 0) >= 15 ? 'text-success' : (breakdown.mpt_sec || 0) < 10 ? 'text-danger' : 'text-warning'}">${(breakdown.mpt_sec || 0) >= 15 ? '<span class="dot dot-ok"></span>' : (breakdown.mpt_sec || 0) < 10 ? '<span class="dot dot-risk"></span>' : '<span class="dot dot-warn"></span>'} норма: 15-30 сек</small></td>
-                                            </tr>
-                                            <tr>
-                                                <td><strong>MPT (речь, сек)</strong></td>
-                                                <td>${(breakdown.mpt_speech_sec || 0).toFixed(2)}</td>
-                                                <td><small class="text-muted">оценка по речи</small></td>
-                                            </tr>
-                                            <tr>
-                                                <td><strong>F0-High (Гц)</strong></td>
-                                                <td>${(breakdown.f0_high_hz || 0).toFixed(1)}</td>
-                                                <td><small class="${(breakdown.f0_high_hz || 0) >= 400 ? 'text-success' : (breakdown.f0_high_hz || 0) < 300 ? 'text-danger' : 'text-warning'}">${(breakdown.f0_high_hz || 0) >= 400 ? '<span class="dot dot-ok"></span>' : (breakdown.f0_high_hz || 0) < 300 ? '<span class="dot dot-risk"></span>' : '<span class="dot dot-warn"></span>'} норма: 400-600 Гц</small></td>
-                                            </tr>
-                                            <tr>
-                                                <td><strong>I-Low (дБ, норм.)</strong></td>
-                                                <td>${(breakdown.i_low_db || 0).toFixed(1)}</td>
-                                                <td><small class="${(breakdown.i_low_db || 0) <= 45 && (breakdown.i_low_db || 0) >= 25 ? 'text-success' : (breakdown.i_low_db || 0) > 55 ? 'text-danger' : 'text-warning'}">${(breakdown.i_low_db || 0) <= 45 && (breakdown.i_low_db || 0) >= 25 ? '<span class="dot dot-ok"></span>' : (breakdown.i_low_db || 0) > 55 ? '<span class="dot dot-risk"></span>' : '<span class="dot dot-warn"></span>'} норма: 25-45 дБ</small></td>
-                                            </tr>
-                                            <tr>
-                                                <td><strong>Jitter (%)</strong></td>
-                                                <td>${(breakdown.jitter_percent || 0).toFixed(2)}</td>
-                                                <td><small class="${(breakdown.jitter_percent || 0) <= 1.0 ? 'text-success' : (breakdown.jitter_percent || 0) > 1.5 ? 'text-danger' : 'text-warning'}">${(breakdown.jitter_percent || 0) <= 1.0 ? '<span class="dot dot-ok"></span>' : (breakdown.jitter_percent || 0) > 1.5 ? '<span class="dot dot-risk"></span>' : '<span class="dot dot-warn"></span>'} норма: 0.0-1.0 %</small></td>
-                                            </tr>
-                                            <tr>
-                                                <td><strong>Jitter (cap 5%)</strong></td>
-                                                <td>${(breakdown.jitter_percent_capped || 0).toFixed(2)}</td>
-                                                <td><small class="text-muted">ограниченная копия</small></td>
-                                            </tr>
-                                        </tbody>
-                                    </table>
-                                </div>
-                                <div class="col-md-6">
-                                    <h6>Интерпретация:</h6>
-                                    <p><strong>Оценка риска:</strong> ${interpretation.pd_risk_note || 'N/A'}</p>
-                                    <div class="alert alert-info mt-3" role="alert">
-                                        <small>
-                                            <strong>Формула:</strong> DSI = 0.13 × MPT + 0.0053 × F0-High - 0.26 × I-Low - 1.18 × Jitter(%) + 12.4<br>
-                                            I-Low — нормализованный дБ (не SPL).
-                                        </small>
-                                    </div>
-                                </div>
-                            </div>
-                        </div>
-                    </div>
-                `;
-            }
+            html += renderDsiCard(dsi);
             
-            function formatWithReference(value, paramName) {
+            // Jitter, shimmer и HNR по обычной речи не оцениваются (нормы - для протяжной гласной)
+            const voiceQualityFromSpeech = result.recording_task === 'speech';
+            const speechNote = '<small class="text-muted">по речи не оценивается, нужна протяжная гласная</small>';
+            
+            function formatWithReference(value, paramName, muted = false) {
+                if (muted) return `${value.toFixed(2)} ${speechNote}`;
                 const refRanges = getReferenceRanges();
                 if (!refRanges[paramName]) return value.toFixed(2);
                 
@@ -351,19 +277,19 @@
                     <tbody>
                         <tr>
                             <td><strong>Jitter</strong></td>
-                            <td>${formatWithReference(features.jitter_percent || 0, 'jitter_percent')}</td>
+                            <td>${formatWithReference(features.jitter_percent || 0, 'jitter_percent', voiceQualityFromSpeech)}</td>
                         </tr>
                         <tr>
                             <td><strong>Jitter (cap 5%)</strong></td>
-                            <td>${formatWithReference(jitterCapped, 'jitter_percent')}</td>
+                            <td>${formatWithReference(jitterCapped, 'jitter_percent', voiceQualityFromSpeech)}</td>
                         </tr>
                         <tr>
                             <td><strong>Shimmer</strong></td>
-                            <td>${formatWithReference(features.shimmer_percent || 0, 'shimmer_percent')}</td>
+                            <td>${formatWithReference(features.shimmer_percent || 0, 'shimmer_percent', voiceQualityFromSpeech)}</td>
                         </tr>
                         <tr>
                             <td><strong>HNR</strong></td>
-                            <td>${formatWithReference(features.hnr_db || 0, 'hnr_db')}</td>
+                            <td>${formatWithReference(features.hnr_db || 0, 'hnr_db', voiceQualityFromSpeech)}</td>
                         </tr>
                         <tr>
                             <td><strong>F0 Mean</strong></td>
@@ -374,7 +300,7 @@
                             <td>${formatWithReference(features.f0_sd_hz || 0, 'f0_sd_hz')}</td>
                         </tr>
                         <tr>
-                            <td><strong>Скорость речи</strong></td>
+                            <td><strong>Темп (слогов/сек без пауз)</strong></td>
                             <td>${formatWithReference(features.rate_syl_sec || 0, 'rate_syl_sec')}</td>
                         </tr>
                     </tbody>
@@ -396,14 +322,7 @@
             };
             
             for (const [key, name] of Object.entries(symptomNames)) {
-                const score = symptomScores[key] || 0;
-                html += `
-                    <div class="mb-2">
-                        <strong>${name}:</strong> 
-                        <span class="symptom-score score-${score}">${score}</span>
-                        <small class="text-muted">(${['Нет', 'Легкий', 'Умеренный', 'Тяжелый'][score]})</small>
-                    </div>
-                `;
+                html += `<div class="mb-2"><strong>${name}:</strong> ${renderSymptomScore(symptomScores[key])}</div>`;
             }
             
             html += '</div>';
@@ -447,18 +366,76 @@
         }
         
         // Reference ranges function
+        // Оценка симптома 0-3; null - симптом не оценивался по этому типу записи
+        function renderSymptomScore(score) {
+            if (score === null || score === undefined) {
+                return '<small class="text-muted">не оценивался по этой записи</small>';
+            }
+            return `<span class="symptom-score score-${score}">${score}</span>
+                <small class="text-muted">(${['Нет', 'Легкий', 'Умеренный', 'Тяжелый'][score] || 'N/A'})</small>`;
+        }
+        
+        // Карточка DSI. DSI считается только по специальным заданиям с калибровкой
+        // микрофона, иначе показываем, почему его нет.
+        function renderDsiCard(dsi) {
+            const dsiScore = dsi ? dsi.dsi_score : null;
+            if (dsiScore === null || dsiScore === undefined) {
+                const reason = dsi && (dsi.reason || dsi.error);
+                if (!reason) return '';
+                return `
+                    <div class="alert alert-secondary mt-3 mb-3">
+                        <strong>DSI не рассчитан.</strong> ${reason}
+                    </div>
+                `;
+            }
+            const breakdown = dsi.dsi_breakdown || {};
+            const interpretation = dsi.interpretation || {};
+            const dot = dsiScore >= 1.6 ? 'dot-ok' : dsiScore >= 0.0 ? 'dot-warn' : dsiScore >= -2.0 ? 'dot-mid' : 'dot-risk';
+            const row = (name, value, status) => `
+                <tr><td><strong>${name}</strong></td><td>${value}</td><td><small>${status || 'N/A'}</small></td></tr>`;
+            return `
+                <div class="card mt-3 mb-3">
+                    <div class="card-header bg-primary text-white">
+                        <h5 class="mb-0">DSI (Dysphonia Severity Index)</h5>
+                    </div>
+                    <div class="card-body">
+                        <div class="text-center mb-3">
+                            <h2 class="display-4">${dsiScore.toFixed(2)}</h2>
+                            <p class="lead"><span class="dot ${dot}"></span> ${dsi.dsi_range || ''}</p>
+                            <p class="text-muted"><small>Здоровый голос: около +1.6 и выше (шкала от -5 до +5)</small></p>
+                        </div>
+                        <table class="table table-sm table-bordered">
+                            <thead class="table-light"><tr><th>Параметр</th><th>Значение</th><th>Оценка</th></tr></thead>
+                            <tbody>
+                                ${row('MPT, сек (норма 15-30)', (breakdown.mpt_sec || 0).toFixed(2), interpretation.mpt_status)}
+                                ${row('F0-High, Гц (норма 400-600)', (breakdown.f0_high_hz || 0).toFixed(1), interpretation.f0_high_status)}
+                                ${row('I-Low, дБ SPL (норма до 45)', (breakdown.i_low_db || 0).toFixed(1), interpretation.i_low_status)}
+                                ${row('Jitter, % (норма до 1.0)', (breakdown.jitter_percent || 0).toFixed(2), interpretation.jitter_status)}
+                            </tbody>
+                        </table>
+                        <div class="alert alert-info mb-0" role="alert">
+                            <small>
+                                <strong>Формула:</strong> ${dsi.formula || 'DSI = 0.13 × MPT + 0.0053 × F0-High - 0.26 × I-Low - 1.18 × Jitter(%) + 12.4'}<br>
+                                ${interpretation.note || 'DSI оценивает качество голоса, а не болезнь Паркинсона, и не является диагнозом.'}
+                            </small>
+                        </div>
+                    </div>
+                </div>
+            `;
+        }
+        
         function getReferenceRanges() {
             return {
                 'jitter_percent': {normal: [0.0, 1.0], unit: '%'},
-                'shimmer_percent': {normal: [2.0, 4.0], unit: '%'},
-                'hnr_db': {normal: [20.0, 25.0], unit: 'дБ'},
+                'shimmer_percent': {normal: [0.0, 4.0], unit: '%'},
+                'hnr_db': {normal: [20.0, 40.0], unit: 'дБ'},
                 'f0_mean_hz': {normal: [100.0, 300.0], unit: 'Гц'},
                 'f0_sd_hz': {normal: [10.0, 50.0], unit: 'Гц'},
                 'rate_syl_sec': {normal: [4.5, 7.0], unit: 'сл/сек'},
                 'mpt_sec': {normal: [15.0, 30.0], unit: 'сек'},
                 'f0_high_hz': {normal: [400.0, 600.0], unit: 'Гц'},
                 'i_low_db': {normal: [25.0, 45.0], unit: 'дБ'},
-                'dsi_score': {normal: [2.0, 5.0], unit: ''}
+                'dsi_score': {normal: [1.6, 5.0], unit: ''}
             };
         }
     </script>

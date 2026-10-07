@@ -5,6 +5,7 @@
 - Daoudi 2022 (monopitch/phonatory instability)
 - NIH 2025 (12 вокальных биомаркеров)
 """
+import numpy as np
 from typing import Dict, List, Tuple
 
 
@@ -20,8 +21,6 @@ class SymptomAnalyzer:
         'jitter_percent': 1.5,        # >1.5% указывает на риск (норма: 0.2-0.7%, патология: >1.5-3%)
         'shimmer_percent': 6.0,        # >6.0% указывает на аномалию (норма: 2-4%, патология: >6-12%)
         'hnr_db': 18.0,               # <18 dB указывает на дисфонию (норма: 20-25 dB, патология: <12-18 dB)
-        'f0_sd_hz': 10.0,             # <10Hz указывает на monopitch (патология: std dev <5-10 Hz)
-        'f0_cv_percent': 8.0,         # <8% std dev указывает на гипофонию (reduced variability)
         'rate_syl_sec': 4.5,          # <4.5 слогов/сек указывает на медленную речь
         'pause_ratio': 0.30,          # >30% указывает на проблемы с артикуляцией
         'amplitude_db_variation': 6.0,  # <6dB указывает на monoloudness
@@ -33,36 +32,68 @@ class SymptomAnalyzer:
     HYPOPHONIA_TILT_DB = (-16.0, -20.0, -24.0)
     HYPOPHONIA_DECAY_DB = 3.0
     
-    def analyze(self, features: Dict[str, float]) -> Dict:
+    # Monopitch: разброс высоты тона в полутонах для легкой/умеренной/тяжелой
+    # степени. Полутоны не зависят от пола: SD=23 Гц у мужчины с F0 120 Гц
+    # это около 3 полутонов, нормальная интонация. Пороги предварительные.
+    MONOPITCH_SEMITONES = (2.0, 1.5, 1.0)
+    
+    # Какие симптомы можно оценить по какому типу записи.
+    # Jitter, shimmer и HNR по нормам измеряются на протяжной гласной: в обычной
+    # речи они завышаются из-за смены звуков и интонации, и здоровый голос
+    # выглядит «охрипшим». Интонацию и темп, наоборот, можно оценить только по речи.
+    VOWEL_ONLY = ('hoarseness',)
+    SPEECH_ONLY = ('monopitch', 'monoloudness', 'imprecise_articulation')
+    VOWEL_ONLY_THRESHOLDS = ('jitter', 'shimmer', 'hnr')
+    SPEECH_ONLY_THRESHOLDS = ('f0_variability', 'f0_sd', 'rate', 'pause_ratio', 'amplitude_variation')
+    
+    def analyze(self, features: Dict[str, float], task: str = 'speech') -> Dict:
         """
         Анализ симптомов на основе извлеченных признаков
         
         Args:
             features: Словарь с извлеченными признаками
+            task: Тип записи: 'speech' (обычная речь) или 'vowel' (протяжная гласная)
         
         Returns:
-            Словарь с оценками симптомов и риском ПД
+            Словарь с оценками симптомов и риском ПД. Симптомы, которые по этому
+            типу записи оценить нельзя, имеют оценку None.
         """
-        # Оценка симптомов (0-3: Нет/Легкий/Умеренный/Тяжелый)
-        symptom_scores = {
-            'hypophonia': self._score_hypophonia(features),
-            'monopitch': self._score_monopitch(features),
-            'monoloudness': self._score_monoloudness(features),
-            'hoarseness': self._score_hoarseness(features),
-            'imprecise_articulation': self._score_articulation(features),
+        is_vowel = task in ('vowel', 'dsi')
+        skipped = self.SPEECH_ONLY if is_vowel else self.VOWEL_ONLY
+        
+        # Оценка симптомов (0-3: Нет/Легкий/Умеренный/Тяжелый, None - не оценивался)
+        scorers = {
+            'hypophonia': self._score_hypophonia,
+            'monopitch': self._score_monopitch,
+            'monoloudness': self._score_monoloudness,
+            'hoarseness': self._score_hoarseness,
+            'imprecise_articulation': self._score_articulation,
         }
+        symptom_scores = {name: (None if name in skipped else scorer(features))
+                          for name, scorer in scorers.items()}
         
         # Подсчет признаков, превышающих пороги
-        exceeded_thresholds = self._count_exceeded_thresholds(features)
+        skipped_thresholds = self.SPEECH_ONLY_THRESHOLDS if is_vowel else self.VOWEL_ONLY_THRESHOLDS
+        exceeded_thresholds = [t for t in self._count_exceeded_thresholds(features)
+                               if t not in skipped_thresholds]
         
         # Оценка риска ПД (вероятностная модель)
-        pd_risk_data = self._assess_pd_risk(exceeded_thresholds, symptom_scores, features)
+        assessed_scores = {k: v for k, v in symptom_scores.items() if v is not None}
+        pd_risk_data = self._assess_pd_risk(exceeded_thresholds, assessed_scores, features)
         
         # Генерация отчета
         report = self._generate_report(features, symptom_scores, exceeded_thresholds)
+        if is_vowel:
+            report.append("- Интонация, громкость и темп речи не оценивались: это запись "
+                          "протяжной гласной, для них нужна обычная речь.")
+        else:
+            report.append("- Охриплость (jitter, shimmer, HNR) не оценивалась: эти показатели "
+                          "надежны только на протяжной гласной «а-а-а», по обычной речи они "
+                          "завышаются и даже у здорового голоса выглядят как патология.")
         
         return {
             'symptom_scores': symptom_scores,
+            'recording_task': 'vowel' if is_vowel else 'speech',
             'pd_risk': pd_risk_data['risk_text'],  # Для обратной совместимости
             'pd_risk_data': pd_risk_data,  # Полные данные о риске
             'exceeded_thresholds': exceeded_thresholds,
@@ -104,18 +135,32 @@ class SymptomAnalyzer:
         """
         Оценка monopitch (монотонность, отсутствие вариации высоты тона)
         
-        Признаки: низкое стандартное отклонение F0 (<50Hz)
+        Признак: малый разброс высоты тона в полутонах (не зависит от пола)
         """
-        f0_sd = features.get('f0_sd_hz', 0.0)
+        f0_sd_st = self._f0_sd_semitones(features)
+        if f0_sd_st <= 0.0:
+            return 0  # Тон не найден, оценить нельзя
         
-        if f0_sd < 20:
+        if f0_sd_st < self.MONOPITCH_SEMITONES[2]:
             return 3  # Тяжелый monopitch
-        elif f0_sd < 35:
+        elif f0_sd_st < self.MONOPITCH_SEMITONES[1]:
             return 2  # Умеренный
-        elif f0_sd < 50:
+        elif f0_sd_st < self.MONOPITCH_SEMITONES[0]:
             return 1  # Легкий
         else:
             return 0  # Норма
+    
+    @staticmethod
+    def _f0_sd_semitones(features: Dict[str, float]) -> float:
+        """Разброс F0 в полутонах; для старых записей - оценка по SD и среднему в Гц"""
+        f0_sd_st = features.get('f0_sd_semitones')
+        if f0_sd_st:
+            return float(f0_sd_st)
+        f0_mean = features.get('f0_mean_hz', 0.0)
+        f0_sd = features.get('f0_sd_hz', 0.0)
+        if f0_mean > 0 and f0_sd > 0:
+            return float(12.0 * np.log2(1.0 + f0_sd / f0_mean))
+        return 0.0
     
     def _score_monoloudness(self, features: Dict[str, float]) -> int:
         """
@@ -226,16 +271,10 @@ class SymptomAnalyzer:
             if hnr_val > 5.0:  # Разумный минимум для HNR
                 exceeded.append('hnr')
         
-        # F0 SD (monopitch) - проверяем также коэффициент вариации
-        # Патология: std dev <5-10 Hz (согласно исследованиям)
-        f0_mean = features.get('f0_mean_hz', 0)
-        f0_sd = features.get('f0_sd_hz', 0)
-        if f0_mean > 0:
-            f0_cv = (f0_sd / f0_mean) * 100  # Коэффициент вариации в %
-            if f0_cv < self.THRESHOLDS.get('f0_cv_percent', 8.0) or f0_sd < self.THRESHOLDS['f0_sd_hz']:
-                exceeded.append('f0_variability')
-        elif f0_sd < self.THRESHOLDS['f0_sd_hz']:
-            exceeded.append('f0_sd')
+        # Разброс F0 (monopitch) в полутонах
+        f0_sd_st = self._f0_sd_semitones(features)
+        if 0.0 < f0_sd_st < self.MONOPITCH_SEMITONES[1]:
+            exceeded.append('f0_variability')
         
         # Rate (артикуляция) - <4.5 сл/сек
         if features.get('rate_syl_sec', 5) < self.THRESHOLDS['rate_syl_sec']:
@@ -427,19 +466,17 @@ class SymptomAnalyzer:
             risk_level = "Low"
             confidence = max(risk_probability, 0.20)
         
-        # Форматирование для обратной совместимости
-        # Показываем реальную вероятность риска, а не фиксированное значение
-        accuracy_text = int(risk_probability * 100)
-        
+        # Текст для обратной совместимости. Процент не показываем: модель
+        # эвристическая и не откалибрована на реальных пациентах.
         if risk_level == "High":
             # Высокий риск: ≥89% и ≥3 признака
-            risk_text = f"Высокий ({accuracy_text}%, согласно Little 2004 + Daoudi 2022)"
+            risk_text = f"Высокий (признаков вне нормы: {num_exceeded}, это не диагноз)"
         elif risk_level == "Medium":
             # Средний риск: 70-89%
-            risk_text = f"Умеренный ({accuracy_text}%, согласно Little 2004 + Daoudi 2022)"
+            risk_text = f"Умеренный (признаков вне нормы: {num_exceeded}, это не диагноз)"
         else:
             # Низкий риск: <70%
-            risk_text = f"Низкий ({accuracy_text}%, согласно Little 2004 + Daoudi 2022)"
+            risk_text = f"Низкий (признаков вне нормы: {num_exceeded}, это не диагноз)"
         
         return {
             'risk_probability': round(risk_probability, 3),
@@ -456,7 +493,7 @@ class SymptomAnalyzer:
         report = []
         
         # Гипофония
-        if symptom_scores['hypophonia'] > 0:
+        if (symptom_scores['hypophonia'] or 0) > 0:
             severity = ['', 'легкая', 'умеренная', 'тяжелая'][symptom_scores['hypophonia']]
             tilt = features.get('spectral_tilt_db', 0.0)
             decay = features.get('loudness_decay_db', 0.0)
@@ -466,16 +503,17 @@ class SymptomAnalyzer:
             )
         
         # Monopitch
-        if symptom_scores['monopitch'] > 0:
+        if (symptom_scores['monopitch'] or 0) > 0:
             severity = ['', 'легкий', 'умеренный', 'тяжелый'][symptom_scores['monopitch']]
             f0_sd = features.get('f0_sd_hz', 0.0)
+            f0_sd_st = self._f0_sd_semitones(features)
             report.append(
-                f"- Monopitch ({severity}): низкая вариация F0 (SD={f0_sd:.1f}Hz), "
-                f"отсутствие просодии характерно для ПД [Daoudi 2022]."
+                f"- Monopitch ({severity}): низкая вариация F0 ({f0_sd_st:.1f} полутона, "
+                f"SD={f0_sd:.1f} Гц), бедная интонация встречается при ПД [Daoudi 2022]."
             )
         
         # Monoloudness
-        if symptom_scores['monoloudness'] > 0:
+        if (symptom_scores['monoloudness'] or 0) > 0:
             severity = ['', 'легкая', 'умеренная', 'тяжелая'][symptom_scores['monoloudness']]
             db_var = features.get('amplitude_db_variation', 0.0)
             report.append(
@@ -484,7 +522,7 @@ class SymptomAnalyzer:
             )
         
         # Hoarseness
-        if symptom_scores['hoarseness'] > 0:
+        if (symptom_scores['hoarseness'] or 0) > 0:
             severity = ['', 'легкая', 'умеренная', 'тяжелая'][symptom_scores['hoarseness']]
             jitter = features.get('jitter_percent', 0.0)
             shimmer = features.get('shimmer_percent', 0.0)
@@ -504,29 +542,30 @@ class SymptomAnalyzer:
             )
         
         # Артикуляция
-        if symptom_scores['imprecise_articulation'] > 0:
+        if (symptom_scores['imprecise_articulation'] or 0) > 0:
             severity = ['', 'легкая', 'умеренная', 'тяжелая'][symptom_scores['imprecise_articulation']]
             rate = features.get('rate_syl_sec', 0.0)
             pause_ratio = features.get('pause_ratio', 0.0)
             report.append(
-                f"- Неточная артикуляция ({severity}): скорость речи {rate:.1f} сл/сек, "
+                f"- Неточная артикуляция ({severity}): темп {rate:.1f} слогов/сек без пауз, "
                 f"паузы {pause_ratio*100:.1f}% [NIH 2025]."
             )
         
         # Общие рекомендации
         if len(exceeded_thresholds) >= 3:
             report.append(
-                "- Рекомендация: консультация невролога, LSVT логопедия."
+                "- Несколько показателей вне нормы. Это не диагноз: если есть жалобы на голос "
+                "или речь, стоит показаться врачу (фониатру или неврологу)."
             )
         elif len(exceeded_thresholds) >= 1:
             report.append(
-                "- Рекомендация: мониторинг симптомов, логопедическая оценка."
+                "- Отдельные показатели вне нормы. Это не диагноз; имеет смысл повторить запись."
             )
         
         # Если нет симптомов
         if not report:
             report.append(
-                "- Акустические параметры в пределах нормы. Симптомы ПД не выявлены."
+                "- Акустические параметры в пределах нормы."
             )
         
         return report

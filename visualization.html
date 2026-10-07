@@ -395,13 +395,13 @@
                     name: 'I-Low',
                     value: dsiBreakdown.i_low_db || 0,
                     unit: 'dB',
-                    description: 'Низшая интенсивность (нормализованный дБ, 5-й перцентиль)'
+                    description: 'Самый тихий уровень голоса (дБ SPL, 5-й перцентиль)'
                 },
                 {
                     name: 'DSI Score',
-                    value: dsi.dsi_score || 0,
+                    value: dsi.dsi_score ?? null,
                     unit: '',
-                    description: dsi.dsi_range || 'Dysphonia Severity Index'
+                    description: dsi.reason || dsi.dsi_range || 'Dysphonia Severity Index'
                 }
             ];
             

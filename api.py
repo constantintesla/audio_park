@@ -128,6 +128,7 @@ DEVICE_INFO_FIELDS = {
     'sample_rate': int,        # частота дискретизации записи
     'noise_floor_dbfs': float, # уровень шума по калибровочной тишине перед записью
     'spl_offset_db': float,    # поправка dBFS -> dB SPL из калибровки устройства
+    'task': str,               # что записано: 'speech' / 'vowel' / 'dsi' (см. README)
 }
 
 
@@ -1075,7 +1076,9 @@ def generate_html_report(results: List[Dict]) -> str:
         except:
             pass
         
-        dsi_score = dsi.get('dsi_score', 'N/A')
+        dsi_score = dsi.get('dsi_score')
+        if dsi_score is None:
+            dsi_score = 'N/A'
         pd_risk = symptom_scores.get('pd_risk', 'N/A')
         
         risk_class = 'badge-low'
@@ -1125,8 +1128,8 @@ def generate_html_report(results: List[Dict]) -> str:
         </div>
         
         <h4>DSI (Dysphonia Severity Index)</h4>
-        <p><strong>Score:</strong> {dsi.get('dsi_score', 'N/A')}</p>
-        <p><strong>Range:</strong> {dsi.get('dsi_range', 'N/A')}</p>
+        <p><strong>Score:</strong> {dsi.get('dsi_score') if dsi.get('dsi_score') is not None else 'N/A'}</p>
+        <p><strong>Range:</strong> {dsi.get('reason') or dsi.get('dsi_range', 'N/A')}</p>
         
         <h4>Акустические признаки</h4>
         <ul>
@@ -1139,11 +1142,11 @@ def generate_html_report(results: List[Dict]) -> str:
         
         <h4>Оценка симптомов</h4>
         <ul>
-            <li>Гипофония: {symptom_scores.get('hypophonia', 'N/A')}</li>
-            <li>Monopitch: {symptom_scores.get('monopitch', 'N/A')}</li>
-            <li>Monoloudness: {symptom_scores.get('monoloudness', 'N/A')}</li>
-            <li>Охриплость: {symptom_scores.get('hoarseness', 'N/A')}</li>
-            <li>Артикуляция: {symptom_scores.get('imprecise_articulation', 'N/A')}</li>
+            <li>Гипофония: {symptom_scores.get('hypophonia') if symptom_scores.get('hypophonia') is not None else 'не оценивался'}</li>
+            <li>Monopitch: {symptom_scores.get('monopitch') if symptom_scores.get('monopitch') is not None else 'не оценивался'}</li>
+            <li>Monoloudness: {symptom_scores.get('monoloudness') if symptom_scores.get('monoloudness') is not None else 'не оценивался'}</li>
+            <li>Охриплость: {symptom_scores.get('hoarseness') if symptom_scores.get('hoarseness') is not None else 'не оценивался'}</li>
+            <li>Артикуляция: {symptom_scores.get('imprecise_articulation') if symptom_scores.get('imprecise_articulation') is not None else 'не оценивался'}</li>
         </ul>
         
         <p><strong>Риск ПД:</strong> {symptom_scores.get('pd_risk', 'N/A')}</p>
