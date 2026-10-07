@@ -33,6 +33,8 @@ except ImportError:
 from audio_processor import AudioProcessor
 from feature_extractor import FeatureExtractor
 from symptom_analyzer import SymptomAnalyzer
+from recording_quality import assess_recording_quality
+from robust_features import compute_cpps
 
 
 class ParkinsonAnalyzer:
@@ -86,12 +88,15 @@ class ParkinsonAnalyzer:
             # Для остальных типов (str, None, bool) возвращаем как есть
             return obj
     
-    def analyze_audio_file(self, file_path: str, save_raw: Optional[bool] = None, result_id: Optional[str] = None) -> Dict:
+    def analyze_audio_file(self, file_path: str, save_raw: Optional[bool] = None, result_id: Optional[str] = None,
+                           device_info: Optional[Dict] = None) -> Dict:
         """
         Полный анализ аудиофайла
         
         Args:
             file_path: Путь к аудиофайлу (WAV/MP3)
+            device_info: Метаданные устройства от приложения (модель, режим микрофона,
+                уровень шума по калибровочной тишине и т.п.)
         
         Returns:
             Структурированный JSON отчет
@@ -123,8 +128,24 @@ class ParkinsonAnalyzer:
                     logger.error(f"⚠️  ОШИБКА при создании директории {result_dir}: {e}")
                     result_dir = None
             
-            # 1. Загрузка аудио
+            # 1. Загрузка аудио и приведение к единой громкости,
+            # чтобы признаки не зависели от микрофона и усиления устройства
             audio, sr = self.audio_processor.load_audio(file_path)
+            audio, loudness_info = self.audio_processor.normalize_loudness(audio, sr)
+            logger.info(f"Громкость записи {loudness_info['input_lufs']:.1f} LUFS, "
+                        f"усиление {loudness_info['gain_db']:+.1f} дБ")
+            
+            # Проверка качества записи (шум, клиппинг, длительность, полоса)
+            device_info = device_info or {}
+            try:
+                import librosa
+                source_sr = librosa.get_samplerate(file_path)
+            except Exception:
+                source_sr = device_info.get('sample_rate')
+            quality = assess_recording_quality(
+                audio, sr,
+                source_sample_rate=source_sr,
+                noise_floor_dbfs=device_info.get('noise_floor_dbfs'))
             
             # Сохранение исходного аудиофайла
             if should_save_raw and result_dir:
@@ -144,6 +165,7 @@ class ParkinsonAnalyzer:
             # 2. Извлечение признаков
             # Извлекаем признаки из исходного аудио без предобработки
             all_features = self.feature_extractor.extract_all_features(audio)
+            all_features['cpps_db'] = compute_cpps(audio, sr)
             
             # 3. Анализ симптомов
             analysis = self.symptom_analyzer.analyze(all_features)
@@ -222,22 +244,33 @@ class ParkinsonAnalyzer:
             recommendation = self._generate_recommendation(risk_level, risk_probability, 
                                                           analysis.get('exceeded_thresholds', []),
                                                           all_features)
+            report = self._add_dsi_to_report(analysis['report'], dsi_result)
+            report = self._add_quality_to_report(report, quality)
+            if quality['verdict'] == 'reject':
+                recommendation = ("Запись непригодна для анализа, результаты ненадежны. "
+                                  "Перезапишите голос: " +
+                                  " ".join(i['message'] for i in quality['issues'] if i['severity'] == 'reject'))
             
             result = {
                 "audio_summary": {
                     "duration_sec": round(len(audio) / sr, 2),
                     "sample_rate": sr,
-                    "segments": 1
+                    "segments": 1,
+                    "input_lufs": round(loudness_info['input_lufs'], 1) if np.isfinite(loudness_info['input_lufs']) else None,
+                    "normalization_gain_db": round(loudness_info['gain_db'], 1)
                 },
                 "features": {
                     "jitter_percent": round(all_features.get('jitter_percent', 0.0), 2),
                     "shimmer_percent": round(all_features.get('shimmer_percent', 0.0), 2),
                     "hnr_db": round(all_features.get('hnr_db', 0.0), 1),
+                    "cpps_db": round(all_features.get('cpps_db', 0.0), 2),
                     "rate_syl_sec": round(all_features.get('rate_syl_sec', 0.0), 1),
                     "f0_sd_hz": round(all_features.get('f0_sd_hz', 0.0), 1),
                     "f0_mean_hz": round(all_features.get('f0_mean_hz', 0.0), 1),
                     "amplitude_db_variation": round(all_features.get('amplitude_db_variation', 0.0), 1),
-                    "pause_ratio": round(all_features.get('pause_ratio', 0.0), 3)
+                    "pause_ratio": round(all_features.get('pause_ratio', 0.0), 3),
+                    "spectral_tilt_db": round(all_features.get('spectral_tilt_db', 0.0), 1),
+                    "loudness_decay_db": round(all_features.get('loudness_decay_db', 0.0), 1)
                 },
                 "dsi": dsi_result,
                 "symptom_scores": {
@@ -256,7 +289,9 @@ class ParkinsonAnalyzer:
                 },
                 "recommendation": recommendation,
                 "confidence": round(pd_risk_data.get('confidence', 0.0), 3),
-                "report": self._add_dsi_to_report(analysis['report'], dsi_result),
+                "report": report,
+                "quality": quality,
+                "device_info": device_info,
                 "visuals": {
                     "waveform": waveform_base64 or f"Данные: {len(waveform_data['amplitude'])} точек, "
                                f"длительность {waveform_data['duration']:.2f}с",
@@ -359,6 +394,18 @@ class ParkinsonAnalyzer:
                        f"незначительные отклонения ({num_exceeded} признак). "
                        f"Рекомендуется мониторинг и повторная оценка при появлении симптомов.")
     
+    def _add_quality_to_report(self, report: List[str], quality: Dict) -> List[str]:
+        """Добавление предупреждений о качестве записи в начало отчета"""
+        if quality['verdict'] == 'ok':
+            return report
+        lines = []
+        if quality['verdict'] == 'reject':
+            lines.append("⚠️ Запись непригодна для анализа, значения ниже ненадежны.")
+        else:
+            lines.append("⚠️ Качество записи снижено, часть значений может быть неточной.")
+        lines.extend(f"- {issue['message']}" for issue in quality['issues'])
+        return lines + report
+    
     def _add_dsi_to_report(self, report: List[str], dsi_result: Dict) -> List[str]:
         """Добавление информации о DSI в отчет"""
         updated_report = report.copy()
@@ -397,6 +444,9 @@ class ParkinsonAnalyzer:
                 f"Интерпретация: {interpretation.get('pd_risk_note', '')}",
                 f"DSI коррелирует с Voice Handicap Index и идеален для мониторинга терапии (LSVT LOUD)."
             ]
+            if dsi_result.get('approximate'):
+                dsi_info.insert(2, "Приблизительно: устройство не откалибровано, I-Low (дБ SPL) "
+                                   "оценен по типичной чувствительности микрофона")
             updated_report.extend(dsi_info)
         elif dsi_result.get('error'):
             error_msg = dsi_result.get('error', 'Не удалось рассчитать')
@@ -473,6 +523,11 @@ class ParkinsonAnalyzer:
                 }
             
             # Проверка наличия всех параметров (должны быть > 0)
+            # I-Low в DSI - абсолютный уровень в дБ SPL. Без калибровки устройства
+            # он оценен по типичной чувствительности микрофона, поэтому DSI
+            # помечается как приблизительный.
+            dsi_approximate = bool(features.get('i_low_calibrated', 1.0) == 0.0)
+            
             if mpt_sec <= 0.0 or f0_high_hz <= 0.0 or i_low_db <= 0.0:
                 return {
                     "dsi_score": None,
@@ -541,7 +596,9 @@ class ParkinsonAnalyzer:
                     "jitter_status": "Высокий" if jitter_percent > 1.5 else "Нормальный" if jitter_percent < 1.0 else "Повышен",
                     "pd_risk_note": pd_risk_note
                 },
-                "formula": "DSI = 0.13 × MPT + 0.0053 × F0-High - 0.26 × I-Low - 1.18 × Jitter(%) + 12.4"
+                "formula": "DSI = 0.13 × MPT + 0.0053 × F0-High - 0.26 × I-Low - 1.18 × Jitter(%) + 12.4",
+                "approximate": dsi_approximate,
+                "i_low_dbfs": round(float(features.get('i_low_dbfs', 0.0)), 1)
             }
             
         except Exception as e:
