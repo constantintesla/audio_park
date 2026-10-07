@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Визуализация параметров анализа голоса</title>
+    <title>Визуализация · Анализ голоса</title>
     
     <!-- Chart.js для графиков -->
     <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
@@ -12,244 +12,40 @@
     <!-- Wavesurfer.js для аудио -->
     <script src="https://cdn.jsdelivr.net/npm/wavesurfer.js@7/dist/wavesurfer.min.js"></script>
     
-    <style>
-        :root {
-            --medical-blue: #2c5f8d;
-            --medical-light-blue: #4a90c2;
-            --medical-grey: #6c757d;
-            --medical-light-grey: #e9ecef;
-            --risk-high: #dc3545;
-            --risk-medium: #ffc107;
-            --risk-low: #28a745;
-        }
-        
-        * {
-            margin: 0;
-            padding: 0;
-            box-sizing: border-box;
-        }
-        
-        body {
-            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
-            background: linear-gradient(135deg, #f5f7fa 0%, #e9ecef 100%);
-            min-height: 100vh;
-            padding: 20px;
-        }
-        
-        .container {
-            max-width: 1400px;
-            margin: 0 auto;
-        }
-        
-        .header {
-            background: linear-gradient(135deg, var(--medical-blue) 0%, var(--medical-light-blue) 100%);
-            color: white;
-            padding: 30px;
-            border-radius: 15px;
-            margin-bottom: 30px;
-            box-shadow: 0 4px 6px rgba(0,0,0,0.1);
-        }
-        
-        .header h1 {
-            margin: 0;
-            font-size: 2rem;
-            font-weight: 600;
-        }
-        
-        .header p {
-            margin: 10px 0 0 0;
-            opacity: 0.9;
-        }
-        
-        .controls {
-            background: white;
-            padding: 20px;
-            border-radius: 15px;
-            margin-bottom: 20px;
-            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
-        }
-        
-        .controls select, .controls input {
-            padding: 10px;
-            border: 2px solid var(--medical-light-grey);
-            border-radius: 8px;
-            font-size: 1rem;
-            margin-right: 10px;
-            margin-bottom: 10px;
-        }
-        
-        .controls button {
-            background: var(--medical-blue);
-            color: white;
-            border: none;
-            padding: 10px 20px;
-            border-radius: 8px;
-            font-size: 1rem;
-            cursor: pointer;
-            transition: background 0.3s;
-        }
-        
-        .controls button:hover {
-            background: var(--medical-light-blue);
-        }
-        
-        .card {
-            background: white;
-            border-radius: 15px;
-            padding: 20px;
-            margin-bottom: 20px;
-            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
-        }
-        
-        .card-header {
-            font-size: 1.3rem;
-            font-weight: 600;
-            color: var(--medical-blue);
-            margin-bottom: 15px;
-            padding-bottom: 10px;
-            border-bottom: 2px solid var(--medical-light-grey);
-        }
-        
-        .audio-player {
-            margin-bottom: 20px;
-        }
-        
-        .waveform-container {
-            background: #f8f9fa;
-            border-radius: 10px;
-            padding: 15px;
-            margin-bottom: 20px;
-        }
-        
-        .chart-container {
-            position: relative;
-            height: 300px;
-            margin-bottom: 20px;
-        }
-        
-        .chart-container.tall {
-            height: 400px;
-        }
-        
-        .parameter-grid {
-            display: grid;
-            grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
-            gap: 15px;
-            margin-bottom: 20px;
-        }
-        
-        .parameter-card {
-            background: linear-gradient(135deg, #f8f9fa 0%, #e9ecef 100%);
-            padding: 15px;
-            border-radius: 10px;
-            border-left: 4px solid var(--medical-blue);
-        }
-        
-        .parameter-card h4 {
-            font-size: 0.9rem;
-            color: var(--medical-grey);
-            margin-bottom: 5px;
-        }
-        
-        .parameter-card .value {
-            font-size: 1.5rem;
-            font-weight: 600;
-            color: var(--medical-blue);
-        }
-        
-        .parameter-card .unit {
-            font-size: 0.9rem;
-            color: var(--medical-grey);
-            margin-left: 5px;
-        }
-        
-        .parameter-card .description {
-            font-size: 0.85rem;
-            color: var(--medical-grey);
-            margin-top: 5px;
-        }
-        
-        .segment-list {
-            display: grid;
-            grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
-            gap: 10px;
-        }
-        
-        .segment-item {
-            background: #f8f9fa;
-            padding: 10px;
-            border-radius: 8px;
-            border: 2px solid transparent;
-            cursor: pointer;
-            transition: all 0.3s;
-        }
-        
-        .segment-item:hover {
-            border-color: var(--medical-blue);
-            background: #e9ecef;
-        }
-        
-        .segment-item.active {
-            border-color: var(--medical-blue);
-            background: var(--medical-light-grey);
-        }
-        
-        .loading {
-            text-align: center;
-            padding: 40px;
-            color: var(--medical-grey);
-        }
-        
-        .error {
-            background: #f8d7da;
-            color: #721c24;
-            padding: 15px;
-            border-radius: 8px;
-            margin-bottom: 20px;
-        }
-        
-        .info-box {
-            background: #d1ecf1;
-            color: #0c5460;
-            padding: 15px;
-            border-radius: 8px;
-            margin-bottom: 20px;
-            border-left: 4px solid #17a2b8;
-        }
-        
-        .legend {
-            display: flex;
-            flex-wrap: wrap;
-            gap: 15px;
-            margin-top: 10px;
-        }
-        
-        .legend-item {
-            display: flex;
-            align-items: center;
-            gap: 5px;
-        }
-        
-        .legend-color {
-            width: 20px;
-            height: 20px;
-            border-radius: 4px;
-        }
-    </style>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="assets/theme.css">
 </head>
 <body>
+    <header class="app-nav">
+        <div class="container app-nav-inner">
+            <a class="brand" href="./">
+                <span class="brand-mark"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" aria-hidden="true"><path d="M3 12h2M7 8v8M11 4v16M15 7v10M19 10v4M21 12h0"/></svg></span>
+                <span class="brand-text"><strong>Анализ голоса</strong><small>Скрининг признаков болезни Паркинсона</small></span>
+            </a>
+            <nav class="app-links" aria-label="Разделы">
+                <a href="./">Обзор</a>
+                <a href="./results">Результаты</a>
+                <a href="./visualization" class="active" aria-current="page">Визуализация</a>
+            </nav>
+        </div>
+    </header>
     <div class="container">
-        <div class="header">
-            <h1>🎯 Визуализация параметров анализа голоса</h1>
-            <p>Интерактивная визуализация извлеченных параметров с привязкой к аудиозаписи</p>
+        <div class="page-head">
+            <div>
+                <h1>Визуализация</h1>
+                <p>Параметры голоса и графики, привязанные к аудиозаписи</p>
+            </div>
         </div>
         
         <div class="controls">
-            <label for="result-select">Выберите результат анализа:</label>
+            <label for="result-select">Анализ</label>
             <select id="result-select">
                 <option value="">Загрузка...</option>
             </select>
-            <button onclick="loadVisualization()">Загрузить визуализацию</button>
+            <button class="primary" onclick="loadVisualization()">Показать</button>
             <button onclick="syncAllCharts()">Синхронизировать графики</button>
         </div>
         
@@ -261,27 +57,27 @@
         <div id="content" style="display: none;">
             <!-- Параметры -->
             <div class="card">
-                <div class="card-header">📊 Извлеченные параметры</div>
+                <div class="card-header">Извлеченные параметры</div>
                 <div class="parameter-grid" id="parameters-grid"></div>
             </div>
             
             <!-- Аудио плеер -->
             <div class="card">
-                <div class="card-header">🎵 Аудиозапись</div>
+                <div class="card-header">Аудиозапись</div>
                 <div class="audio-player">
                     <div class="waveform-container">
                         <div id="waveform"></div>
                     </div>
-                    <div style="text-align: center; margin-top: 10px;">
-                        <button onclick="wavesurfer.playPause()">▶️ Воспроизвести / ⏸️ Пауза</button>
-                        <button onclick="wavesurfer.stop()">⏹️ Стоп</button>
+                    <div class="player-controls">
+                        <button onclick="wavesurfer.playPause()">Воспроизвести / пауза</button>
+                        <button onclick="wavesurfer.stop()">Стоп</button>
                     </div>
                 </div>
             </div>
             
             <!-- Waveform -->
             <div class="card">
-                <div class="card-header">📈 Волновая форма (Waveform)</div>
+                <div class="card-header">Волновая форма</div>
                 <div class="info-box">
                     <strong>Описание:</strong> Волновая форма показывает изменение амплитуды сигнала во времени. 
                     Отсюда извлекаются параметры <strong>Shimmer</strong> (вариация амплитуды) и <strong>I-Low</strong> (низшая интенсивность).
@@ -293,7 +89,7 @@
             
             <!-- F0 (Pitch) -->
             <div class="card">
-                <div class="card-header">🎵 Основная частота (F0 / Pitch)</div>
+                <div class="card-header">Основная частота (F0)</div>
                 <div class="info-box">
                     <strong>Описание:</strong> F0 (основная частота) показывает высоту тона голоса во времени. 
                     Отсюда извлекаются параметры <strong>Jitter</strong> (вариация периода), <strong>F0 Mean</strong>, <strong>F0 SD</strong> и <strong>F0-High</strong>.
@@ -305,7 +101,7 @@
             
             <!-- Спектрограмма -->
             <div class="card">
-                <div class="card-header">🌈 Спектрограмма</div>
+                <div class="card-header">Спектрограмма</div>
                 <div class="info-box">
                     <strong>Описание:</strong> Спектрограмма показывает распределение энергии по частотам во времени. 
                     Отсюда извлекается параметр <strong>HNR</strong> (отношение гармоник к шуму) и другие спектральные признаки.
@@ -317,7 +113,7 @@
             
             <!-- Интенсивность -->
             <div class="card">
-                <div class="card-header">🔊 Интенсивность сигнала</div>
+                <div class="card-header">Интенсивность сигнала</div>
                 <div class="info-box">
                     <strong>Описание:</strong> Интенсивность показывает громкость сигнала во времени. 
                     Используется для расчета <strong>MPT</strong> (максимальное время фонации) и <strong>I-Low</strong>.
@@ -328,9 +124,21 @@
             </div>
             
         </div>
+        
+        <div class="footer">
+            <p>Система предназначена для исследовательских целей и не заменяет медицинскую диагностику.</p>
+        </div>
     </div>
     
     <script>
+        // Общий стиль графиков в цветах интерфейса
+        if (window.Chart) {
+            Chart.defaults.font.family = "'Inter', -apple-system, 'Segoe UI', Roboto, sans-serif";
+            Chart.defaults.font.size = 12;
+            Chart.defaults.color = '#5b6878';
+            Chart.defaults.borderColor = '#e9edf2';
+            Chart.defaults.plugins.legend.labels.boxWidth = 12;
+        }
         let wavesurfer = null;
         let charts = {};
         let currentData = null;
@@ -622,9 +430,9 @@
             
             wavesurfer = WaveSurfer.create({
                 container: '#waveform',
-                waveColor: '#2c5f8d',
-                progressColor: '#4a90c2',
-                cursorColor: '#dc3545',
+                waveColor: '#7fa8bb',
+                progressColor: '#0e5a78',
+                cursorColor: '#b42318',
                 barWidth: 2,
                 barRadius: 3,
                 responsive: true,
@@ -660,8 +468,8 @@
                     datasets: [{
                         label: 'Амплитуда',
                         data: waveformPoints,
-                        borderColor: '#2c5f8d',
-                        backgroundColor: 'rgba(44, 95, 141, 0.1)',
+                        borderColor: '#0e5a78',
+                        backgroundColor: 'rgba(14, 90, 120, 0.08)',
                         borderWidth: 1,
                         pointRadius: 0,
                         tension: 0.1
@@ -736,8 +544,8 @@
             const datasets = [{
                 label: 'F0 (Основная частота)',
                 data: f0Points,
-                borderColor: '#28a745',
-                backgroundColor: 'rgba(40, 167, 69, 0.1)',
+                borderColor: '#1f8a70',
+                backgroundColor: 'rgba(31, 138, 112, 0.08)',
                 borderWidth: 2,
                 pointRadius: 0,
                 tension: 0.1
@@ -748,7 +556,7 @@
                 datasets.push({
                     label: 'F0 Mean',
                     data: f0Points.map((p) => ({ x: p.x, y: f0Data.mean })),
-                    borderColor: '#ffc107',
+                    borderColor: '#c98a00',
                     borderWidth: 2,
                     borderDash: [5, 5],
                     pointRadius: 0
@@ -869,7 +677,7 @@
                         backgroundColor: (ctx) => {
                             const value = ctx.raw.v;
                             const alpha = Math.max(0, Math.min(1, (value + 80) / 80)); // Нормализация -80 до 0 dB
-                            return `rgba(44, 95, 141, ${alpha})`;
+                            return `rgba(14, 90, 120, ${alpha})`;
                         },
                         pointRadius: 2
                     }]
@@ -949,8 +757,8 @@
                     datasets: [{
                         label: 'Интенсивность',
                         data: intensityPoints,
-                        borderColor: '#dc3545',
-                        backgroundColor: 'rgba(220, 53, 69, 0.1)',
+                        borderColor: '#8a4f7d',
+                        backgroundColor: 'rgba(138, 79, 125, 0.08)',
                         borderWidth: 2,
                         pointRadius: 0,
                         tension: 0.1,
@@ -1024,8 +832,8 @@
             datasets.push({
                 label: 'Jitter (%)',
                 data: segmentsData.map(s => s.features?.jitter_percent || 0),
-                borderColor: '#28a745',
-                backgroundColor: 'rgba(40, 167, 69, 0.1)',
+                borderColor: '#1f8a70',
+                backgroundColor: 'rgba(31, 138, 112, 0.08)',
                 borderWidth: 2,
                 yAxisID: 'y'
             });
@@ -1034,8 +842,8 @@
             datasets.push({
                 label: 'Shimmer (%)',
                 data: segmentsData.map(s => s.features?.shimmer_percent || 0),
-                borderColor: '#ffc107',
-                backgroundColor: 'rgba(255, 193, 7, 0.1)',
+                borderColor: '#c98a00',
+                backgroundColor: 'rgba(201, 138, 0, 0.08)',
                 borderWidth: 2,
                 yAxisID: 'y'
             });
@@ -1044,8 +852,8 @@
             datasets.push({
                 label: 'HNR (dB)',
                 data: segmentsData.map(s => s.features?.hnr_db || 0),
-                borderColor: '#dc3545',
-                backgroundColor: 'rgba(220, 53, 69, 0.1)',
+                borderColor: '#8a4f7d',
+                backgroundColor: 'rgba(138, 79, 125, 0.08)',
                 borderWidth: 2,
                 yAxisID: 'y1'
             });
