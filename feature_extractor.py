@@ -45,12 +45,18 @@ class FeatureExtractor:
         self.spl_calibrated = spl_offset_db is not None
         self.spl_offset_db = float(spl_offset_db) if self.spl_calibrated else DEFAULT_SPL_OFFSET_DB
     
-    def extract_all_features(self, audio: np.ndarray) -> Dict[str, float]:
+    def extract_all_features(self, audio: np.ndarray,
+                             level_audio: Optional[np.ndarray] = None,
+                             spl_offset_db: Optional[float] = None) -> Dict[str, float]:
         """
         Извлечение всех акустических признаков
         
         Args:
             audio: Аудиомассив
+            level_audio: Исходный сигнал до нормализации громкости. По нему
+                считается I-Low, иначе абсолютный уровень теряется.
+            spl_offset_db: Калибровка устройства для этой записи
+                (перекрывает значение из конструктора)
         
         Returns:
             Словарь с извлеченными признаками
@@ -71,15 +77,15 @@ class FeatureExtractor:
                 features.update(self._extract_spectral_features(audio))
                 
                 # Извлечение параметров для DSI
-                features.update(self._extract_dsi_parameters(sound, audio))
+                features.update(self._extract_dsi_parameters(sound, audio, level_audio, spl_offset_db))
                 
             except Exception as e:
                 print(f"Предупреждение при извлечении признаков через parselmouth: {str(e)}")
                 # Fallback на librosa
-                features.update(self._extract_features_librosa(audio))
+                features.update(self._extract_features_librosa(audio, level_audio, spl_offset_db))
         else:
             # Используем только librosa
-            features.update(self._extract_features_librosa(audio))
+            features.update(self._extract_features_librosa(audio, level_audio, spl_offset_db))
         
         return features
     
@@ -703,7 +709,9 @@ class FeatureExtractor:
         # Возвращаем None, чтобы вызывающий код мог обработать это
         return 0.0
     
-    def _extract_features_librosa(self, audio: np.ndarray) -> Dict[str, float]:
+    def _extract_features_librosa(self, audio: np.ndarray,
+                                  level_audio: Optional[np.ndarray] = None,
+                                  spl_offset_db: Optional[float] = None) -> Dict[str, float]:
         """Fallback извлечение признаков через librosa"""
         features = {}
         
@@ -736,7 +744,7 @@ class FeatureExtractor:
             try:
                 audio_normalized = audio / (np.max(np.abs(audio)) + 1e-10)
                 sound = parselmouth.Sound(audio_normalized, sampling_frequency=self.sample_rate)
-                features.update(self._extract_dsi_parameters(sound, audio))
+                features.update(self._extract_dsi_parameters(sound, audio, level_audio, spl_offset_db))
             except:
                 # Fallback значения для DSI параметров
                 features['mpt_sec'] = 0.0
@@ -751,7 +759,9 @@ class FeatureExtractor:
         return features
     
     def _extract_dsi_parameters(self, sound, 
-                               audio: np.ndarray) -> Dict[str, float]:
+                               audio: np.ndarray,
+                               level_audio: Optional[np.ndarray] = None,
+                               spl_offset_db: Optional[float] = None) -> Dict[str, float]:
         """
         Извлечение параметров для расчета DSI (Dysphonia Severity Index)
         
@@ -773,7 +783,8 @@ class FeatureExtractor:
             features['f0_high_hz'] = float(f0_high)
             
             # 3. I-Low - низшая интенсивность в дБ (по исходному сигналу)
-            features.update(self._calculate_lowest_intensity(audio))
+            features.update(self._calculate_lowest_intensity(
+                level_audio if level_audio is not None else audio, spl_offset_db))
             
         except Exception as e:
             print(f"Ошибка извлечения параметров DSI: {str(e)}")
@@ -906,7 +917,8 @@ class FeatureExtractor:
             print(f"Ошибка расчета F0-High: {str(e)}")
             return 200.0  # Безопасное значение по умолчанию
     
-    def _calculate_lowest_intensity(self, audio: np.ndarray) -> Dict[str, float]:
+    def _calculate_lowest_intensity(self, audio: np.ndarray,
+                                    spl_offset_db: Optional[float] = None) -> Dict[str, float]:
         """
         Расчет низшей интенсивности в дБ (I-Low)
         
@@ -923,10 +935,12 @@ class FeatureExtractor:
         Без калибровки устройства значение в дБ SPL - оценка по типичной
         чувствительности микрофона, на это указывает i_low_calibrated = 0.
         """
+        calibrated = spl_offset_db is not None or self.spl_calibrated
+        offset_db = float(spl_offset_db) if spl_offset_db is not None else self.spl_offset_db
         result = {
             'i_low_dbfs': 0.0,
             'i_low_db': 0.0,
-            'i_low_calibrated': 1.0 if self.spl_calibrated else 0.0,
+            'i_low_calibrated': 1.0 if calibrated else 0.0,
         }
         try:
             sound = parselmouth.Sound(audio, sampling_frequency=self.sample_rate)
@@ -954,7 +968,7 @@ class FeatureExtractor:
             
             i_low_dbfs = i_low_praat_db - PRAAT_DB_AT_FULL_SCALE
             result['i_low_dbfs'] = float(i_low_dbfs)
-            result['i_low_db'] = float(i_low_dbfs + self.spl_offset_db)
+            result['i_low_db'] = float(i_low_dbfs + offset_db)
             return result
                 
         except Exception as e:
