@@ -16,8 +16,7 @@ PYTHON_CMD=$(command -v python3 || command -v python)
 if [ ! -f .env ]; then
     echo "📝 Создание .env файла из примера..."
     cp env.example .env
-    echo "⚠️  ВАЖНО: Отредактируйте .env и укажите TELEGRAM_BOT_TOKEN"
-    read -p "Нажмите Enter после редактирования .env файла..."
+    echo "⚠️  При необходимости отредактируйте .env"
 fi
 
 # Загрузка переменных из .env
@@ -26,37 +25,8 @@ if [ -f .env ]; then
 fi
 
 echo ""
-echo "✅ Запуск сервисов..."
-echo ""
-echo "📊 API сервер будет запущен на http://localhost:5000"
-echo "🤖 Telegram бот будет запущен в отдельном терминале"
-echo ""
-echo "⚠️  Для остановки нажмите Ctrl+C в каждом терминале"
+echo "✅ Запуск веб-интерфейса на http://localhost:5000"
+echo "⚠️  Для остановки нажмите Ctrl+C"
 echo ""
 
-# Запуск API сервера в фоне
-echo "[API] Запуск API сервера..."
-$PYTHON_CMD start_api.py &
-API_PID=$!
-
-# Ожидание запуска API
-sleep 3
-
-# Запуск бота в фоне
-echo "[BOT] Запуск Telegram бота..."
-$PYTHON_CMD start_bot.py &
-BOT_PID=$!
-
-echo ""
-echo "✅ Сервисы запущены!"
-echo ""
-echo "📊 API сервер (PID: $API_PID): http://localhost:5000"
-echo "🤖 Telegram бот (PID: $BOT_PID)"
-echo ""
-echo "Для остановки выполните:"
-echo "  kill $API_PID $BOT_PID"
-echo ""
-
-# Ожидание завершения (Ctrl+C остановит оба процесса)
-trap "kill $API_PID $BOT_PID; exit" INT TERM
-wait
+exec $PYTHON_CMD start_api.py

@@ -1,5 +1,10 @@
 # Changelog
 
+## [Unreleased]
+
+### Удалено
+- Telegram бот (`bot.py`, `start_bot.py`), зависимость `aiogram`, переменная `TELEGRAM_BOT_TOKEN` и сервис `bot` в docker-compose. Остался только веб-интерфейс.
+
 ## [1.1.0] - 2025-01-19
 
 ### Изменено

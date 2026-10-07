@@ -25,7 +25,7 @@ if not exist .env (
     echo 📝 Создание .env файла из примера...
     if exist env.example (
         copy env.example .env >nul
-        echo ⚠️  ВАЖНО: Отредактируйте .env и укажите TELEGRAM_BOT_TOKEN
+        echo ⚠️  При необходимости отредактируйте .env
         echo.
         pause
     ) else (
@@ -42,7 +42,6 @@ echo.
 echo ✅ Система запущена!
 echo.
 echo 📊 Веб-интерфейс: http://localhost:5000
-echo 🤖 Telegram бот: найдите вашего бота в Telegram
 echo.
 echo 📋 Просмотр логов: docker-compose logs -f
 echo 🛑 Остановка: docker-compose down
