@@ -35,3 +35,30 @@ jobs:
         env:
           MPLBACKEND: Agg
         run: '"$VENV/bin/python" scripts/ci_smoke.py'
+
+  # Выкладка на lab-сервер (https://msr25.ru/audio_park/) после зелёного smoke в main.
+  # Данные (results.json, results/) и .env лежат в ~/audio_park и не трогаются.
+  deploy:
+    needs: smoke
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    runs-on: [self-hosted, Linux]
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build image
+        run: docker build -t audio_park-api:latest .
+
+      - name: Restart container
+        run: docker compose -p audio_park -f docker-compose.prod.yml --project-directory "$HOME/audio_park" up -d --no-build
+
+      - name: Wait for the app
+        run: |
+          for i in $(seq 1 30); do
+            if wget -q -O /dev/null http://127.0.0.1:5005/api/stats; then
+              echo "app is up"; exit 0
+            fi
+            sleep 2
+          done
+          docker logs --tail 50 parkinson_api
+          exit 1
