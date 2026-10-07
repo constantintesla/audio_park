@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Анализ голоса на болезнь Паркинсона</title>
+    <title>Обзор · Анализ голоса</title>
     
     <!-- Bootstrap 5 CSS -->
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
@@ -11,517 +11,146 @@
     <!-- Wavesurfer.js CSS -->
     <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/wavesurfer.js@6/dist/wavesurfer.min.css">
     
-    <style>
-        :root {
-            --medical-blue: #2c5f8d;
-            --medical-light-blue: #4a90c2;
-            --medical-grey: #6c757d;
-            --medical-light-grey: #e9ecef;
-            --risk-high: #dc3545;
-            --risk-medium: #ffc107;
-            --risk-low: #28a745;
-        }
-        
-        body {
-            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
-            background: linear-gradient(135deg, #f5f7fa 0%, #e9ecef 100%);
-            min-height: 100vh;
-            padding: 20px 0;
-        }
-        
-        .container {
-            max-width: 1200px;
-        }
-        
-        .header {
-            background: linear-gradient(135deg, var(--medical-blue) 0%, var(--medical-light-blue) 100%);
-            color: white;
-            padding: 30px;
-            border-radius: 15px;
-            margin-bottom: 30px;
-            box-shadow: 0 4px 6px rgba(0,0,0,0.1);
-        }
-        
-        .header h1 {
-            margin: 0;
-            font-size: 2rem;
-            font-weight: 600;
-        }
-        
-        .header p {
-            margin: 10px 0 0 0;
-            opacity: 0.9;
-        }
-        
-        .card {
-            border: none;
-            border-radius: 15px;
-            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
-            margin-bottom: 20px;
-        }
-        
-        .card-header {
-            background: var(--medical-light-grey);
-            border-bottom: 2px solid var(--medical-blue);
-            font-weight: 600;
-            padding: 15px 20px;
-        }
-        
-        #upload-zone {
-            border: 3px dashed var(--medical-blue);
-            border-radius: 10px;
-            padding: 40px;
-            text-align: center;
-            background: white;
-            cursor: pointer;
-            transition: all 0.3s;
-            margin-bottom: 20px;
-        }
-        
-        #upload-zone:hover {
-            background: var(--medical-light-grey);
-            border-color: var(--medical-light-blue);
-        }
-        
-        #upload-zone.dragover {
-            background: #d4edda;
-            border-color: var(--risk-low);
-        }
-        
-        #file-input {
-            display: none;
-        }
-        
-        .btn-primary {
-            background: var(--medical-blue);
-            border: none;
-            padding: 12px 30px;
-            font-size: 1.1rem;
-            border-radius: 8px;
-            transition: all 0.3s;
-        }
-        
-        .btn-primary:hover {
-            background: var(--medical-light-blue);
-            transform: translateY(-2px);
-            box-shadow: 0 4px 8px rgba(0,0,0,0.2);
-        }
-        
-        .btn-primary:disabled {
-            background: var(--medical-grey);
-            cursor: not-allowed;
-        }
-        
-        .btn-record {
-            background: var(--risk-high);
-            color: white;
-            border: none;
-            padding: 12px 30px;
-            font-size: 1.1rem;
-            border-radius: 8px;
-            margin-right: 10px;
-        }
-        
-        .btn-record:hover {
-            background: #c82333;
-        }
-        
-        .btn-record.recording {
-            animation: pulse 1.5s infinite;
-        }
-        
-        #live-recorder {
-            margin: 20px 0;
-        }
-        
-        .rec-status {
-            font-weight: 600;
-            padding: 8px 12px;
-            border-radius: 8px;
-            margin-bottom: 8px;
-            background: #eef3f8;
-        }
-        
-        .rec-status-silence { background: #eef1f4; color: #4a5560; }
-        .rec-status-signal { background: #fff3e0; color: #8a4b00; }
-        .rec-status-speech { background: #fdecee; color: #a71d2a; }
-        
-        #live-wave {
-            width: 100%;
-            height: 120px;
-            display: block;
-            background: #f7f9fb;
-            border-radius: 10px;
-        }
-        
-        .level-meter {
-            height: 8px;
-            background: #e3e8ee;
-            border-radius: 4px;
-            overflow: hidden;
-            margin-top: 8px;
-        }
-        
-        #level-bar {
-            height: 100%;
-            width: 0;
-            transition: width 0.05s linear;
-        }
-        
-        #level-bar.level-low { background: #9aa5b1; }
-        #level-bar.level-ok { background: #28a745; }
-        #level-bar.level-hot { background: #dc3545; }
-        
-        .live-meta {
-            display: flex;
-            justify-content: space-between;
-            font-size: 0.85rem;
-            color: var(--medical-grey);
-            margin-top: 4px;
-        }
-        
-        #clip-indicator {
-            visibility: hidden;
-            color: #fff;
-            background: #dc3545;
-            border-radius: 4px;
-            padding: 0 6px;
-            font-weight: 700;
-        }
-        
-        @keyframes pulse {
-            0%, 100% { opacity: 1; }
-            50% { opacity: 0.6; }
-        }
-        
-        #waveform {
-            margin: 20px 0;
-            border-radius: 10px;
-            overflow: hidden;
-        }
-        
-        .progress-container {
-            display: none;
-            margin: 20px 0;
-        }
-        
-        .progress {
-            height: 30px;
-            border-radius: 15px;
-            background: var(--medical-light-grey);
-        }
-        
-        .progress-bar {
-            background: linear-gradient(90deg, var(--medical-blue), var(--medical-light-blue));
-            transition: width 0.3s;
-        }
-        
-        #results {
-            display: none;
-        }
-        
-        .feature-table {
-            width: 100%;
-            margin: 20px 0;
-        }
-        
-        .feature-table th {
-            background: var(--medical-blue);
-            color: white;
-            padding: 12px;
-            text-align: left;
-        }
-        
-        .feature-table td {
-            padding: 10px 12px;
-            border-bottom: 1px solid #dee2e6;
-        }
-        
-        .feature-table tr:hover {
-            background: var(--medical-light-grey);
-        }
-        
-        .risk-badge {
-            display: inline-block;
-            padding: 8px 16px;
-            border-radius: 20px;
-            font-weight: 600;
-            font-size: 1.1rem;
-        }
-        
-        .risk-high {
-            background: var(--risk-high);
-            color: white;
-        }
-        
-        .risk-medium {
-            background: var(--risk-medium);
-            color: #333;
-        }
-        
-        .risk-low {
-            background: var(--risk-low);
-            color: white;
-        }
-        
-        .symptom-score {
-            display: inline-block;
-            padding: 4px 12px;
-            border-radius: 15px;
-            font-weight: 600;
-            margin: 2px;
-        }
-        
-        .score-0 { background: #d4edda; color: #155724; }
-        .score-1 { background: #fff3cd; color: #856404; }
-        .score-2 { background: #ffeaa7; color: #856404; }
-        .score-3 { background: #f8d7da; color: #721c24; }
-        
-        .report-list {
-            background: white;
-            padding: 20px;
-            border-radius: 10px;
-            margin: 20px 0;
-        }
-        
-        .report-list ul {
-            list-style: none;
-            padding: 0;
-        }
-        
-        .report-list li {
-            padding: 10px;
-            margin: 5px 0;
-            border-left: 4px solid var(--medical-blue);
-            background: var(--medical-light-grey);
-        }
-        
-        .footer {
-            text-align: center;
-            padding: 20px;
-            color: var(--medical-grey);
-            font-size: 0.9rem;
-            margin-top: 40px;
-        }
-        
-        .chart-container {
-            position: relative;
-            height: 300px;
-            margin: 20px 0;
-        }
-        
-        .audio-info {
-            background: white;
-            padding: 15px;
-            border-radius: 10px;
-            margin: 15px 0;
-        }
-        
-        #summary-table-container {
-            margin-bottom: 30px;
-        }
-        
-        #summary-table {
-            font-size: 0.9rem;
-        }
-        
-        #summary-table th {
-            background: var(--medical-blue);
-            color: white;
-            font-weight: 600;
-            white-space: nowrap;
-            position: sticky;
-            top: 0;
-            z-index: 10;
-        }
-        
-        #summary-table th:hover {
-            background: var(--medical-light-blue);
-        }
-        
-        #summary-table td {
-            vertical-align: middle;
-        }
-        
-        #summary-table tbody tr:hover {
-            background-color: #f0f8ff;
-            cursor: pointer;
-        }
-        
-        #table-search {
-            max-width: 400px;
-            margin: 0 auto 15px auto;
-        }
-        
-        .table-badge {
-            padding: 4px 8px;
-            border-radius: 4px;
-            font-size: 0.85rem;
-            font-weight: 600;
-        }
-        
-        .table-badge-high {
-            background: var(--risk-high);
-            color: white;
-        }
-        
-        .table-badge-medium {
-            background: var(--risk-medium);
-            color: #333;
-        }
-        
-        .table-badge-low {
-            background: var(--risk-low);
-            color: white;
-        }
-        
-        .table-badge-minimal {
-            background: #e9ecef;
-            color: #333;
-        }
-        
-        @media (max-width: 768px) {
-            .header h1 {
-                font-size: 1.5rem;
-            }
-            
-            #upload-zone {
-                padding: 20px;
-            }
-            
-            .btn-primary, .btn-record {
-                width: 100%;
-                margin-bottom: 10px;
-            }
-        }
-    </style>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="assets/theme.css">
 </head>
 <body>
+    <header class="app-nav">
+        <div class="container app-nav-inner">
+            <a class="brand" href="./">
+                <span class="brand-mark"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" aria-hidden="true"><path d="M3 12h2M7 8v8M11 4v16M15 7v10M19 10v4M21 12h0"/></svg></span>
+                <span class="brand-text"><strong>Анализ голоса</strong><small>Скрининг признаков болезни Паркинсона</small></span>
+            </a>
+            <nav class="app-links" aria-label="Разделы">
+                <a href="./" class="active" aria-current="page">Обзор</a>
+                <a href="./results">Результаты</a>
+                <a href="./visualization">Визуализация</a>
+            </nav>
+        </div>
+    </header>
     <div class="container">
-        <div class="header">
-            <h1>🎤 Анализ голоса на болезнь Паркинсона</h1>
-            <p>Результаты анализа голосовых записей</p>
-            <div class="mt-3 d-flex flex-column flex-md-row align-items-start align-items-md-center gap-2 flex-wrap">
-                <a href="./visualization" class="btn btn-light btn-lg fw-semibold">
-                    🎯 Открыть визуализацию параметров
-                </a>
-                <a href="./results" class="btn btn-primary btn-lg fw-semibold">
-                    📋 Показать все результаты
-                </a>
-                <span class="small text-white-50">Подробные графики и аудио для каждого анализа</span>
+        <div class="page-head">
+            <div>
+                <h1>Обзор</h1>
+                <p>Новая запись голоса и сводка всех анализов</p>
             </div>
         </div>
         
         <!-- Stats Section -->
-        <div class="card mb-3">
-            <div class="card-body">
-                <div class="row text-center">
-                    <div class="col-md-4">
-                        <h3 id="total-analyses">-</h3>
-                        <p class="text-muted">Всего анализов</p>
-                    </div>
-                    <div class="col-md-4">
-                        <h3 id="users-count">-</h3>
-                        <p class="text-muted">Пользователей</p>
-                    </div>
-                    <div class="col-md-4">
-                        <h3 id="recent-analyses">-</h3>
-                        <p class="text-muted">За последние 7 дней</p>
-                    </div>
-                </div>
+        <div class="stat-grid">
+            <div class="stat">
+                <p class="stat-label">Всего анализов</p>
+                <p class="stat-value" id="total-analyses">–</p>
+            </div>
+            <div class="stat">
+                <p class="stat-label">Пользователей</p>
+                <p class="stat-value" id="users-count">–</p>
+            </div>
+            <div class="stat">
+                <p class="stat-label">За последние 7 дней</p>
+                <p class="stat-value" id="recent-analyses">–</p>
             </div>
         </div>
         
-        <!-- Local Analysis Section (Collapsible) -->
-        <div class="card mb-3">
-            <div class="card-header" style="cursor: pointer;" id="local-analysis-header">
-                <h5 class="mb-0">📤 Локальный анализ (развернуть)</h5>
+        <!-- Новый анализ -->
+        <div class="card">
+            <div class="card-header collapsible-header" id="local-analysis-header">
+                <h5 class="mb-0">Новый анализ</h5>
+                <svg class="chevron" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M6 9l6 6 6-6"/></svg>
             </div>
-            <div class="card-body" id="local-analysis-section" style="display: none;">
-                <div id="upload-zone">
-                    <p style="font-size: 1.2rem; margin-bottom: 10px;">📁 Перетащите аудиофайл сюда</p>
-                    <p style="color: var(--medical-grey);">или</p>
-                    <input type="file" id="file-input" accept="audio/wav,audio/mp3,audio/mpeg,audio/ogg,audio/oga,audio/*">
-                    <button class="btn btn-primary mt-3" onclick="document.getElementById('file-input').click()">
-                        Выбрать файл (WAV/MP3/OGG, макс. 60 сек)
-                    </button>
-                </div>
-                
-                <div class="text-center">
-                    <button id="record-btn" class="btn btn-record">🎤 Записать с микрофона</button>
-                    <button id="analyze-btn" class="btn btn-primary" disabled>Анализировать</button>
-                    <div class="form-check d-inline-block mt-2 ms-2">
-                        <input class="form-check-input" type="checkbox" id="calibrate-check" checked>
-                        <label class="form-check-label" for="calibrate-check">Калибровка перед записью (тишина + тестовый звук, ~7 с)</label>
+            <div class="card-body" id="local-analysis-section">
+                <div class="capture-grid">
+                    <div class="capture-panel">
+                        <h3>Запись с микрофона</h3>
+                        <p class="hint">Держите устройство на расстоянии 20–30 см и произнесите протяжное «а-а-а» или фразу.</p>
+                        <button id="record-btn" class="btn btn-record">Записать с микрофона</button>
+                        <div class="form-check mt-3">
+                            <input class="form-check-input" type="checkbox" id="calibrate-check" checked>
+                            <label class="form-check-label" for="calibrate-check">Калибровка перед записью (тишина и тестовый звук, около 7 с)</label>
+                        </div>
+                        
+                        <div id="live-recorder" style="display: none;">
+                            <div id="rec-status" class="rec-status"></div>
+                            <canvas id="live-wave"></canvas>
+                            <div class="level-meter"><div id="level-bar"></div></div>
+                            <div class="live-meta">
+                                <span id="level-text">— dBFS</span>
+                                <span id="clip-indicator">ПЕРЕГРУЗ</span>
+                                <span id="rec-timer"></span>
+                            </div>
+                        </div>
+                        
+                        <div id="calibration-info" class="audio-info" style="display: none;"></div>
+                    </div>
+                    <div class="capture-panel">
+                        <h3>Загрузка файла</h3>
+                        <p class="hint">WAV, MP3 или OGG, не длиннее 60 секунд.</p>
+                        <div id="upload-zone">
+                            <input type="file" id="file-input" accept="audio/wav,audio/mp3,audio/mpeg,audio/ogg,audio/oga,audio/*">
+                            <p class="fw-medium">Перетащите аудиофайл сюда</p>
+                            <p class="text-muted small mb-2">или</p>
+                            <span class="btn btn-outline-secondary btn-sm">Выбрать файл</span>
+                        </div>
                     </div>
                 </div>
-                
-                <div id="live-recorder" style="display: none;">
-                    <div id="rec-status" class="rec-status"></div>
-                    <canvas id="live-wave"></canvas>
-                    <div class="level-meter"><div id="level-bar"></div></div>
-                    <div class="live-meta">
-                        <span id="level-text">— dBFS</span>
-                        <span id="clip-indicator">ПЕРЕГРУЗ</span>
-                        <span id="rec-timer"></span>
-                    </div>
-                </div>
-                
-                <div id="calibration-info" class="audio-info" style="display: none;"></div>
                 
                 <div id="audio-info" class="audio-info" style="display: none;">
-                    <strong>Загружено:</strong> <span id="audio-name"></span><br>
-                    <strong>Длительность:</strong> <span id="audio-duration"></span> сек<br>
-                    <strong>Частота дискретизации:</strong> <span id="audio-sr"></span> Hz
+                    <strong>Загружено:</strong> <span id="audio-name"></span> ·
+                    <strong>Длительность:</strong> <span id="audio-duration"></span> с ·
+                    <strong>Частота дискретизации:</strong> <span id="audio-sr"></span> Гц
+                </div>
+                
+                <div class="analyze-bar">
+                    <span class="text-muted small">Запись отправляется на сервер и сохраняется в общем списке анализов.</span>
+                    <button id="analyze-btn" class="btn btn-primary btn-lg" disabled>Анализировать</button>
                 </div>
             </div>
         </div>
         
         <!-- Сводная таблица результатов -->
-        <div class="card mb-3">
+        <div class="card">
             <div class="card-header d-flex justify-content-between align-items-center">
-                <h4 class="mb-0">📊 Сводная таблица результатов</h4>
-                <small class="text-muted" id="results-count">Загрузка...</small>
+                <h4 class="mb-0">Все анализы</h4>
+                <small class="text-muted fw-normal" id="results-count">Загрузка...</small>
             </div>
             <div class="card-body">
-                <div class="text-center mb-3">
-                    <button id="refresh-btn" class="btn btn-primary">🔄 Обновить список</button>
-                    <button id="recalculate-all-btn" class="btn btn-secondary">♻️ Пересчитать все результаты</button>
-                    <button id="export-csv-btn" class="btn btn-success">📊 Экспорт CSV</button>
-                    <button id="export-json-btn" class="btn btn-info">📄 Экспорт JSON</button>
-                    <button id="export-html-btn" class="btn btn-warning">🌐 Экспорт HTML</button>
+                <div class="toolbar mb-3">
+                    <input type="text" id="table-search" class="form-control" placeholder="Поиск по пользователю, риску, DSI">
+                    <span class="spacer"></span>
+                    <button id="refresh-btn" class="btn btn-outline-secondary">Обновить</button>
+                    <button id="export-csv-btn" class="btn btn-outline-secondary">CSV</button>
+                    <button id="export-json-btn" class="btn btn-outline-secondary">JSON</button>
+                    <button id="export-html-btn" class="btn btn-outline-secondary">HTML</button>
+                    <button id="recalculate-all-btn" class="btn btn-ghost" title="Пересчитать все сохраненные результаты текущими алгоритмами">Пересчитать все</button>
                 </div>
                 <div id="recalculate-status" class="alert alert-info" style="display: none; margin-top: 15px;">
                     <div class="d-flex align-items-center">
                         <div class="spinner-border spinner-border-sm me-2" role="status"></div>
                         <span id="recalculate-status-text">Пересчет результатов...</span>
                     </div>
-                    <div class="progress mt-2" style="height: 20px;">
-                        <div id="recalculate-progress" class="progress-bar progress-bar-striped progress-bar-animated" 
-                             role="progressbar" style="width: 0%"></div>
+                    <div class="progress mt-2">
+                        <div id="recalculate-progress" class="progress-bar" role="progressbar" style="width: 0%"></div>
                     </div>
                 </div>
                 
                 <!-- Сводная таблица -->
                 <div id="summary-table-container" style="display: none;">
-                    <h5 class="mb-3">📊 Сводная таблица результатов</h5>
-                    <div class="mb-3">
-                        <input type="text" id="table-search" class="form-control" placeholder="🔍 Поиск по имени пользователя, риску, DSI...">
-                    </div>
-                    <div class="table-responsive">
-                        <table class="table table-striped table-hover" id="summary-table">
-                            <thead class="table-dark">
+                    <div class="table-wrap">
+                        <table class="table table-hover" id="summary-table">
+                            <thead>
                                 <tr>
-                                    <th style="cursor: pointer;" onclick="sortTable(0)">Дата/Время ↕️</th>
-                                    <th style="cursor: pointer;" onclick="sortTable(1)">Пользователь ↕️</th>
-                                    <th style="cursor: pointer;" onclick="sortTable(2)">DSI Score ↕️</th>
-                                    <th style="cursor: pointer;" onclick="sortTable(3)">DSI Range ↕️</th>
-                                    <th style="cursor: pointer;" onclick="sortTable(4)">Риск ПД ↕️</th>
-                                    <th style="cursor: pointer;" onclick="sortTable(5)">Jitter (%) ↕️</th>
-                                    <th style="cursor: pointer;" onclick="sortTable(6)">Shimmer (%) ↕️</th>
-                                    <th style="cursor: pointer;" onclick="sortTable(7)">HNR (dB) ↕️</th>
-                                    <th style="cursor: pointer;" onclick="sortTable(8)">F0 SD (Hz) ↕️</th>
-                                    <th>Действия</th>
+                                    <th class="sortable" onclick="sortTable(0)">Дата</th>
+                                    <th class="sortable" onclick="sortTable(1)">Пользователь</th>
+                                    <th class="sortable" onclick="sortTable(2)">DSI</th>
+                                    <th class="sortable" onclick="sortTable(3)">Оценка DSI</th>
+                                    <th class="sortable" onclick="sortTable(4)">Риск ПД</th>
+                                    <th class="sortable" onclick="sortTable(5)">Jitter, %</th>
+                                    <th class="sortable" onclick="sortTable(6)">Shimmer, %</th>
+                                    <th class="sortable" onclick="sortTable(7)">HNR, дБ</th>
+                                    <th class="sortable" onclick="sortTable(8)">F0 SD, Гц</th>
+                                    <th></th>
                                 </tr>
                             </thead>
                             <tbody id="summary-table-body">
@@ -536,9 +165,9 @@
         <!-- Детальный отчет по выбранному результату -->
         <div id="single-result-container" class="card mb-3" style="display: none;">
             <div class="card-header d-flex justify-content-between align-items-center">
-                <h4 class="mb-0">📄 Детальный отчет</h4>
+                <h4 class="mb-0">Детальный отчет</h4>
                 <button class="btn btn-sm btn-outline-secondary" onclick="closeSingleResult()">
-                    ✕ Закрыть
+                    Закрыть
                 </button>
             </div>
             <div class="card-body" id="single-result-content">
@@ -590,7 +219,7 @@
                 <!-- DSI Section -->
                 <div class="card mt-4 mb-4" id="dsi-card" style="display: none;">
                     <div class="card-header bg-primary text-white">
-                        <h4 class="mb-0">📊 DSI (Dysphonia Severity Index)</h4>
+                        <h4 class="mb-0">DSI (Dysphonia Severity Index)</h4>
                     </div>
                     <div class="card-body">
                         <div class="text-center mb-3">
@@ -645,7 +274,7 @@
                 
                 <!-- Export -->
                 <div class="text-center mt-4">
-                    <button id="export-btn" class="btn btn-primary">📥 Экспорт JSON</button>
+                    <button id="export-btn" class="btn btn-primary">Экспорт JSON</button>
                 </div>
             </div>
         </div>
@@ -660,10 +289,7 @@
         
         <!-- Footer -->
         <div class="footer">
-            
-            <p style="margin-top: 10px; font-size: 0.85rem;">
-                ⚠️ Система предназначена для исследовательских целей и не заменяет медицинскую диагностику
-            </p>
+            <p>Система предназначена для исследовательских целей и не заменяет медицинскую диагностику.</p>
         </div>
     </div>
     
@@ -714,15 +340,9 @@
             const header = event.currentTarget || event.target.closest('.card-header');
             if (!header) return;
             
-            if (section.style.display === 'none' || section.style.display === '') {
-                section.style.display = 'block';
-                const h5 = header.querySelector('h5');
-                if (h5) h5.textContent = '📤 Локальный анализ (свернуть)';
-            } else {
-                section.style.display = 'none';
-                const h5 = header.querySelector('h5');
-                if (h5) h5.textContent = '📤 Локальный анализ (развернуть)';
-            }
+            const hidden = section.style.display === 'none';
+            section.style.display = hidden ? 'block' : 'none';
+            header.classList.toggle('collapsed', !hidden);
         }
         
         function initRefreshButton() {
@@ -738,7 +358,7 @@
                 const progressBar = document.getElementById('recalculate-progress');
                 
                 // Подтверждение действия
-                if (!confirm('⚠️ Внимание! Это действие пересчитает все сохраненные результаты с использованием обновленных алгоритмов (без капов и фолбеков).\n\nЭто может занять несколько минут в зависимости от количества результатов.\n\nПродолжить?')) {
+                if (!confirm('Внимание! Это действие пересчитает все сохраненные результаты с использованием обновленных алгоритмов (без капов и фолбеков).\n\nЭто может занять несколько минут в зависимости от количества результатов.\n\nПродолжить?')) {
                     return;
                 }
                 
@@ -761,7 +381,7 @@
                     
                     if (response.ok) {
                         statusDiv.className = 'alert alert-success';
-                        statusText.textContent = `✅ ${data.message}`;
+                        statusText.textContent = data.message;
                         progressBar.style.width = '100%';
                         
                         // Обновляем список результатов после пересчета
@@ -771,13 +391,13 @@
                         }, 2000);
                     } else {
                         statusDiv.className = 'alert alert-danger';
-                        statusText.textContent = `❌ Ошибка: ${data.error || 'Неизвестная ошибка'}`;
+                        statusText.textContent = `Ошибка: ${data.error || 'Неизвестная ошибка'}`;
                         progressBar.style.width = '100%';
                         progressBar.className = 'progress-bar bg-danger';
                     }
                 } catch (error) {
                     statusDiv.className = 'alert alert-danger';
-                    statusText.textContent = `❌ Ошибка соединения: ${error.message}`;
+                    statusText.textContent = `Ошибка соединения: ${error.message}`;
                     progressBar.style.width = '100%';
                     progressBar.className = 'progress-bar bg-danger';
                 } finally {
@@ -857,7 +477,7 @@
                 if (tableContainer) {
                     tableContainer.innerHTML = `
                         <div class="alert alert-danger">
-                            <h5>❌ Ошибка загрузки результатов</h5>
+                            <h5>Ошибка загрузки результатов</h5>
                             <p>${e.message}</p>
                             <p class="mb-0"><small>Проверьте, что API сервер запущен и доступен по адресу ${API_URL}</small></p>
                         </div>
@@ -873,7 +493,7 @@
         
         function createResultCard(result, index) {
             const card = document.createElement('div');
-            card.className = 'card mb-3';
+            card.className = 'card result-card';
             
             const userInfo = result.user_info || {};
             const username = userInfo.tg_username || 'Неизвестный пользователь';
@@ -903,37 +523,31 @@
             
             // Определение цвета риска
             let riskClass = 'risk-low';
-            let riskIcon = '🟢';
             if (pdRisk.includes('Высокий')) {
                 riskClass = 'risk-high';
-                riskIcon = '🔴';
             } else if (pdRisk.includes('Умеренный')) {
                 riskClass = 'risk-medium';
-                riskIcon = '🟡';
             }
             
             // Краткая информация для заголовка
             const shortInfo = dsiScore !== null && dsiScore !== undefined 
-                ? `DSI: ${dsiScore.toFixed(2)} | ` 
+                ? `DSI ${dsiScore.toFixed(2)}` 
                 : '';
             
             card.innerHTML = `
-                <div class="card-header d-flex justify-content-between align-items-center" style="cursor: pointer;" onclick="toggleResult(${index})">
+                <div class="card-header d-flex justify-content-between align-items-center" onclick="toggleResult(${index})">
                     <div class="flex-grow-1">
                         <div class="d-flex align-items-center gap-2">
-                            <h5 class="mb-0">👤 ${username}</h5>
-                            <span class="risk-badge ${riskClass}" style="font-size: 0.85rem; padding: 4px 12px;">
-                                ${riskIcon} ${pdRisk.split('(')[0].trim()}
-                            </span>
+                            <h5 class="mb-0">${username}</h5>
+                            <span class="table-badge ${riskClass}">${pdRisk.split('(')[0].trim()}</span>
                         </div>
-                        <div class="mt-1">
-                            <small class="text-muted">📅 ${dateStr}</small>
-                            ${shortInfo ? `<small class="text-muted ms-2">${shortInfo}</small>` : ''}
+                        <div class="mt-1 result-meta">
+                            ${dateStr}${shortInfo ? ` · ${shortInfo}` : ''}
                         </div>
                     </div>
                     <div class="d-flex gap-2 align-items-center">
                         <button class="btn btn-sm btn-outline-secondary" onclick="event.stopPropagation(); openVisualization(${index})" title="Открыть визуализацию">
-                            📈
+                            Графики
                         </button>
                         <button class="btn btn-sm btn-outline-secondary" onclick="event.stopPropagation(); toggleResult(${index})">
                             <span id="toggle-icon-${index}">▼</span>
@@ -977,13 +591,13 @@
                 html += `
                     <div class="card mt-3 mb-3">
                         <div class="card-header bg-primary text-white">
-                            <h5 class="mb-0">📊 DSI (Dysphonia Severity Index)</h5>
+                            <h5 class="mb-0">DSI (Dysphonia Severity Index)</h5>
                         </div>
                         <div class="card-body">
                             <div class="text-center mb-3">
                                 <h2 class="display-4 ${dsiColorClass}">${dsiScore.toFixed(2)}</h2>
                                 <p class="lead">${dsiRange}</p>
-                                <p class="text-muted"><small>${dsiScore >= 2.0 ? '🟢' : dsiScore >= 0.0 ? '🟡' : dsiScore >= -2.0 ? '🟠' : '🔴'} Референсный диапазон: 2.0-5.0 (нормальный голос)</small></p>
+                                <p class="text-muted"><small><span class="dot ${dsiScore >= 2.0 ? 'dot-ok' : dsiScore >= 0.0 ? 'dot-warn' : dsiScore >= -2.0 ? 'dot-mid' : 'dot-risk'}"></span> Референсный диапазон: 2.0-5.0 (нормальный голос)</small></p>
                             </div>
                             <div class="row">
                                 <div class="col-md-6">
@@ -1000,7 +614,7 @@
                                             <tr>
                                             <td><strong>MPT (гласный, сек)</strong></td>
                                                 <td>${(breakdown.mpt_sec || 0).toFixed(2)}</td>
-                                                <td><small class="${(breakdown.mpt_sec || 0) >= 15 ? 'text-success' : (breakdown.mpt_sec || 0) < 10 ? 'text-danger' : 'text-warning'}">${(breakdown.mpt_sec || 0) >= 15 ? '🟢' : (breakdown.mpt_sec || 0) < 10 ? '🔴' : '🟡'} норма: 15-30 сек</small></td>
+                                                <td><small class="${(breakdown.mpt_sec || 0) >= 15 ? 'text-success' : (breakdown.mpt_sec || 0) < 10 ? 'text-danger' : 'text-warning'}">${(breakdown.mpt_sec || 0) >= 15 ? '<span class="dot dot-ok"></span>' : (breakdown.mpt_sec || 0) < 10 ? '<span class="dot dot-risk"></span>' : '<span class="dot dot-warn"></span>'} норма: 15-30 сек</small></td>
                                             </tr>
                                         <tr>
                                             <td><strong>MPT (речь, сек)</strong></td>
@@ -1010,17 +624,17 @@
                                             <tr>
                                                 <td><strong>F0-High (Гц)</strong></td>
                                                 <td>${(breakdown.f0_high_hz || 0).toFixed(1)}</td>
-                                                <td><small class="${(breakdown.f0_high_hz || 0) >= 400 ? 'text-success' : (breakdown.f0_high_hz || 0) < 300 ? 'text-danger' : 'text-warning'}">${(breakdown.f0_high_hz || 0) >= 400 ? '🟢' : (breakdown.f0_high_hz || 0) < 300 ? '🔴' : '🟡'} норма: 400-600 Гц</small></td>
+                                                <td><small class="${(breakdown.f0_high_hz || 0) >= 400 ? 'text-success' : (breakdown.f0_high_hz || 0) < 300 ? 'text-danger' : 'text-warning'}">${(breakdown.f0_high_hz || 0) >= 400 ? '<span class="dot dot-ok"></span>' : (breakdown.f0_high_hz || 0) < 300 ? '<span class="dot dot-risk"></span>' : '<span class="dot dot-warn"></span>'} норма: 400-600 Гц</small></td>
                                             </tr>
                                             <tr>
                                             <td><strong>I-Low (дБ, норм.)</strong></td>
                                                 <td>${(breakdown.i_low_db || 0).toFixed(1)}</td>
-                                                <td><small class="${(breakdown.i_low_db || 0) <= 45 && (breakdown.i_low_db || 0) >= 25 ? 'text-success' : (breakdown.i_low_db || 0) > 55 ? 'text-danger' : 'text-warning'}">${(breakdown.i_low_db || 0) <= 45 && (breakdown.i_low_db || 0) >= 25 ? '🟢' : (breakdown.i_low_db || 0) > 55 ? '🔴' : '🟡'} норма: 25-45 дБ</small></td>
+                                                <td><small class="${(breakdown.i_low_db || 0) <= 45 && (breakdown.i_low_db || 0) >= 25 ? 'text-success' : (breakdown.i_low_db || 0) > 55 ? 'text-danger' : 'text-warning'}">${(breakdown.i_low_db || 0) <= 45 && (breakdown.i_low_db || 0) >= 25 ? '<span class="dot dot-ok"></span>' : (breakdown.i_low_db || 0) > 55 ? '<span class="dot dot-risk"></span>' : '<span class="dot dot-warn"></span>'} норма: 25-45 дБ</small></td>
                                             </tr>
                                             <tr>
                                                 <td><strong>Jitter (%)</strong></td>
                                                 <td>${(breakdown.jitter_percent || 0).toFixed(2)}</td>
-                                                <td><small class="${(breakdown.jitter_percent || 0) <= 1.0 ? 'text-success' : (breakdown.jitter_percent || 0) > 1.5 ? 'text-danger' : 'text-warning'}">${(breakdown.jitter_percent || 0) <= 1.0 ? '🟢' : (breakdown.jitter_percent || 0) > 1.5 ? '🔴' : '🟡'} норма: 0.0-1.0 %</small></td>
+                                                <td><small class="${(breakdown.jitter_percent || 0) <= 1.0 ? 'text-success' : (breakdown.jitter_percent || 0) > 1.5 ? 'text-danger' : 'text-warning'}">${(breakdown.jitter_percent || 0) <= 1.0 ? '<span class="dot dot-ok"></span>' : (breakdown.jitter_percent || 0) > 1.5 ? '<span class="dot dot-risk"></span>' : '<span class="dot dot-warn"></span>'} норма: 0.0-1.0 %</small></td>
                                             </tr>
                                         <tr>
                                             <td><strong>Jitter (cap 5%)</strong></td>
@@ -1057,13 +671,13 @@
                 let statusIcon = '';
                 let statusClass = '';
                 if (normalMin <= value && value <= normalMax) {
-                    statusIcon = '🟢';
+                    statusIcon = '<span class="dot dot-ok"></span>';
                     statusClass = 'text-success';
                 } else if (value < normalMin) {
-                    statusIcon = '🔴';
+                    statusIcon = '<span class="dot dot-risk"></span>';
                     statusClass = 'text-danger';
                 } else {
-                    statusIcon = '🔴';
+                    statusIcon = '<span class="dot dot-risk"></span>';
                     statusClass = 'text-danger';
                 }
                 
@@ -1209,17 +823,17 @@
             let statusIcon = '';
             let statusClass = '';
             if (normalMin <= value && value <= normalMax) {
-                statusIcon = '🟢';
+                statusIcon = '<span class="dot dot-ok"></span>';
                 statusClass = 'text-success';
             } else {
-                statusIcon = '🔴';
+                statusIcon = '<span class="dot dot-risk"></span>';
                 statusClass = 'text-danger';
             }
             
             const numDecimals = paramName.includes('percent') ? 2 : (paramName.includes('db') || paramName.includes('hz')) ? 1 : 2;
             const valueStr = typeof value === 'number' ? value.toFixed(numDecimals) : value;
             
-            return `<div><strong class="${statusClass}">${valueStr} ${statusIcon}</strong><br><small class="text-muted">(норма: ${normalMin.toFixed(numDecimals)}-${normalMax.toFixed(numDecimals)} ${unit})</small></div>`;
+            return `<div class="cell-value"><strong class="${statusClass}">${valueStr}</strong>${statusIcon}<span class="ref">норма ${normalMin.toFixed(numDecimals)}–${normalMax.toFixed(numDecimals)}</span></div>`;
         }
         
         function displaySummaryTable(results) {
@@ -1317,19 +931,19 @@
                     <td>${dateStr}</td>
                     <td><strong>${username}</strong></td>
                     <td>${dsiScore}</td>
-                    <td><small>${dsiRange}</small></td>
+                    <td class="dsi-range">${dsiRange}</td>
                     <td><span class="table-badge ${riskClass}">${riskText}</span></td>
                     <td>${jitter}</td>
                     <td>${shimmer}</td>
                     <td>${hnr}</td>
                     <td>${f0sd}</td>
                     <td>
-                        <div class="d-flex align-items-center justify-content-center gap-2 flex-wrap">
+                        <div class="d-flex align-items-center justify-content-end gap-2">
                             <button class="btn btn-sm btn-outline-primary" onclick="event.stopPropagation(); showSingleResult(${index})">
-                                👁️ Показать
+                                Отчет
                             </button>
                             <button class="btn btn-sm btn-outline-secondary" onclick="event.stopPropagation(); openVisualization(${index})">
-                                📈 Визуализация
+                                Графики
                             </button>
                         </div>
                     </td>
@@ -1616,9 +1230,9 @@
                 // WaveSurfer 6 uses WaveSurfer.create()
                 wavesurfer = WaveSurfer.create({
                     container: '#waveform',
-                    waveColor: '#2c5f8d',
-                    progressColor: '#4a90c2',
-                    cursorColor: '#dc3545',
+                    waveColor: '#7fa8bb',
+                    progressColor: '#0e5a78',
+                    cursorColor: '#b42318',
                     barWidth: 2,
                     barRadius: 3,
                     responsive: true,
@@ -1724,7 +1338,7 @@
                 isRecording = true;
                 const recordBtn = document.getElementById('record-btn');
                 recordBtn.classList.add('recording');
-                recordBtn.textContent = '⏹ Остановить запись';
+                recordBtn.textContent = 'Остановить запись';
                 document.getElementById('analyze-btn').disabled = true;
                 document.getElementById('calibration-info').style.display = 'none';
                 document.getElementById('live-recorder').style.display = 'block';
@@ -1761,14 +1375,14 @@
         async function runRecordingPhases(state) {
             if (!state.calibrate) {
                 state.speechStart = 0;
-                setRecPhase('speech', '🔴 Идет запись. Говорите. Нажмите «Остановить», когда закончите');
+                setRecPhase('speech', 'Идет запись. Говорите. Нажмите «Остановить», когда закончите');
                 return;
             }
-            setRecPhase('silence', '🤫 Калибровка: 3 секунды тишины, пожалуйста, молчите');
+            setRecPhase('silence', 'Калибровка: 3 секунды тишины, пожалуйста, молчите');
             if (!await waitForSample(state, Math.round(CAL.silence * state.sr))) return;
             state.silenceEnd = state.nSamples;
 
-            setRecPhase('signal', '🔊 Калибровка: звучит тестовый сигнал, держите устройство как при записи');
+            setRecPhase('signal', 'Калибровка: звучит тестовый сигнал, держите устройство как при записи');
             state.plan = playCalibrationSignal(state);
             if (!await waitForSample(state, state.plan.end + Math.round(CAL.tail * state.sr))) return;
 
@@ -1776,7 +1390,7 @@
             // С запасом на задержку динамик → микрофон (Bluetooth бывает до ~0.3 с)
             if (!await waitForSample(state, beep.end + Math.round(0.5 * state.sr))) return;
             state.speechStart = state.nSamples;
-            setRecPhase('speech', '🔴 Идет запись. Говорите. Нажмите «Остановить», когда закончите');
+            setRecPhase('speech', 'Идет запись. Говорите. Нажмите «Остановить», когда закончите');
         }
 
         // Время AudioContext -> номер отсчета в записи (с точностью до буфера; задержку уточняем по записи)
@@ -1884,13 +1498,13 @@
             ctx.moveTo(0, mid);
             ctx.lineTo(width, mid);
             ctx.stroke();
-            const colors = { speech: '#2c5f8d', silence: '#9aa5b1', signal: '#e08a1e', start: '#9aa5b1' };
+            const colors = { speech: '#0e5a78', silence: '#a3aebb', signal: '#d39a12', start: '#a3aebb' };
             const offset = width - rec.columns.length * 2;
             rec.columns.forEach((c, i) => {
                 // Масштаб с запасом, чтобы тихая речь тоже была видна
                 const top = Math.max(-1, Math.min(1, c.max * 1.5));
                 const bottom = Math.max(-1, Math.min(1, c.min * 1.5));
-                ctx.fillStyle = colors[c.phase] || '#2c5f8d';
+                ctx.fillStyle = colors[c.phase] || '#0e5a78';
                 ctx.fillRect(offset + i * 2, mid - top * mid, 1.5, Math.max(1, (top - bottom) * mid));
             });
 
@@ -1922,7 +1536,7 @@
             isRecording = false;
             const recordBtn = document.getElementById('record-btn');
             recordBtn.classList.remove('recording');
-            recordBtn.textContent = '🎤 Записать с микрофона';
+            recordBtn.textContent = 'Записать с микрофона';
             document.getElementById('live-recorder').style.display = 'none';
         }
 
@@ -2227,9 +1841,9 @@
                 html += `Автоусиление (АРУ): ${agc}<br>`;
             }
             if (cal.warnings.length) {
-                html += '<div class="text-warning-emphasis mt-1">⚠️ ' + cal.warnings.join('<br>⚠️ ') + '</div>';
+                html += '<div class="text-warning mt-1">' + cal.warnings.join('<br>') + '</div>';
             } else {
-                html += '<div class="text-success mt-1">✅ Устройство в порядке</div>';
+                html += '<div class="text-success mt-1">Устройство в порядке</div>';
             }
             box.innerHTML = html;
             box.style.display = 'block';
@@ -2321,7 +1935,7 @@
                         notification.className = 'alert alert-success alert-dismissible fade show position-fixed';
                         notification.style.cssText = 'top: 20px; right: 20px; z-index: 9999; min-width: 300px;';
                         notification.innerHTML = `
-                            <strong>✅ Результат сохранен!</strong> Результат добавлен в общий список анализов.
+                            <strong>Результат сохранен.</strong> Результат добавлен в общий список анализов.
                             <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
                         `;
                         document.body.appendChild(notification);
@@ -2341,7 +1955,7 @@
                         warning.className = 'alert alert-warning alert-dismissible fade show position-fixed';
                         warning.style.cssText = 'top: 20px; right: 20px; z-index: 9999; min-width: 300px;';
                         warning.innerHTML = `
-                            <strong>⚠️ Не удалось сохранить результат</strong> Анализ выполнен, но результат не добавлен в список.
+                            <strong>Не удалось сохранить результат.</strong> Анализ выполнен, но результат не добавлен в список.
                             <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
                         `;
                         document.body.appendChild(warning);
@@ -2357,7 +1971,7 @@
                     warning.className = 'alert alert-warning alert-dismissible fade show position-fixed';
                     warning.style.cssText = 'top: 20px; right: 20px; z-index: 9999; min-width: 300px;';
                     warning.innerHTML = `
-                        <strong>⚠️ Ошибка сохранения</strong> ${saveError.message}
+                        <strong>Ошибка сохранения.</strong> ${saveError.message}
                         <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
                     `;
                     document.body.appendChild(warning);
@@ -3102,7 +2716,7 @@
                 // Handle DSI section header
                 if (item.startsWith('===')) {
                     li.className = 'fw-bold mt-3';
-                    li.style.borderLeft = '4px solid #2c5f8d';
+                    li.style.borderLeft = '4px solid #0e5a78';
                     li.style.background = '#e7f3ff';
                 } else if (item.startsWith('  -')) {
                     // DSI parameters (indented)
@@ -3251,7 +2865,7 @@
                                     result.features.pause_ratio * 100,
                                     result.features.amplitude_db_variation
                                 ],
-                                backgroundColor: '#2c5f8d'
+                                backgroundColor: '#0e5a78'
                             }]
                         },
                         options: {
