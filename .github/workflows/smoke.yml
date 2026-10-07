@@ -6,6 +6,10 @@ on:
   pull_request:
   workflow_dispatch:
 
+concurrency:
+  group: smoke-runner
+  cancel-in-progress: false
+
 jobs:
   smoke:
     runs-on: [self-hosted, Linux]
@@ -13,13 +17,21 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Create venv and install dependencies
+      # Доступ к PyPI с lab-сервера нестабилен, поэтому venv живёт вне рабочей
+      # папки и пересоздаётся только при изменении requirements.txt
+      - name: Prepare cached venv
         run: |
-          python3 -m venv .venv
-          .venv/bin/python -m pip install --upgrade pip
-          .venv/bin/python -m pip install -r requirements.txt
+          key=$(sha256sum requirements.txt | cut -c1-16)
+          venv="$HOME/.cache/audio_park-ci/venv-$key"
+          if [ ! -f "$venv/.ready" ]; then
+            rm -rf "$venv"
+            python3 -m venv "$venv"
+            "$venv/bin/python" -m pip install --retries 10 --timeout 60 -r requirements.txt
+            touch "$venv/.ready"
+          fi
+          echo "VENV=$venv" >> "$GITHUB_ENV"
 
       - name: Smoke check
         env:
           MPLBACKEND: Agg
-        run: .venv/bin/python scripts/ci_smoke.py
+        run: '"$VENV/bin/python" scripts/ci_smoke.py'
