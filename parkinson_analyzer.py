@@ -123,8 +123,12 @@ class ParkinsonAnalyzer:
                     logger.error(f"⚠️  ОШИБКА при создании директории {result_dir}: {e}")
                     result_dir = None
             
-            # 1. Загрузка аудио
+            # 1. Загрузка аудио и приведение к единой громкости,
+            # чтобы признаки не зависели от микрофона и усиления устройства
             audio, sr = self.audio_processor.load_audio(file_path)
+            audio, loudness_info = self.audio_processor.normalize_loudness(audio, sr)
+            logger.info(f"Громкость записи {loudness_info['input_lufs']:.1f} LUFS, "
+                        f"усиление {loudness_info['gain_db']:+.1f} дБ")
             
             # Сохранение исходного аудиофайла
             if should_save_raw and result_dir:
@@ -227,7 +231,9 @@ class ParkinsonAnalyzer:
                 "audio_summary": {
                     "duration_sec": round(len(audio) / sr, 2),
                     "sample_rate": sr,
-                    "segments": 1
+                    "segments": 1,
+                    "input_lufs": round(loudness_info['input_lufs'], 1) if np.isfinite(loudness_info['input_lufs']) else None,
+                    "normalization_gain_db": round(loudness_info['gain_db'], 1)
                 },
                 "features": {
                     "jitter_percent": round(all_features.get('jitter_percent', 0.0), 2),
@@ -237,7 +243,9 @@ class ParkinsonAnalyzer:
                     "f0_sd_hz": round(all_features.get('f0_sd_hz', 0.0), 1),
                     "f0_mean_hz": round(all_features.get('f0_mean_hz', 0.0), 1),
                     "amplitude_db_variation": round(all_features.get('amplitude_db_variation', 0.0), 1),
-                    "pause_ratio": round(all_features.get('pause_ratio', 0.0), 3)
+                    "pause_ratio": round(all_features.get('pause_ratio', 0.0), 3),
+                    "spectral_tilt_db": round(all_features.get('spectral_tilt_db', 0.0), 1),
+                    "loudness_decay_db": round(all_features.get('loudness_decay_db', 0.0), 1)
                 },
                 "dsi": dsi_result,
                 "symptom_scores": {

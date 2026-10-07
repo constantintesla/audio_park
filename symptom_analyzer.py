@@ -27,6 +27,12 @@ class SymptomAnalyzer:
         'amplitude_db_variation': 6.0,  # <6dB указывает на monoloudness
     }
     
+    # Гипофония: пороги наклона спектра (энергия 1-3.5 кГц относительно 0.3-1 кГц)
+    # для легкой/умеренной/тяжелой степени и порог затухания громкости.
+    # Не зависят от устройства, но предварительные: откалибровать на реальных записях.
+    HYPOPHONIA_TILT_DB = (-16.0, -20.0, -24.0)
+    HYPOPHONIA_DECAY_DB = 3.0
+    
     def analyze(self, features: Dict[str, float]) -> Dict:
         """
         Анализ симптомов на основе извлеченных признаков
@@ -67,20 +73,32 @@ class SymptomAnalyzer:
         """
         Оценка гипофонии (низкая громкость)
         
-        Признаки: низкий RMS, низкая амплитуда
-        """
-        rms = features.get('rms_mean', 0.0)
-        amplitude_range = features.get('amplitude_db_range', 0.0)
+        Абсолютный уровень (RMS) зависит от микрофона, усиления и расстояния, а записи
+        перед анализом приводятся к единой громкости (AudioProcessor.normalize_loudness).
+        Поэтому оцениваем не уровень, а признаки слабого голосового усилия:
+        - крутой наклон спектра (spectral_tilt_db): мало энергии в 1-3.5 кГц;
+        - затухание громкости к концу записи (loudness_decay_db).
         
-        # Нормальные значения RMS обычно >0.05 для речевого сигнала
-        if rms < 0.02:
-            return 3  # Тяжелая гипофония
-        elif rms < 0.04:
-            return 2  # Умеренная
-        elif rms < 0.05:
-            return 1  # Легкая
-        else:
-            return 0  # Норма
+        Пороги предварительные и требуют калибровки на записях здоровых дикторов.
+        """
+        tilt = features.get('spectral_tilt_db', 0.0)
+        decay = features.get('loudness_decay_db', 0.0)
+        
+        score = 0
+        # tilt == 0.0 означает, что признак не удалось рассчитать
+        if tilt != 0.0:
+            if tilt < self.HYPOPHONIA_TILT_DB[2]:
+                score = 3  # Тяжелая
+            elif tilt < self.HYPOPHONIA_TILT_DB[1]:
+                score = 2  # Умеренная
+            elif tilt < self.HYPOPHONIA_TILT_DB[0]:
+                score = 1  # Легкая
+        
+        # Голос заметно затихает к концу фразы
+        if decay > self.HYPOPHONIA_DECAY_DB:
+            score += 1
+        
+        return min(score, 3)
     
     def _score_monopitch(self, features: Dict[str, float]) -> int:
         """
@@ -440,9 +458,11 @@ class SymptomAnalyzer:
         # Гипофония
         if symptom_scores['hypophonia'] > 0:
             severity = ['', 'легкая', 'умеренная', 'тяжелая'][symptom_scores['hypophonia']]
-            rms = features.get('rms_mean', 0.0)
+            tilt = features.get('spectral_tilt_db', 0.0)
+            decay = features.get('loudness_decay_db', 0.0)
             report.append(
-                f"- Гипофония ({severity}): низкий RMS ({rms:.3f}), типично для ПД [Little 2004]."
+                f"- Гипофония ({severity}): слабое голосовое усилие "
+                f"(наклон спектра {tilt:.1f} дБ, затухание громкости {decay:.1f} дБ), типично для ПД."
             )
         
         # Monopitch

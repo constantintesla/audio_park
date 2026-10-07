@@ -408,6 +408,55 @@ class FeatureExtractor:
         features['amplitude_db_variation'] = float(db_variation)
         features['amplitude_db_range'] = float(db_range)
         
+        # Признаки гипофонии, не зависящие от усиления устройства
+        features.update(self._extract_vocal_effort_features(audio, rms_frames,
+                                                            frame_length, hop_length))
+        
+        return features
+    
+    def _extract_vocal_effort_features(self, audio: np.ndarray, rms_frames: np.ndarray,
+                                       frame_length: int, hop_length: int) -> Dict[str, float]:
+        """
+        Признаки голосового усилия, инвариантные к громкости записи
+        
+        Абсолютный уровень (RMS) зависит от микрофона и расстояния до него, поэтому
+        гипофонию оцениваем по относительным величинам, которые от усиления не зависят:
+        - spectral_tilt_db: энергия 1-3.5 кГц относительно 0.3-1 кГц в речевых кадрах.
+          Тихий голос с малым усилием беднее высокими гармониками, наклон круче
+          (alpha ratio, Eyben et al. 2016, GeMAPS). Полосы выбраны так, чтобы
+          уместиться и в телефонную полосу (до 4 кГц).
+        - loudness_decay_db: на сколько дБ речь затихает от первой трети записи
+          к последней (затухание громкости при ПД, Ho et al. 1999).
+        """
+        features = {'spectral_tilt_db': 0.0, 'loudness_decay_db': 0.0}
+        
+        if len(rms_frames) == 0 or np.max(rms_frames) <= 0:
+            return features
+        
+        # Речевые кадры: в пределах 30 дБ от громких участков
+        rms_db = 20 * np.log10(rms_frames + 1e-10)
+        active = rms_db > np.percentile(rms_db, 95) - 30
+        
+        # Наклон спектра
+        n_fft = 512
+        spec = np.abs(librosa.stft(audio, n_fft=n_fft, win_length=frame_length,
+                                   hop_length=hop_length)) ** 2
+        freqs = librosa.fft_frequencies(sr=self.sample_rate, n_fft=n_fft)
+        n = min(spec.shape[1], len(active))
+        spec_active = spec[:, :n][:, active[:n]]
+        if spec_active.shape[1] > 0:
+            low = np.sum(spec_active[(freqs >= 300) & (freqs < 1000)])
+            high = np.sum(spec_active[(freqs >= 1000) & (freqs < 3500)])
+            if low > 0 and high > 0:
+                features['spectral_tilt_db'] = float(10 * np.log10(high / low))
+        
+        # Затухание громкости: медиана уровня речи в первой и последней трети
+        thirds = np.array_split(np.arange(len(rms_db)), 3)
+        first = rms_db[thirds[0]][active[thirds[0]]]
+        last = rms_db[thirds[2]][active[thirds[2]]]
+        if len(first) > 0 and len(last) > 0:
+            features['loudness_decay_db'] = float(np.median(first) - np.median(last))
+        
         return features
     
     def _extract_articulation_features(self, audio: np.ndarray) -> Dict[str, float]:
@@ -680,6 +729,7 @@ class FeatureExtractor:
         
         features['shimmer_percent'] = 0.0  # Сложно без parselmouth
         features['hnr_db'] = self._calculate_hnr(audio)
+        features.update(self._extract_amplitude_features(audio))
         
         # Базовые параметры DSI через librosa (если parselmouth доступен)
         if HAS_PARSELMOUTH:
