@@ -64,8 +64,11 @@
                 <div class="capture-grid">
                     <div class="capture-panel">
                         <h3>Запись с микрофона</h3>
-                        <p class="hint">Держите устройство на расстоянии 20–30 см и произнесите протяжное «а-а-а» или фразу.</p>
-                        <button id="record-btn" class="btn btn-record">Записать с микрофона</button>
+                        <p class="hint">Держите устройство на расстоянии 20–30 см и произнесите протяжное «а-а-а» или фразу. «Тест DSI» проведет по 4 упражнениям для индекса DSI.</p>
+                        <div class="record-actions">
+                            <button id="record-btn" class="btn btn-record">Записать с микрофона</button>
+                            <button id="dsi-test-btn" class="btn btn-outline-secondary" title="Пошаговый тест для индекса DSI: 4 упражнения, около 3 минут">Тест DSI</button>
+                        </div>
                         <div class="form-check mt-3">
                             <input class="form-check-input" type="checkbox" id="calibrate-check" checked>
                             <label class="form-check-label" for="calibrate-check">Калибровка перед записью (тишина и тестовый звук, около 7 с)</label>
@@ -73,6 +76,19 @@
                         
                         <div id="live-recorder" style="display: none;">
                             <div id="rec-status" class="rec-status"></div>
+                            <div id="dsi-step" class="dsi-step" style="display: none;">
+                                <div class="dsi-step-head">
+                                    <span id="dsi-step-count"></span>
+                                    <span id="dsi-step-tries"></span>
+                                </div>
+                                <h4 id="dsi-step-title"></h4>
+                                <p id="dsi-step-text"></p>
+                                <p id="dsi-step-say" class="dsi-step-say"></p>
+                                <div class="dsi-step-actions">
+                                    <button id="dsi-try-btn" class="btn btn-primary">Начать попытку</button>
+                                    <button id="dsi-next-btn" class="btn btn-outline-secondary" style="display: none;">Следующее упражнение</button>
+                                </div>
+                            </div>
                             <canvas id="live-wave"></canvas>
                             <div class="level-meter"><div id="level-bar"></div></div>
                             <div class="live-meta">
@@ -224,36 +240,7 @@
                 </table>
                 
                 <!-- DSI Section -->
-                <div class="card mt-4 mb-4" id="dsi-card" style="display: none;">
-                    <div class="card-header bg-primary text-white">
-                        <h4 class="mb-0">DSI (Dysphonia Severity Index)</h4>
-                    </div>
-                    <div class="card-body">
-                        <div class="text-center mb-3">
-                            <h2 id="dsi-score" class="display-4"></h2>
-                            <p id="dsi-range" class="lead"></p>
-                        </div>
-                        <div class="row">
-                            <div class="col-md-6">
-                                <h5>Параметры DSI:</h5>
-                                <table class="table table-sm">
-                                    <tbody id="dsi-breakdown"></tbody>
-                                </table>
-                            </div>
-                            <div class="col-md-6">
-                                <h5>Интерпретация:</h5>
-                                <div id="dsi-interpretation"></div>
-                                <div class="alert alert-info mt-3" role="alert">
-                                    <small>
-                                        <strong>Формула:</strong> DSI = 0.13 × MPT + 0.0053 × F0-High - 0.26 × I-Low - 1.18 × Jitter(%) + 12.4<br>
-                                        I-Low — нормализованный дБ (не SPL).<br>
-                                        DSI коррелирует с Voice Handicap Index и идеален для мониторинга терапии (LSVT LOUD).
-                                    </small>
-                                </div>
-                            </div>
-                        </div>
-                    </div>
-                </div>
+                <div id="dsi-card" class="mt-4 mb-4" style="display: none;"></div>
                 
                 <!-- Symptom Scores -->
                 <h4 class="mt-4">Оценка симптомов (0-3)</h4>
@@ -586,88 +573,14 @@
             let html = '';
             
             // DSI Section
-            if (dsiScore !== null && dsiScore !== undefined) {
-                const dsiRange = dsi.dsi_range || '';
-                const breakdown = dsi.dsi_breakdown || {};
-                const interpretation = dsi.interpretation || {};
-                
-                const dsiColorClass = dsiScore >= 2.0 ? 'text-success' : 
-                                     dsiScore >= 0.0 ? 'text-warning' : 
-                                     dsiScore >= -2.0 ? 'text-warning' : 'text-danger';
-                
-                html += `
-                    <div class="card mt-3 mb-3">
-                        <div class="card-header bg-primary text-white">
-                            <h5 class="mb-0">DSI (Dysphonia Severity Index)</h5>
-                        </div>
-                        <div class="card-body">
-                            <div class="text-center mb-3">
-                                <h2 class="display-4 ${dsiColorClass}">${dsiScore.toFixed(2)}</h2>
-                                <p class="lead">${dsiRange}</p>
-                                <p class="text-muted"><small><span class="dot ${dsiScore >= 2.0 ? 'dot-ok' : dsiScore >= 0.0 ? 'dot-warn' : dsiScore >= -2.0 ? 'dot-mid' : 'dot-risk'}"></span> Референсный диапазон: 2.0-5.0 (нормальный голос)</small></p>
-                            </div>
-                            <div class="row">
-                                <div class="col-md-6">
-                                    <h6>Параметры DSI:</h6>
-                                <table class="table table-sm table-bordered">
-                                        <thead class="table-light">
-                                            <tr>
-                                                <th>Параметр</th>
-                                                <th>Значение</th>
-                                                <th>Референс</th>
-                                            </tr>
-                                        </thead>
-                                        <tbody>
-                                            <tr>
-                                            <td><strong>MPT (гласный, сек)</strong></td>
-                                                <td>${(breakdown.mpt_sec || 0).toFixed(2)}</td>
-                                                <td><small class="${(breakdown.mpt_sec || 0) >= 15 ? 'text-success' : (breakdown.mpt_sec || 0) < 10 ? 'text-danger' : 'text-warning'}">${(breakdown.mpt_sec || 0) >= 15 ? '<span class="dot dot-ok"></span>' : (breakdown.mpt_sec || 0) < 10 ? '<span class="dot dot-risk"></span>' : '<span class="dot dot-warn"></span>'} норма: 15-30 сек</small></td>
-                                            </tr>
-                                        <tr>
-                                            <td><strong>MPT (речь, сек)</strong></td>
-                                            <td>${(breakdown.mpt_speech_sec || 0).toFixed(2)}</td>
-                                            <td><small class="text-muted">оценка по речи</small></td>
-                                        </tr>
-                                            <tr>
-                                                <td><strong>F0-High (Гц)</strong></td>
-                                                <td>${(breakdown.f0_high_hz || 0).toFixed(1)}</td>
-                                                <td><small class="${(breakdown.f0_high_hz || 0) >= 400 ? 'text-success' : (breakdown.f0_high_hz || 0) < 300 ? 'text-danger' : 'text-warning'}">${(breakdown.f0_high_hz || 0) >= 400 ? '<span class="dot dot-ok"></span>' : (breakdown.f0_high_hz || 0) < 300 ? '<span class="dot dot-risk"></span>' : '<span class="dot dot-warn"></span>'} норма: 400-600 Гц</small></td>
-                                            </tr>
-                                            <tr>
-                                            <td><strong>I-Low (дБ, норм.)</strong></td>
-                                                <td>${(breakdown.i_low_db || 0).toFixed(1)}</td>
-                                                <td><small class="${(breakdown.i_low_db || 0) <= 45 && (breakdown.i_low_db || 0) >= 25 ? 'text-success' : (breakdown.i_low_db || 0) > 55 ? 'text-danger' : 'text-warning'}">${(breakdown.i_low_db || 0) <= 45 && (breakdown.i_low_db || 0) >= 25 ? '<span class="dot dot-ok"></span>' : (breakdown.i_low_db || 0) > 55 ? '<span class="dot dot-risk"></span>' : '<span class="dot dot-warn"></span>'} норма: 25-45 дБ</small></td>
-                                            </tr>
-                                            <tr>
-                                                <td><strong>Jitter (%)</strong></td>
-                                                <td>${(breakdown.jitter_percent || 0).toFixed(2)}</td>
-                                                <td><small class="${(breakdown.jitter_percent || 0) <= 1.0 ? 'text-success' : (breakdown.jitter_percent || 0) > 1.5 ? 'text-danger' : 'text-warning'}">${(breakdown.jitter_percent || 0) <= 1.0 ? '<span class="dot dot-ok"></span>' : (breakdown.jitter_percent || 0) > 1.5 ? '<span class="dot dot-risk"></span>' : '<span class="dot dot-warn"></span>'} норма: 0.0-1.0 %</small></td>
-                                            </tr>
-                                        <tr>
-                                            <td><strong>Jitter (cap 5%)</strong></td>
-                                            <td>${(breakdown.jitter_percent_capped || 0).toFixed(2)}</td>
-                                            <td><small class="text-muted">ограниченная копия</small></td>
-                                        </tr>
-                                        </tbody>
-                                    </table>
-                                </div>
-                                <div class="col-md-6">
-                                    <h6>Интерпретация:</h6>
-                                    <p><strong>Оценка риска:</strong> ${interpretation.pd_risk_note || 'N/A'}</p>
-                                    <div class="alert alert-info mt-3" role="alert">
-                                        <small>
-                                            <strong>Формула:</strong> DSI = 0.13 × MPT + 0.0053 × F0-High - 0.26 × I-Low - 1.18 × Jitter(%) + 12.4<br>
-                                            I-Low — нормализованный дБ (не SPL).
-                                        </small>
-                                    </div>
-                                </div>
-                            </div>
-                        </div>
-                    </div>
-                `;
-            }
+            html += renderDsiCard(dsi);
             
-            function formatWithReference(value, paramName) {
+            // Jitter, shimmer и HNR по обычной речи не оцениваются (нормы - для протяжной гласной)
+            const voiceQualityFromSpeech = result.recording_task === 'speech';
+            const speechNote = '<small class="text-muted">по речи не оценивается, нужна протяжная гласная</small>';
+            
+            function formatWithReference(value, paramName, muted = false) {
+                if (muted) return `${value.toFixed(2)} ${speechNote}`;
                 const refRanges = getReferenceRanges();
                 if (!refRanges[paramName]) return value.toFixed(2);
                 
@@ -704,19 +617,19 @@
                     <tbody>
                         <tr>
                             <td><strong>Jitter</strong></td>
-                            <td>${formatWithReference(features.jitter_percent || 0, 'jitter_percent')}</td>
+                            <td>${formatWithReference(features.jitter_percent || 0, 'jitter_percent', voiceQualityFromSpeech)}</td>
                         </tr>
                         <tr>
                             <td><strong>Jitter (cap 5%)</strong></td>
-                            <td>${formatWithReference(jitterCapped, 'jitter_percent')}</td>
+                            <td>${formatWithReference(jitterCapped, 'jitter_percent', voiceQualityFromSpeech)}</td>
                         </tr>
                         <tr>
                             <td><strong>Shimmer</strong></td>
-                            <td>${formatWithReference(features.shimmer_percent || 0, 'shimmer_percent')}</td>
+                            <td>${formatWithReference(features.shimmer_percent || 0, 'shimmer_percent', voiceQualityFromSpeech)}</td>
                         </tr>
                         <tr>
                             <td><strong>HNR</strong></td>
-                            <td>${formatWithReference(features.hnr_db || 0, 'hnr_db')}</td>
+                            <td>${formatWithReference(features.hnr_db || 0, 'hnr_db', voiceQualityFromSpeech)}</td>
                         </tr>
                         <tr>
                             <td><strong>F0 Mean</strong></td>
@@ -727,7 +640,7 @@
                             <td>${formatWithReference(features.f0_sd_hz || 0, 'f0_sd_hz')}</td>
                         </tr>
                         <tr>
-                            <td><strong>Скорость речи</strong></td>
+                            <td><strong>Темп (слогов/сек без пауз)</strong></td>
                             <td>${formatWithReference(features.rate_syl_sec || 0, 'rate_syl_sec')}</td>
                         </tr>
                     </tbody>
@@ -749,14 +662,7 @@
             };
             
             for (const [key, name] of Object.entries(symptomNames)) {
-                const score = symptomScores[key] || 0;
-                html += `
-                    <div class="mb-2">
-                        <strong>${name}:</strong> 
-                        <span class="symptom-score score-${score}">${score}</span>
-                        <small class="text-muted">(${['Нет', 'Легкий', 'Умеренный', 'Тяжелый'][score]})</small>
-                    </div>
-                `;
+                html += `<div class="mb-2"><strong>${name}:</strong> ${renderSymptomScore(symptomScores[key])}</div>`;
             }
             
             html += '</div>';
@@ -799,19 +705,85 @@
         let currentSortColumn = -1;
         let sortDirection = 1; // 1 = по возрастанию, -1 = по убыванию
         
+        // Оценка симптома 0-3; null - симптом не оценивался по этому типу записи
+        function renderSymptomScore(score) {
+            if (score === null || score === undefined) {
+                return '<small class="text-muted">не оценивался по этой записи</small>';
+            }
+            return `<span class="symptom-score score-${score}">${score}</span>
+                <small class="text-muted">(${['Нет', 'Легкий', 'Умеренный', 'Тяжелый'][score] || 'N/A'})</small>`;
+        }
+        
+        // Карточка DSI. DSI считается только по специальным заданиям с калибровкой
+        // микрофона, иначе показываем, почему его нет.
+        function renderDsiCard(dsi) {
+            const dsiScore = dsi ? dsi.dsi_score : null;
+            const hasScore = dsiScore !== null && dsiScore !== undefined;
+            if (!hasScore && !(dsi && dsi.measured)) {
+                const reason = dsi && (dsi.reason || dsi.error);
+                if (!reason) return '';
+                return `
+                    <div class="alert alert-secondary mt-3 mb-3">
+                        <strong>DSI не рассчитан.</strong> ${reason}
+                    </div>
+                `;
+            }
+            const breakdown = dsi.dsi_breakdown || {};
+            const interpretation = dsi.interpretation || {};
+            const dot = dsiScore >= 1.6 ? 'dot-ok' : dsiScore >= 0.0 ? 'dot-warn' : dsiScore >= -2.0 ? 'dot-mid' : 'dot-risk';
+            // Тест DSI без калибровки: показываем измеренные упражнения и почему нет итога
+            const scoreBlock = hasScore ? `
+                            <h2 class="display-4">${dsiScore.toFixed(2)}</h2>
+                            <p class="lead"><span class="dot ${dot}"></span> ${dsi.dsi_range || ''}</p>
+                            <p class="text-muted"><small>Здоровый голос: около +1.6 и выше (шкала от -5 до +5)</small></p>` : `
+                            <p class="lead mb-1">Итог DSI не рассчитан</p>
+                            <p class="text-muted mb-0"><small>${dsi.reason || ''}</small></p>`;
+            const iLowText = (breakdown.i_low_db || 0) > 0
+                ? (breakdown.i_low_db).toFixed(1)
+                : (dsi.i_low_dbfs ? `${dsi.i_low_dbfs.toFixed(1)} dBFS (без калибровки)` : '—');
+            const row = (name, value, status) => `
+                <tr><td><strong>${name}</strong></td><td>${value}</td><td><small>${status || 'N/A'}</small></td></tr>`;
+            return `
+                <div class="card mt-3 mb-3">
+                    <div class="card-header bg-primary text-white">
+                        <h5 class="mb-0">DSI (Dysphonia Severity Index)</h5>
+                    </div>
+                    <div class="card-body">
+                        <div class="text-center mb-3">${scoreBlock}
+                        </div>
+                        <table class="table table-sm table-bordered">
+                            <thead class="table-light"><tr><th>Параметр</th><th>Значение</th><th>Оценка</th></tr></thead>
+                            <tbody>
+                                ${row('MPT, сек (норма 15-30)', (breakdown.mpt_sec || 0).toFixed(2), interpretation.mpt_status)}
+                                ${row('F0-High, Гц (норма 400-600)', (breakdown.f0_high_hz || 0).toFixed(1), interpretation.f0_high_status)}
+                                ${row('I-Low, дБ SPL (норма до 45)', iLowText, interpretation.i_low_status)}
+                                ${row('Jitter, % (норма до 1.0)', (breakdown.jitter_percent || 0).toFixed(2), interpretation.jitter_status)}
+                            </tbody>
+                        </table>
+                        <div class="alert alert-info mb-0" role="alert">
+                            <small>
+                                <strong>Формула:</strong> ${dsi.formula || 'DSI = 0.13 × MPT + 0.0053 × F0-High - 0.26 × I-Low - 1.18 × Jitter(%) + 12.4'}<br>
+                                ${interpretation.note || 'DSI оценивает качество голоса, а не болезнь Паркинсона, и не является диагнозом.'}
+                            </small>
+                        </div>
+                    </div>
+                </div>
+            `;
+        }
+        
         // Reference ranges function (глобальная)
         function getReferenceRanges() {
             return {
                 'jitter_percent': {normal: [0.0, 1.0], unit: '%'},
-                'shimmer_percent': {normal: [2.0, 4.0], unit: '%'},
-                'hnr_db': {normal: [20.0, 25.0], unit: 'дБ'},
+                'shimmer_percent': {normal: [0.0, 4.0], unit: '%'},
+                'hnr_db': {normal: [20.0, 40.0], unit: 'дБ'},
                 'f0_mean_hz': {normal: [100.0, 300.0], unit: 'Гц'},
                 'f0_sd_hz': {normal: [10.0, 50.0], unit: 'Гц'},
                 'rate_syl_sec': {normal: [4.5, 7.0], unit: 'сл/сек'},
                 'mpt_sec': {normal: [15.0, 30.0], unit: 'сек'},
                 'f0_high_hz': {normal: [400.0, 600.0], unit: 'Гц'},
                 'i_low_db': {normal: [25.0, 45.0], unit: 'дБ'},
-                'dsi_score': {normal: [2.0, 5.0], unit: ''}
+                'dsi_score': {normal: [1.6, 5.0], unit: ''}
             };
         }
         
@@ -1163,10 +1135,18 @@
             recordBtn.addEventListener('click', async () => {
                 if (!isRecording) {
                     await startRecording();
+                } else if (rec && rec.dsi) {
+                    // Тест DSI прерывают целиком: незаконченный тест не анализируем
+                    cleanupRecording();
                 } else {
                     stopRecording();
                 }
             });
+            document.getElementById('dsi-test-btn').addEventListener('click', async () => {
+                if (!isRecording) await startRecording({ dsi: true });
+            });
+            document.getElementById('dsi-try-btn').addEventListener('click', onDsiTryButton);
+            document.getElementById('dsi-next-btn').addEventListener('click', () => nextDsiStep(rec));
         }
         
         function initAnalyzeButton() {
@@ -1295,7 +1275,7 @@
             throw new Error(errorMsg);
         }
 
-        async function startRecording() {
+        async function startRecording(options = {}) {
             if (rec) return;
             try {
                 const getUserMedia = getUserMediaFn();
@@ -1330,7 +1310,9 @@
                     chunks: [], nSamples: 0,
                     calibrate: document.getElementById('calibrate-check').checked,
                     phase: 'start', speechStart: null, plan: null,
-                    stopped: false, clipUntil: 0, columns: [], raf: null
+                    stopped: false, clipUntil: 0, columns: [], raf: null,
+                    // Тест DSI: номер упражнения, попытки и границы попыток (в отсчетах)
+                    dsi: options.dsi ? { step: 0, tries: 0, tryStart: null, segments: [] } : null
                 };
                 processor.onaudioprocess = (e) => {
                     if (!rec || rec.stopped) return;
@@ -1345,7 +1327,8 @@
                 isRecording = true;
                 const recordBtn = document.getElementById('record-btn');
                 recordBtn.classList.add('recording');
-                recordBtn.textContent = 'Остановить запись';
+                recordBtn.textContent = options.dsi ? 'Прервать тест' : 'Остановить запись';
+                document.getElementById('dsi-test-btn').disabled = true;
                 document.getElementById('analyze-btn').disabled = true;
                 document.getElementById('calibration-info').style.display = 'none';
                 document.getElementById('live-recorder').style.display = 'block';
@@ -1382,6 +1365,7 @@
         async function runRecordingPhases(state) {
             if (!state.calibrate) {
                 state.speechStart = 0;
+                if (state.dsi) return showDsiStep(state);
                 setRecPhase('speech', 'Идет запись. Говорите. Нажмите «Остановить», когда закончите');
                 return;
             }
@@ -1397,7 +1381,100 @@
             // С запасом на задержку динамик → микрофон (Bluetooth бывает до ~0.3 с)
             if (!await waitForSample(state, beep.end + Math.round(0.5 * state.sr))) return;
             state.speechStart = state.nSamples;
+            if (state.dsi) return showDsiStep(state);
             setRecPhase('speech', 'Идет запись. Говорите. Нажмите «Остановить», когда закончите');
+        }
+
+        // Упражнения теста DSI (Wuyts 2000). Что пациент делает и говорит на каждом шаге
+        const DSI_STEPS = [
+            {
+                task: 'mpt', tries: 3,
+                title: 'Самая долгая «а»',
+                text: 'Сделайте глубокий вдох и тяните звук «а» обычным голосом как можно дольше, на одном выдохе. ' +
+                      'Нажмите «Начать попытку», затем говорите. Когда воздух закончится, нажмите «Готово». Будет 3 попытки, засчитается лучшая.',
+                say: '«А-а-а-а-а…» (сколько хватит дыхания)'
+            },
+            {
+                task: 'glide', tries: 2,
+                title: 'Голос вверх до самой высокой ноты',
+                text: 'Начните «а» низким удобным голосом и плавно поднимайтесь как можно выше, как сирена вверх. ' +
+                      'Можно уйти в фальцет (тонкий голос). 2 попытки, засчитается самая высокая нота.',
+                say: '«А-а-а↗» снизу вверх до самой высокой ноты'
+            },
+            {
+                task: 'soft', tries: 3,
+                title: 'Самый тихий голос',
+                text: 'Скажите «а» так тихо, как можете, но голосом, а не шепотом. Держите телефон или ноутбук на том же расстоянии (20–30 см). ' +
+                      '3 попытки по 2–3 секунды, засчитается самая тихая.',
+                say: '«а-а-а» очень тихо, но не шепотом'
+            },
+            {
+                task: 'vowel', tries: 1,
+                title: 'Спокойная «а»',
+                text: 'Скажите «а» обычной удобной громкостью и высотой, ровно, 4–5 секунд. По этой записи оценивается стабильность голоса (jitter).',
+                say: '«А-а-а-а» спокойно, 4–5 секунд'
+            }
+        ];
+
+        function showDsiStep(state) {
+            const step = DSI_STEPS[state.dsi.step];
+            setRecPhase('dsi-wait', 'Микрофон включен. Прочитайте задание и нажмите «Начать попытку»');
+            document.getElementById('dsi-step').style.display = 'block';
+            document.getElementById('dsi-step-count').textContent = `Упражнение ${state.dsi.step + 1} из ${DSI_STEPS.length}`;
+            document.getElementById('dsi-step-tries').textContent = `попытка ${state.dsi.tries + 1} из ${step.tries}`;
+            document.getElementById('dsi-step-title').textContent = step.title;
+            document.getElementById('dsi-step-text').textContent = step.text;
+            document.getElementById('dsi-step-say').textContent = 'Что сказать: ' + step.say;
+            const tryBtn = document.getElementById('dsi-try-btn');
+            tryBtn.textContent = 'Начать попытку';
+            tryBtn.disabled = false;
+            // Перейти дальше можно после хотя бы одной попытки
+            document.getElementById('dsi-next-btn').style.display =
+                state.dsi.tries > 0 && state.dsi.step < DSI_STEPS.length - 1 ? 'inline-block' : 'none';
+        }
+
+        function onDsiTryButton() {
+            const state = rec;
+            if (!state || !state.dsi || state.speechStart === null) return;
+            const dsi = state.dsi;
+            const step = DSI_STEPS[dsi.step];
+            if (dsi.tryStart === null) {
+                dsi.tryStart = state.nSamples;
+                setRecPhase('speech', `Идет попытка: ${step.title.toLowerCase()}. Нажмите «Готово», когда закончите`);
+                document.getElementById('dsi-try-btn').textContent = 'Готово';
+                document.getElementById('dsi-next-btn').style.display = 'none';
+                return;
+            }
+            // Небольшой запас по краям: нажатие кнопки чуть запаздывает за голосом
+            const margin = Math.round(0.3 * state.sr);
+            dsi.segments.push({
+                task: step.task,
+                start: Math.max(state.speechStart, dsi.tryStart - margin),
+                end: state.nSamples + margin
+            });
+            dsi.tryStart = null;
+            dsi.tries += 1;
+            if (dsi.tries >= step.tries) {
+                nextDsiStep(state);
+            } else {
+                showDsiStep(state);
+            }
+        }
+
+        async function nextDsiStep(state) {
+            if (!state || !state.dsi || state.dsi.tryStart !== null) return;
+            state.dsi.step += 1;
+            state.dsi.tries = 0;
+            if (state.dsi.step < DSI_STEPS.length) {
+                showDsiStep(state);
+                return;
+            }
+            // Все упражнения сделаны: дописываем запас после последней попытки и завершаем
+            document.getElementById('dsi-try-btn').disabled = true;
+            setRecPhase('dsi-wait', 'Тест записан, готовим запись к анализу');
+            const lastEnd = state.dsi.segments[state.dsi.segments.length - 1].end;
+            await waitForSample(state, lastEnd);
+            stopRecording();
         }
 
         // Время AudioContext -> номер отсчета в записи (с точностью до буфера; задержку уточняем по записи)
@@ -1505,7 +1582,7 @@
             ctx.moveTo(0, mid);
             ctx.lineTo(width, mid);
             ctx.stroke();
-            const colors = { speech: '#0e5a78', silence: '#a3aebb', signal: '#d39a12', start: '#a3aebb' };
+            const colors = { speech: '#0e5a78', silence: '#a3aebb', signal: '#d39a12', start: '#a3aebb', 'dsi-wait': '#a3aebb' };
             const offset = width - rec.columns.length * 2;
             rec.columns.forEach((c, i) => {
                 // Масштаб с запасом, чтобы тихая речь тоже была видна
@@ -1524,8 +1601,13 @@
             document.getElementById('clip-indicator').style.visibility =
                 performance.now() < rec.clipUntil ? 'visible' : 'hidden';
             const seconds = rec.speechStart !== null ? (rec.nSamples - rec.speechStart) / rec.sr : 0;
-            document.getElementById('rec-timer').textContent =
-                rec.phase === 'speech' ? `запись ${Math.max(0, seconds).toFixed(1)} с` : 'калибровка';
+            let timerText = rec.phase === 'speech' ? `запись ${Math.max(0, seconds).toFixed(1)} с` : 'калибровка';
+            if (rec.dsi) {
+                timerText = rec.dsi.tryStart !== null
+                    ? `попытка ${((rec.nSamples - rec.dsi.tryStart) / rec.sr).toFixed(1)} с`
+                    : (rec.speechStart !== null ? 'ожидание' : 'калибровка');
+            }
+            document.getElementById('rec-timer').textContent = timerText;
 
             rec.raf = requestAnimationFrame(drawLive);
         }
@@ -1545,6 +1627,8 @@
             recordBtn.classList.remove('recording');
             recordBtn.textContent = 'Записать с микрофона';
             document.getElementById('live-recorder').style.display = 'none';
+            document.getElementById('dsi-step').style.display = 'none';
+            document.getElementById('dsi-test-btn').disabled = false;
         }
 
         function stopRecording() {
@@ -1581,10 +1665,20 @@
                 calBuffer.getChannelData(0).set(calSamples);
                 calibrationWav = audioBufferToWav(calBuffer, state.sr);
             }
+            const deviceInfo = buildDeviceInfo(state, calibration);
+            if (state.dsi) {
+                // Границы упражнений в секундах от начала отправляемой записи
+                deviceInfo.task = 'dsi';
+                deviceInfo.dsi_segments = state.dsi.segments.map(seg => ({
+                    task: seg.task,
+                    start_sec: round3((seg.start - state.speechStart) / state.sr),
+                    end_sec: round3((Math.min(seg.end, state.nSamples) - state.speechStart) / state.sr)
+                }));
+            }
             lastRecording = {
                 calibration,
                 calibrationWav,
-                deviceInfo: buildDeviceInfo(state, calibration),
+                deviceInfo,
                 buffer: audioBuffer
             };
 
@@ -1614,6 +1708,10 @@
             const sorted = [...values].sort((a, b) => a - b);
             const idx = Math.min(sorted.length - 1, Math.max(0, Math.round(p / 100 * (sorted.length - 1))));
             return sorted[idx];
+        }
+
+        function round3(x) {
+            return Math.round(x * 1000) / 1000;
         }
 
         function round1(x) {
@@ -2384,66 +2482,19 @@
         }
         
         function calculateDSI(features) {
-            const mpt = features.mpt_sec || 0;
-            const f0High = features.f0_high_hz || 0;
-            const iLow = features.i_low_db || 0;
-            const jitter = features.jitter_percent || 0;
-            
-            // Check if all parameters are available
-            if (mpt === 0 || f0High === 0 || iLow === 0) {
-                return {
-                    dsi_score: null,
-                    dsi_range: "Недостаточно данных для расчета DSI",
-                    dsi_breakdown: {
-                        mpt_sec: mpt,
-                        f0_high_hz: f0High,
-                        i_low_db: iLow,
-                        jitter_percent: jitter
-                    },
-                    error: "Отсутствуют необходимые параметры для расчета DSI"
-                };
-            }
-            
-            // Calculate DSI: DSI = 0.13 × MPT + 0.0053 × F0-High - 0.26 × I-Low - 1.18 × Jitter(%) + 12.4
-            const dsiScore = 0.13 * mpt + 0.0053 * f0High - 0.26 * iLow - 1.18 * jitter + 12.4;
-            
-            // Interpretation
-            let dsiRange, pdRiskNote;
-            if (dsiScore >= 2.0) {
-                dsiRange = "Нормальный голос";
-                pdRiskNote = "Низкий риск ПД";
-            } else if (dsiScore >= 0.0) {
-                dsiRange = "Легкая дисфония";
-                pdRiskNote = "Умеренный риск ПД";
-            } else if (dsiScore >= -2.0) {
-                dsiRange = "Умеренная дисфония (PD риск высокий)";
-                pdRiskNote = "Высокий риск ПД (стадия 1-2)";
-            } else {
-                dsiRange = "Тяжелая дисфония (PD риск очень высокий)";
-                pdRiskNote = "Очень высокий риск ПД (стадия 3-5)";
-            }
-            
-            // Status for each parameter
-            const mptStatus = mpt < 10 ? "Низкий" : (mpt >= 15 ? "Нормальный" : "Снижен");
-            const f0HighStatus = f0High < 300 ? "Низкий" : (f0High >= 400 ? "Нормальный" : "Снижен");
-            const iLowStatus = iLow > 55 ? "Повышен" : (iLow < 45 ? "Нормальный" : "Повышен");
-            const jitterStatus = jitter > 1.5 ? "Высокий" : (jitter < 1.0 ? "Нормальный" : "Повышен");
-            
+            // DSI требует отдельных заданий (самая долгая гласная, самая высокая нота,
+            // самый тихий голос) и калибровки микрофона в дБ SPL. По обычной записи
+            // в браузере это не измерить, поэтому DSI здесь не считаем.
             return {
-                dsi_score: dsiScore,
-                dsi_range: dsiRange,
+                dsi_score: null,
+                dsi_range: "Не рассчитывается",
+                status: "not_applicable",
+                reason: "Нужна отдельная запись с заданиями DSI и калибровка громкости микрофона.",
                 dsi_breakdown: {
-                    mpt_sec: mpt,
-                    f0_high_hz: f0High,
-                    i_low_db: iLow,
-                    jitter_percent: jitter
-                },
-                interpretation: {
-                    mpt_status: mptStatus,
-                    f0_high_status: f0HighStatus,
-                    i_low_status: iLowStatus,
-                    jitter_status: jitterStatus,
-                    pd_risk_note: pdRiskNote
+                    mpt_sec: features.mpt_sec || 0,
+                    f0_high_hz: features.f0_high_hz || 0,
+                    i_low_db: features.i_low_db || 0,
+                    jitter_percent: features.jitter_percent || 0
                 }
             };
         }
@@ -2597,7 +2648,7 @@
             }
             
             if (exceeded.length >= 3) {
-                report.push(`- Рекомендация: консультация невролога, LSVT логопедия, скрининг в РФ с использованием ИИ-инструментов (2023-2025).`);
+                report.push(`- Несколько показателей вне нормы. Это не диагноз: если есть жалобы на голос или речь, стоит показаться врачу (фониатру или неврологу).`);
             } else if (exceeded.length >= 1) {
                 report.push(`- Рекомендация: мониторинг симптомов, логопедическая оценка.`);
             }
@@ -2626,8 +2677,7 @@
             updatedReport.push(`  - F0-High: ${breakdown.f0_high_hz.toFixed(1)} Гц (${interpretation.f0_high_status || 'N/A'})`);
             updatedReport.push(`  - I-Low: ${breakdown.i_low_db.toFixed(1)} дБ (${interpretation.i_low_status || 'N/A'})`);
             updatedReport.push(`  - Jitter: ${breakdown.jitter_percent.toFixed(2)}% (${interpretation.jitter_status || 'N/A'})`);
-            updatedReport.push(`Интерпретация: ${interpretation.pd_risk_note || 'N/A'}`);
-            updatedReport.push(`DSI коррелирует с Voice Handicap Index и идеален для мониторинга терапии (LSVT LOUD).`);
+            updatedReport.push(interpretation.note || 'DSI оценивает качество голоса, а не болезнь Паркинсона, и не является диагнозом.');
             
             return updatedReport;
         }
@@ -2670,7 +2720,13 @@
                 amplitude_db_variation: { value: result.features.amplitude_db_variation, threshold: 6.0, name: 'Вариация амплитуды (dB)', op: '<' }
             };
             
+            // Голос (jitter, shimmer, HNR) оценивается по гласной, интонация и темп - по речи
+            const task = result.recording_task;
+            const speechOnly = ['f0_sd_hz', 'rate_syl_sec', 'pause_ratio', 'amplitude_db_variation'];
+            const vowelOnly = ['jitter_percent', 'shimmer_percent', 'hnr_db'];
             for (const [key, info] of Object.entries(thresholds)) {
+                if (task && task !== 'speech' && speechOnly.includes(key)) continue;
+                if (task === 'speech' && vowelOnly.includes(key)) continue;
                 const row = document.createElement('tr');
                 const value = info.mult ? (info.value * info.mult) : info.value;
                 const displayValue = info.mult ? value.toFixed(1) : value.toFixed(2);
@@ -2708,11 +2764,7 @@
                     if (key === 'pd_risk') continue;
                     const div = document.createElement('div');
                     div.className = 'mb-2';
-                    div.innerHTML = `
-                        <strong>${symptomNames[key] || key}:</strong> 
-                        <span class="symptom-score score-${score}">${score}</span>
-                        <small class="text-muted">(${['Нет', 'Легкий', 'Умеренный', 'Тяжелый'][score] || 'N/A'})</small>
-                    `;
+                    div.innerHTML = `<strong>${symptomNames[key] || key}:</strong> ${renderSymptomScore(score)}`;
                     symptomScoresDiv.appendChild(div);
                 }
             }
@@ -2755,104 +2807,11 @@
         
         function displayDSI(dsiResult) {
             const dsiCard = document.getElementById('dsi-card');
-            const dsiScoreEl = document.getElementById('dsi-score');
-            const dsiRangeEl = document.getElementById('dsi-range');
-            const dsiBreakdownEl = document.getElementById('dsi-breakdown');
-            const dsiInterpretationEl = document.getElementById('dsi-interpretation');
-            
-            if (!dsiResult || dsiResult.dsi_score === null) {
-                if (dsiCard) dsiCard.style.display = 'none';
-                return;
-            }
-            
-            if (!dsiCard || !dsiScoreEl || !dsiRangeEl || !dsiBreakdownEl || !dsiInterpretationEl) {
-                console.warn('Некоторые элементы DSI не найдены');
-                return;
-            }
-            
-            dsiCard.style.display = 'block';
-            
-            // Display score with color coding
-            const score = dsiResult.dsi_score;
-            if (dsiScoreEl) dsiScoreEl.textContent = score.toFixed(2);
-            if (dsiScoreEl) {
-                if (score >= 2.0) {
-                    dsiScoreEl.className = 'display-4 text-success';
-                } else if (score >= 0.0) {
-                    dsiScoreEl.className = 'display-4 text-warning';
-                } else if (score >= -2.0) {
-                    dsiScoreEl.className = 'display-4 text-warning';
-                } else {
-                    dsiScoreEl.className = 'display-4 text-danger';
-                }
-            }
-            
-            if (dsiRangeEl) dsiRangeEl.textContent = dsiResult.dsi_range || '';
-            
-            // Display breakdown
-            const breakdown = dsiResult.dsi_breakdown || {};
-            const interpretation = dsiResult.interpretation || {};
-            
-            if (dsiBreakdownEl) {
-                const hasMptSpeech = Object.prototype.hasOwnProperty.call(breakdown, 'mpt_speech_sec');
-                const mptSpeechText = hasMptSpeech ? (breakdown.mpt_speech_sec || 0).toFixed(2) : 'N/A';
-                const jitterRaw = breakdown.jitter_percent || 0;
-                const jitterCapped = Number.isFinite(breakdown.jitter_percent_capped)
-                    ? breakdown.jitter_percent_capped
-                    : Math.min(jitterRaw, 5.0);
-                
-                dsiBreakdownEl.innerHTML = `
-                <tr>
-                    <td><strong>MPT (гласный, сек)</strong></td>
-                    <td>${(breakdown.mpt_sec || 0).toFixed(2)}</td>
-                    <td><span class="badge ${(breakdown.mpt_sec || 0) < 10 ? 'bg-danger' : (breakdown.mpt_sec || 0) >= 15 ? 'bg-success' : 'bg-warning'}">${interpretation.mpt_status || 'N/A'}</span></td>
-                </tr>
-                <tr>
-                    <td><strong>MPT (речь, сек)</strong></td>
-                    <td>${mptSpeechText}</td>
-                    <td><span class="badge bg-secondary">Оценка по речи</span></td>
-                </tr>
-                <tr>
-                    <td><strong>F0-High (Гц)</strong></td>
-                    <td>${(breakdown.f0_high_hz || 0).toFixed(1)}</td>
-                    <td><span class="badge ${(breakdown.f0_high_hz || 0) < 300 ? 'bg-danger' : (breakdown.f0_high_hz || 0) >= 400 ? 'bg-success' : 'bg-warning'}">${interpretation.f0_high_status || 'N/A'}</span></td>
-                </tr>
-                <tr>
-                    <td><strong>I-Low (дБ, норм.)</strong></td>
-                    <td>${(breakdown.i_low_db || 0).toFixed(1)}</td>
-                    <td><span class="badge ${(breakdown.i_low_db || 0) > 55 ? 'bg-danger' : (breakdown.i_low_db || 0) < 45 ? 'bg-success' : 'bg-warning'}">${interpretation.i_low_status || 'N/A'}</span></td>
-                </tr>
-                <tr>
-                    <td><strong>Jitter (%)</strong></td>
-                    <td>${(breakdown.jitter_percent || 0).toFixed(2)}</td>
-                    <td><span class="badge ${(breakdown.jitter_percent || 0) > 1.5 ? 'bg-danger' : (breakdown.jitter_percent || 0) < 1.0 ? 'bg-success' : 'bg-warning'}">${interpretation.jitter_status || 'N/A'}</span></td>
-                </tr>
-                <tr>
-                    <td><strong>Jitter (cap 5%)</strong></td>
-                    <td>${jitterCapped.toFixed(2)}</td>
-                    <td><span class="badge bg-secondary">Ограниченная копия</span></td>
-                </tr>
-            `;
-            }
-            
-            // Display interpretation
-            if (dsiInterpretationEl) {
-                dsiInterpretationEl.innerHTML = `
-                <p><strong>Оценка риска:</strong> ${interpretation.pd_risk_note || 'N/A'}</p>
-                <div class="mt-2">
-                    <small>
-                        <strong>Нормальные значения:</strong><br>
-                        • MPT: >15-20 сек<br>
-                        • F0-High: >400-500 Гц<br>
-                        • I-Low: <45 дБ (норм.)<br>
-                        • Jitter: <1%
-                    </small>
-                </div>
-                <div class="mt-2">
-                    <small><strong>I-Low — нормализованный дБ, не SPL.</strong></small>
-                </div>
-            `;
-            }
+            if (!dsiCard) return;
+            const html = renderDsiCard(dsiResult);
+            dsiCard.innerHTML = html;
+            dsiCard.className = 'mt-4 mb-4';
+            dsiCard.style.display = html ? 'block' : 'none';
         }
         
         function createCharts(result) {

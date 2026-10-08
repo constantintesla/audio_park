@@ -25,6 +25,72 @@ def make_vowel(path: str, sr: int = 22050, seconds: float = 3.0) -> None:
     sf.write(path, signal.astype(np.float32), sr)
 
 
+def make_speech(path: str, sr: int = 22050, seconds: float = 4.0) -> None:
+    """Похожая на речь запись: слоги по ~150 мс с меняющимся тоном, глухие шумы и паузы"""
+    rng = np.random.default_rng(1)
+    parts = []
+    t_total = 0.0
+    while t_total < seconds:
+        for _ in range(int(rng.integers(3, 7))):
+            n = int(sr * 0.15)
+            t = np.arange(n) / sr
+            f0 = 120 * 2 ** (rng.uniform(-4, 4) / 12) * (1 + 0.1 * t / 0.15)
+            phase = 2 * np.pi * np.cumsum(f0) / sr
+            syllable = sum(np.sin(k * phase) / k for k in range(1, 8)) * np.hanning(n)
+            parts += [syllable, 0.05 * rng.standard_normal(int(sr * 0.06))]
+        parts.append(np.zeros(int(sr * 0.4)))
+        t_total = sum(len(p) for p in parts) / sr
+    signal = np.concatenate(parts)
+    signal = 0.5 * signal / np.max(np.abs(signal))
+    sf.write(path, signal.astype(np.float32), sr)
+
+
+def check_recording_tasks(tmp: str, results_dir: str) -> None:
+    """DSI и охриплость считаются только там, где их можно измерить"""
+    from parkinson_analyzer import ParkinsonAnalyzer
+
+    analyzer = ParkinsonAnalyzer(save_raw_data=False, raw_data_dir=results_dir)
+    vowel_path = os.path.join(tmp, "vowel.wav")
+    speech_path = os.path.join(tmp, "speech.wav")
+    make_vowel(vowel_path, seconds=4.0)
+    make_speech(speech_path)
+
+    vowel = analyzer.analyze_audio_file(vowel_path, save_raw=False)
+    assert vowel["recording_task"] == "vowel", vowel["recording_task"]
+    assert vowel["symptom_scores"]["hoarseness"] is not None, "охриплость не оценена на гласной"
+    assert vowel["symptom_scores"]["monopitch"] is None, "интонация оценена по гласной"
+
+    speech = analyzer.analyze_audio_file(speech_path, save_raw=False)
+    assert speech["recording_task"] == "speech", speech["recording_task"]
+    assert speech["symptom_scores"]["hoarseness"] is None, "охриплость оценена по речи"
+    assert speech["symptom_scores"]["monopitch"] is not None, "интонация не оценена по речи"
+
+    # Обычная запись без заданий DSI и без калибровки: DSI не показываем
+    for result in (vowel, speech):
+        assert result["dsi"]["dsi_score"] is None, f"DSI посчитан по обычной записи: {result['dsi']}"
+        assert result["dsi"]["status"] == "not_applicable"
+    report = " ".join(vowel["report"] + speech["report"] + [vowel["recommendation"], speech["recommendation"]])
+    assert "стади" not in report, "в отчете стадия болезни"
+
+    # Задания DSI с калибровкой микрофона: DSI считается
+    dsi = analyzer.analyze_audio_file(vowel_path, save_raw=False,
+                                      device_info={"task": "dsi", "spl_offset_db": 100.0})
+    assert dsi["dsi"]["dsi_score"] is not None, dsi["dsi"]
+
+    # Тест DSI с границами упражнений: параметры меряются по своим упражнениям
+    segments = [{"task": t, "start_sec": 0.0, "end_sec": 4.0} for t in ("mpt", "glide", "soft", "vowel")]
+    protocol = analyzer.analyze_audio_file(vowel_path, save_raw=False,
+                                           device_info={"task": "dsi", "dsi_segments": segments})
+    assert protocol["dsi"].get("measured"), protocol["dsi"]
+    assert protocol["dsi"]["dsi_score"] is None, "DSI без калибровки"
+    assert protocol["dsi"]["dsi_breakdown"]["mpt_sec"] > 3.0, protocol["dsi"]
+    calibrated = analyzer.analyze_audio_file(vowel_path, save_raw=False,
+                                             device_info={"task": "dsi", "dsi_segments": segments,
+                                                          "spl_offset_db": 100.0})
+    assert calibrated["dsi"]["dsi_score"] is not None, calibrated["dsi"]
+    print("recording tasks: ok")
+
+
 def check_analyzer(wav_path: str, results_dir: str) -> None:
     from parkinson_analyzer import ParkinsonAnalyzer
 
@@ -74,6 +140,7 @@ def main() -> None:
         wav_path = os.path.join(tmp, "ci_smoke.wav")
         make_vowel(wav_path)
         check_analyzer(wav_path, os.path.join(tmp, "results"))
+        check_recording_tasks(tmp, os.path.join(tmp, "results"))
         # api.py пишет results.json и results/ в текущую папку, поэтому запускаем его во временной
         os.chdir(tmp)
         try:

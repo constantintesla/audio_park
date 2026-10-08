@@ -97,8 +97,9 @@ class FeatureExtractor:
         try:
             # Извлечение F0 (fundamental frequency)
             pitch = sound.to_pitch_ac(time_step=0.01)
-            f0_values = pitch.selected_array['frequency']
-            f0_values = f0_values[f0_values > 0]  # Убираем незаполненные значения
+            f0_track = pitch.selected_array['frequency']
+            features.update(self._voicing_features(f0_track, 0.01))
+            f0_values = f0_track[f0_track > 0]  # Убираем незаполненные значения
             
             if len(f0_values) > 0:
                 f0_mean = np.mean(f0_values)
@@ -215,6 +216,44 @@ class FeatureExtractor:
             features['jitter_percent'] = 0.0
             features['shimmer_percent'] = 0.0
         
+        return features
+    
+    @staticmethod
+    def _voicing_features(f0_track: np.ndarray, time_step: float) -> Dict[str, float]:
+        """
+        Признаки озвончения по треку F0 (0 = кадр без тона):
+        - f0_sd_semitones: разброс высоты тона в полутонах. В отличие от SD в Гц
+          не зависит от пола и среднего тона (у мужчин SD в Гц вдвое меньше);
+        - voiced_sec: суммарная длительность озвонченных кадров;
+        - longest_voiced_sec: самый длинный непрерывный озвонченный участок.
+          В обычной речи тон прерывается на глухих согласных и паузах, поэтому
+          длинный непрерывный участок, занимающий большую часть записи, означает
+          протяжную гласную.
+        """
+        f0_track = np.nan_to_num(np.asarray(f0_track, dtype=float))
+        voiced = f0_track > 0
+        features = {'f0_sd_semitones': 0.0, 'voiced_sec': 0.0, 'longest_voiced_sec': 0.0}
+        if not np.any(voiced):
+            return features
+        
+        f0_voiced = f0_track[voiced]
+        semitones = 12.0 * np.log2(f0_voiced / np.median(f0_voiced))
+        features['f0_sd_semitones'] = float(np.std(semitones))
+        features['voiced_sec'] = float(np.sum(voiced) * time_step)
+        
+        # Короткие провалы трекера (до 50 мс) внутри гласной не считаем разрывом
+        max_gap = int(round(0.05 / time_step))
+        longest = current = gap = 0
+        for is_voiced in voiced:
+            if is_voiced:
+                current += 1 + gap
+                gap = 0
+            elif current > 0 and gap < max_gap:
+                gap += 1
+            else:
+                current = gap = 0
+            longest = max(longest, current)
+        features['longest_voiced_sec'] = float(longest * time_step)
         return features
     
     def _filter_f0_for_jitter(self, f0_values: np.ndarray) -> np.ndarray:
@@ -466,35 +505,60 @@ class FeatureExtractor:
         return features
     
     def _extract_articulation_features(self, audio: np.ndarray) -> Dict[str, float]:
-        """Извлечение признаков артикуляции"""
-        features = {}
+        """
+        Извлечение признаков артикуляции
+
+        - rate_syl_sec: темп артикуляции, слогов в секунду без учета пауз.
+          Слоги считаются как пики громкости (ядра слогов), между которыми
+          громкость проседает хотя бы на 3 дБ (по мотивам de Jong & Wempe 2009).
+        - pause_ratio: доля пауз (тишина длиннее 0.25 с) между началом
+          и концом речи. Тишина определяется относительно громкой части
+          записи (на 25 дБ тише), поэтому не зависит от усиления микрофона.
+        """
+        from scipy.signal import find_peaks
+
+        features = {'rate_syl_sec': 0.0, 'pause_ratio': 0.0}
         
-        # Скорость речи (приблизительно через энергию)
+        hop_sec = 0.010
         frame_length = int(0.025 * self.sample_rate)
-        hop_length = int(0.010 * self.sample_rate)
+        hop_length = int(hop_sec * self.sample_rate)
         rms = librosa.feature.rms(y=audio, frame_length=frame_length,
                                  hop_length=hop_length)[0]
+        if len(rms) < 10:
+            return features
+        db = 20 * np.log10(rms + 1e-10)
+        # Сглаживание ~50 мс, чтобы не считать колебания внутри одного слога
+        kernel = np.hanning(7)
+        db_smooth = np.convolve(db, kernel / kernel.sum(), mode='same')
         
-        # Порог для обнаружения активной речи
-        threshold = np.percentile(rms, 20)
-        speech_frames = rms > threshold
+        silence_threshold = np.percentile(db_smooth, 99) - 25.0
+        speech = db_smooth > silence_threshold
+        speech_idx = np.flatnonzero(speech)
+        if len(speech_idx) == 0:
+            return features
+        first, last = speech_idx[0], speech_idx[-1] + 1
         
-        # Подсчет переходов (приблизительная оценка слогов)
-        transitions = np.sum(np.diff(speech_frames.astype(int)) != 0)
-        duration = len(audio) / self.sample_rate
+        # Паузы: участки тишины длиннее 0.25 с между началом и концом речи
+        min_pause = int(round(0.25 / hop_sec))
+        pause_frames = 0
+        run = 0
+        for is_speech in speech[first:last]:
+            if is_speech:
+                if run >= min_pause:
+                    pause_frames += run
+                run = 0
+            else:
+                run += 1
+        span_frames = last - first
+        phonation_sec = (span_frames - pause_frames) * hop_sec
+        features['pause_ratio'] = float(pause_frames / span_frames) if span_frames > 0 else 0.0
         
-        # Приблизительная скорость в слогах/сек (грубая оценка)
-        if duration > 0:
-            # Примерно 1 переход на 2 слога
-            syllables_approx = transitions / 2
-            rate_syl_sec = syllables_approx / duration
-            features['rate_syl_sec'] = float(rate_syl_sec)
-        else:
-            features['rate_syl_sec'] = 0.0
-        
-        # Соотношение пауз
-        silence_ratio = np.sum(~speech_frames) / len(speech_frames)
-        features['pause_ratio'] = float(silence_ratio)
+        # Ядра слогов: пики громкости выше порога тишины с провалом >= 3 дБ,
+        # не чаще чем раз в 80 мс (больше 12 слогов в секунду не бывает)
+        peaks, _ = find_peaks(db_smooth, height=silence_threshold, prominence=3.0,
+                              distance=max(1, int(round(0.08 / hop_sec))))
+        if phonation_sec > 0:
+            features['rate_syl_sec'] = float(len(peaks) / phonation_sec)
         
         # Форманты (упрощенный расчет)
         try:
@@ -716,8 +780,9 @@ class FeatureExtractor:
         features = {}
         
         # Базовые признаки через librosa
-        f0 = librosa.pyin(audio, fmin=50, fmax=500)
+        f0 = librosa.pyin(audio, fmin=50, fmax=500, sr=self.sample_rate)
         f0_values = f0[0]
+        features.update(self._voicing_features(np.nan_to_num(f0_values), 512 / self.sample_rate))
         f0_values = f0_values[~np.isnan(f0_values)]
         
         if len(f0_values) > 0:
