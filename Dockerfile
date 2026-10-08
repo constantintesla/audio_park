@@ -16,7 +16,8 @@ WORKDIR /app
 COPY requirements.txt .
 
 # Установка Python зависимостей
-RUN pip install --no-cache-dir -r requirements.txt
+# Повторы на случай нестабильного доступа к PyPI; слой кэшируется, пока requirements.txt не меняется
+RUN pip install --no-cache-dir --retries 10 --timeout 60 -r requirements.txt
 
 # Копирование всех файлов проекта
 COPY . .
