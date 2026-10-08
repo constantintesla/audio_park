@@ -120,7 +120,8 @@ def _median_voiced_dbfs(piece: np.ndarray, sr: int) -> Optional[float]:
 
 
 def measure_dsi_tasks(raw_audio: np.ndarray, audio: np.ndarray, sr: int,
-                      segments: List[Dict], spl_offset_db: Optional[float]) -> Dict:
+                      segments: List[Dict], spl_offset_db: Optional[float],
+                      model_offset: Optional[Dict] = None) -> Dict:
     """
     Параметры DSI по упражнениям.
 
@@ -129,6 +130,8 @@ def measure_dsi_tasks(raw_audio: np.ndarray, audio: np.ndarray, sr: int,
         audio: запись после нормализации громкости (для MPT и F0-High)
         segments: границы упражнений
         spl_offset_db: калибровка микрофона, дБ SPL = dBFS + offset
+        model_offset: поправка модели по обычной громкости многих людей
+            (device_model_stats.model_spl_offset), если калибровки нет
 
     Returns:
         mpt_sec, f0_high_hz, i_low_dbfs, i_low_db, i_low_calibrated, а также
@@ -152,6 +155,9 @@ def measure_dsi_tasks(raw_audio: np.ndarray, audio: np.ndarray, sr: int,
     if calibrated:
         i_low_method = 'calibrated'
         offset_db = float(spl_offset_db)
+    elif model_offset:
+        i_low_method = 'model_reference'
+        offset_db = float(model_offset['offset_db'])
     elif comfortable_dbfs is not None:
         i_low_method = 'self_reference'
         offset_db = COMFORTABLE_SPL_DB - comfortable_dbfs
@@ -165,6 +171,7 @@ def measure_dsi_tasks(raw_audio: np.ndarray, audio: np.ndarray, sr: int,
         'i_low_calibrated': 1.0 if calibrated else 0.0,
         'i_low_method': i_low_method,
         'comfortable_dbfs': round(comfortable_dbfs, 1) if comfortable_dbfs is not None else None,
+        'model_offset': model_offset if i_low_method == 'model_reference' else None,
         'attempts': attempts,
         'missing': [TASK_NAMES[t] for t in DSI_TASKS
                     if not segment_audio(audio, sr, segments, t)],
