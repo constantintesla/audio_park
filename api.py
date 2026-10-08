@@ -12,6 +12,7 @@ from flask_cors import CORS
 import logging
 import numpy as np
 from dsi_protocol import parse_segments
+from device_model_stats import loop_gain_check, model_spl_offset
 
 from speaker_baseline import compare_to_baseline
 
@@ -159,6 +160,16 @@ def parse_device_info(raw: Optional[str]) -> Dict:
     return info
 
 
+def add_loop_gain_check(result: Dict, calibration: Dict, history: List[Dict], device_info: Dict) -> None:
+    """Сверка уровня тестового звука с обычным для модели; при отклонении - строка в отчете"""
+    check = loop_gain_check(calibration, history, device_info)
+    if not check:
+        return
+    result['calibration_check'] = check
+    if check['status'] == 'deviation' and isinstance(result.get('report'), list):
+        result['report'].insert(0, f"⚠️ {check['message']}")
+
+
 MAX_CALIBRATION_JSON = 20000  # байт; результаты калибровки — небольшой словарь
 
 
@@ -220,12 +231,15 @@ def analyze_audio():
             results_dir_abs = os.path.abspath(RESULTS_DIR)
             logger.info(f"📁 Сохранение сырых данных в: {results_dir_abs}")
             device_info = parse_device_info(request.form.get('device_info'))
+            history = load_results()
             analyzer = ParkinsonAnalyzer(save_raw_data=True, raw_data_dir=results_dir_abs)
             result = analyzer.analyze_audio_file(temp_file, save_raw=True, result_id=result_id,
-                                                 device_info=device_info)
+                                                 device_info=device_info,
+                                                 model_offset=model_spl_offset(history, device_info))
             calibration = parse_calibration(request.form.get('calibration'))
             if calibration:
                 result['calibration'] = calibration
+                add_loop_gain_check(result, calibration, history, device_info)
             save_calibration_audio(request.files.get('calibration_file'), result)
             
             # Добавление информации о пользователе
@@ -388,8 +402,13 @@ def recalculate_all():
                 # Пересчитываем анализ
                 logger.info(f"🔄 Пересчет результата {idx + 1}/{len(results)}: {audio_path}")
                 # device_info сохраняем, иначе при пересчете теряются калибровки устройства
+                device_info = result.get('device_info') or {}
+                others = results[:idx] + results[idx + 1:]
                 new_result = analyzer.analyze_audio_file(audio_path, save_raw=False, result_id=result_id,
-                                                         device_info=result.get('device_info') or {})
+                                                         device_info=device_info,
+                                                         model_offset=model_spl_offset(others, device_info))
+                if isinstance(result.get('calibration'), dict):
+                    add_loop_gain_check(new_result, result['calibration'], others, device_info)
                 
                 # Сохраняем оригинальную информацию о пользователе
                 original_user_info = result.get('user_info', {})

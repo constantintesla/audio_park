@@ -71,7 +71,7 @@
                         </div>
                         <div class="form-check mt-3">
                             <input class="form-check-input" type="checkbox" id="calibrate-check" checked>
-                            <label class="form-check-label" for="calibrate-check">Калибровка перед записью (тишина и тестовый звук, около 7 с)</label>
+                            <label class="form-check-label" for="calibrate-check">Калибровка перед записью (тишина и тестовый звук, около 7 с). Поставьте громкость устройства на максимум</label>
                         </div>
                         
                         <div id="live-recorder" style="display: none;">
@@ -732,14 +732,18 @@
             const interpretation = dsi.interpretation || {};
             const dot = dsiScore >= 1.6 ? 'dot-ok' : dsiScore >= 0.0 ? 'dot-warn' : dsiScore >= -2.0 ? 'dot-mid' : 'dot-risk';
             // Тест DSI без калибровки: показываем измеренные упражнения и почему нет итога
+            const scoreText = dsi.approximate
+                ? `≈ ${dsiScore.toFixed(1)} <small class="text-muted">± ${(dsi.uncertainty || 0).toFixed(1)}</small>`
+                : dsiScore.toFixed(2);
             const scoreBlock = hasScore ? `
-                            <h2 class="display-4">${dsiScore.toFixed(2)}</h2>
+                            <h2 class="display-4">${scoreText}</h2>
                             <p class="lead"><span class="dot ${dot}"></span> ${dsi.dsi_range || ''}</p>
-                            <p class="text-muted"><small>Здоровый голос: около +1.6 и выше (шкала от -5 до +5)</small></p>` : `
+                            <p class="text-muted"><small>Здоровый голос: около +1.6 и выше (шкала от -5 до +5)</small></p>
+                            ${dsi.approximate ? `<p class="text-muted mb-0"><small>${dsi.estimate_note || ''}</small></p>` : ''}` : `
                             <p class="lead mb-1">Итог DSI не рассчитан</p>
                             <p class="text-muted mb-0"><small>${dsi.reason || ''}</small></p>`;
             const iLowText = (breakdown.i_low_db || 0) > 0
-                ? (breakdown.i_low_db).toFixed(1)
+                ? (breakdown.i_low_db).toFixed(1) + (dsi.approximate ? ' (оценка)' : '')
                 : (dsi.i_low_dbfs ? `${dsi.i_low_dbfs.toFixed(1)} dBFS (без калибровки)` : '—');
             const row = (name, value, status) => `
                 <tr><td><strong>${name}</strong></td><td>${value}</td><td><small>${status || 'N/A'}</small></td></tr>`;
@@ -1411,14 +1415,15 @@
             {
                 task: 'vowel', tries: 1,
                 title: 'Спокойная «а»',
-                text: 'Скажите «а» обычной удобной громкостью и высотой, ровно, 4–5 секунд. По этой записи оценивается стабильность голоса (jitter).',
+                text: 'Скажите «а» обычной громкостью, как в спокойном разговоре, ровно, 4–5 секунд. Держите устройство на том же расстоянии (30 см). ' +
+                      'По этой записи оценивается стабильность голоса (jitter), а еще она служит меркой громкости для самого тихого голоса.',
                 say: '«А-а-а-а» спокойно, 4–5 секунд'
             }
         ];
 
         function showDsiStep(state) {
             const step = DSI_STEPS[state.dsi.step];
-            setRecPhase('dsi-wait', 'Микрофон включен. Прочитайте задание и нажмите «Начать попытку»');
+            setRecPhase('dsi-wait', 'Микрофон включен. Держите устройство на 30 см (длина линейки) весь тест. Прочитайте задание и нажмите «Начать попытку»');
             document.getElementById('dsi-step').style.display = 'block';
             document.getElementById('dsi-step-count').textContent = `Упражнение ${state.dsi.step + 1} из ${DSI_STEPS.length}`;
             document.getElementById('dsi-step-tries').textContent = `попытка ${state.dsi.tries + 1} из ${step.tries}`;

@@ -26,6 +26,15 @@ TASK_NAMES = {
 }
 MAX_SEGMENTS = 20
 
+# Оценка I-Low без шумомера. Спокойная «а» обычной громкостью на 30 см у взрослых
+# в среднем около 70 дБ SPL (разброс между людьми примерно ±5 дБ). Зная, сколько
+# dBFS дала эта «а» на этом телефоне, переводим самый тихий голос в дБ SPL:
+#   I-Low ≈ тихий_dBFS - обычный_dBFS + 70.
+# Чувствительность микрофона при этом сокращается, остается только разница
+# между тихим и обычным голосом самого человека.
+COMFORTABLE_SPL_DB = 70.0
+COMFORTABLE_SPL_SD_DB = 5.0
+
 
 def parse_segments(raw) -> List[Dict]:
     """Проверка и нормализация границ упражнений; некорректные отбрасываются"""
@@ -111,7 +120,8 @@ def _median_voiced_dbfs(piece: np.ndarray, sr: int) -> Optional[float]:
 
 
 def measure_dsi_tasks(raw_audio: np.ndarray, audio: np.ndarray, sr: int,
-                      segments: List[Dict], spl_offset_db: Optional[float]) -> Dict:
+                      segments: List[Dict], spl_offset_db: Optional[float],
+                      model_offset: Optional[Dict] = None) -> Dict:
     """
     Параметры DSI по упражнениям.
 
@@ -120,6 +130,8 @@ def measure_dsi_tasks(raw_audio: np.ndarray, audio: np.ndarray, sr: int,
         audio: запись после нормализации громкости (для MPT и F0-High)
         segments: границы упражнений
         spl_offset_db: калибровка микрофона, дБ SPL = dBFS + offset
+        model_offset: поправка модели по обычной громкости многих людей
+            (device_model_stats.model_spl_offset), если калибровки нет
 
     Returns:
         mpt_sec, f0_high_hz, i_low_dbfs, i_low_db, i_low_calibrated, а также
@@ -134,19 +146,43 @@ def measure_dsi_tasks(raw_audio: np.ndarray, audio: np.ndarray, sr: int,
         level = _median_voiced_dbfs(piece, sr)
         if level is not None:
             attempts['soft_dbfs'].append(round(level, 1))
+    comfortable = [level for level in (_median_voiced_dbfs(p, sr)
+                                       for p in segment_audio(raw_audio, sr, segments, 'vowel'))
+                   if level is not None]
 
     calibrated = spl_offset_db is not None
+    comfortable_dbfs = float(np.median(comfortable)) if comfortable else None
+    if calibrated:
+        i_low_method = 'calibrated'
+        offset_db = float(spl_offset_db)
+    elif model_offset:
+        i_low_method = 'model_reference'
+        offset_db = float(model_offset['offset_db'])
+    elif comfortable_dbfs is not None:
+        i_low_method = 'self_reference'
+        offset_db = COMFORTABLE_SPL_DB - comfortable_dbfs
+    else:
+        i_low_method = None
+        offset_db = None
     result = {
         'mpt_sec': max(attempts['mpt'], default=0.0),
         'f0_high_hz': max(attempts['glide'], default=0.0),
         'i_low_dbfs': min(attempts['soft_dbfs'], default=0.0),
         'i_low_calibrated': 1.0 if calibrated else 0.0,
+        'i_low_method': i_low_method,
+        'comfortable_dbfs': round(comfortable_dbfs, 1) if comfortable_dbfs is not None else None,
+        'model_offset': model_offset if i_low_method == 'model_reference' else None,
         'attempts': attempts,
         'missing': [TASK_NAMES[t] for t in DSI_TASKS
                     if not segment_audio(audio, sr, segments, t)],
     }
     if not attempts['soft_dbfs'] and 'soft' in {s['task'] for s in segments}:
         result['missing'].append('самый тихий голос (в попытках не найден голос, только шепот или тишина)')
-    result['i_low_db'] = (result['i_low_dbfs'] + float(spl_offset_db)
-                          if calibrated and attempts['soft_dbfs'] else 0.0)
+    result['i_low_db'] = (result['i_low_dbfs'] + offset_db
+                          if offset_db is not None and attempts['soft_dbfs'] else 0.0)
+    # Насколько самый тихий голос тише обычного: не зависит от микрофона,
+    # удобно сравнивать записи одного человека между собой
+    result['soft_below_comfortable_db'] = (
+        round(result['i_low_dbfs'] - comfortable_dbfs, 1)
+        if comfortable_dbfs is not None and attempts['soft_dbfs'] else None)
     return result

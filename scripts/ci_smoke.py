@@ -82,13 +82,43 @@ def check_recording_tasks(tmp: str, results_dir: str) -> None:
     protocol = analyzer.analyze_audio_file(vowel_path, save_raw=False,
                                            device_info={"task": "dsi", "dsi_segments": segments})
     assert protocol["dsi"].get("measured"), protocol["dsi"]
-    assert protocol["dsi"]["dsi_score"] is None, "DSI без калибровки"
+    # Без калибровки I-Low оценивается по обычной громкости (упражнение vowel): DSI - оценка
+    assert protocol["dsi"]["dsi_score"] is not None and protocol["dsi"].get("approximate"), protocol["dsi"]
+    no_reference = analyzer.analyze_audio_file(
+        vowel_path, save_raw=False,
+        device_info={"task": "dsi", "dsi_segments": [s for s in segments if s["task"] != "vowel"]})
+    assert no_reference["dsi"]["dsi_score"] is None, "DSI без калибровки и без обычной «а»"
     assert protocol["dsi"]["dsi_breakdown"]["mpt_sec"] > 3.0, protocol["dsi"]
     calibrated = analyzer.analyze_audio_file(vowel_path, save_raw=False,
                                              device_info={"task": "dsi", "dsi_segments": segments,
                                                           "spl_offset_db": 100.0})
     assert calibrated["dsi"]["dsi_score"] is not None, calibrated["dsi"]
+    # Поправка модели по обычной громкости многих людей точнее оценки по себе
+    model = analyzer.analyze_audio_file(vowel_path, save_raw=False,
+                                        device_info={"task": "dsi", "dsi_segments": segments},
+                                        model_offset={"offset_db": 95.0, "n_devices": 5, "sd_db": 3.0})
+    assert model["dsi"]["i_low_method"] == "model_reference", model["dsi"]
+    assert model["dsi"]["uncertainty"] < protocol["dsi"]["uncertainty"], model["dsi"]
     print("recording tasks: ok")
+
+
+def check_device_model_stats() -> None:
+    """Обычный уровень тестового звука и поправка громкости по модели устройства"""
+    from device_model_stats import loop_gain_check, model_spl_offset
+
+    info = {"device_model": "Pixel 7", "mic_mode": "unprocessed", "device_id": "me"}
+    history = [{"device_info": {"device_model": "Pixel 7", "mic_mode": "unprocessed", "device_id": f"d{i}"},
+                "calibration": {"sweep_level_dbfs": -20.0 + 0.5 * i},
+                "dsi": {"comfortable_dbfs": -30.0 + i}} for i in range(5)]
+    assert loop_gain_check({"sweep_level_dbfs": -19.0}, history, info)["status"] == "ok"
+    deviation = loop_gain_check({"sweep_level_dbfs": -35.0}, history, info)
+    assert deviation["status"] == "deviation" and "громкость" in deviation["message"], deviation
+    assert loop_gain_check({"sweep_level_dbfs": -19.0}, history[:2], info)["status"] == "learning"
+    offset = model_spl_offset(history, info)
+    assert offset and offset["offset_db"] == 98.0 and offset["n_devices"] == 5, offset
+    assert model_spl_offset(history[:4], info) is None, "поправка по 4 устройствам"
+    assert model_spl_offset(history, {**info, "mic_mode": "default"}) is None, "другой режим микрофона"
+    print("device model stats: ok")
 
 
 def check_analyzer(wav_path: str, results_dir: str) -> None:
@@ -141,6 +171,7 @@ def main() -> None:
         make_vowel(wav_path)
         check_analyzer(wav_path, os.path.join(tmp, "results"))
         check_recording_tasks(tmp, os.path.join(tmp, "results"))
+        check_device_model_stats()
         # api.py пишет results.json и results/ в текущую папку, поэтому запускаем его во временной
         os.chdir(tmp)
         try:

@@ -35,7 +35,12 @@ from feature_extractor import FeatureExtractor
 from symptom_analyzer import SymptomAnalyzer
 from recording_quality import assess_recording_quality
 from robust_features import compute_cpps
-from dsi_protocol import parse_segments, segment_audio, measure_dsi_tasks
+from dsi_protocol import parse_segments, segment_audio, measure_dsi_tasks, COMFORTABLE_SPL_SD_DB
+
+
+def model_offset_sd(protocol: Dict) -> float:
+    """Разброс поправки модели, дБ (хранится в протоколе теста)"""
+    return float((protocol.get('model_offset') or {}).get('sd_db', 3.0))
 
 
 DSI_FORMULA = "DSI = 0.13 × MPT + 0.0053 × F0-High - 0.26 × I-Low - 1.18 × Jitter(%) + 12.4"
@@ -94,7 +99,8 @@ class ParkinsonAnalyzer:
             return obj
     
     def analyze_audio_file(self, file_path: str, save_raw: Optional[bool] = None, result_id: Optional[str] = None,
-                           device_info: Optional[Dict] = None) -> Dict:
+                           device_info: Optional[Dict] = None,
+                           model_offset: Optional[Dict] = None) -> Dict:
         """
         Полный анализ аудиофайла
         
@@ -190,7 +196,7 @@ class ParkinsonAnalyzer:
             dsi_protocol = None
             if dsi_segments:
                 dsi_protocol = measure_dsi_tasks(raw_audio, audio, sr, dsi_segments,
-                                                 device_info.get('spl_offset_db'))
+                                                 device_info.get('spl_offset_db'), model_offset)
                 for key in ('mpt_sec', 'f0_high_hz', 'i_low_db', 'i_low_dbfs', 'i_low_calibrated'):
                     all_features[key] = dsi_protocol[key]
             
@@ -447,14 +453,19 @@ class ParkinsonAnalyzer:
         interpretation = dsi_result.get('interpretation', {})
         updated_report.extend([
             "\n=== DSI (Dysphonia Severity Index) ===",
-            f"DSI: {dsi_score:.2f} ({dsi_result.get('dsi_range', 'N/A')})",
+            (f"DSI (оценка): {dsi_score:.1f} ± {dsi_result.get('uncertainty', 0):.1f} "
+             f"({dsi_result.get('dsi_range', 'N/A')})" if dsi_result.get('approximate')
+             else f"DSI: {dsi_score:.2f} ({dsi_result.get('dsi_range', 'N/A')})"),
             "Параметры:",
             f"  - MPT: {breakdown.get('mpt_sec', 0):.2f}с ({interpretation.get('mpt_status', 'N/A')})",
             f"  - F0-High: {breakdown.get('f0_high_hz', 0):.1f} Гц ({interpretation.get('f0_high_status', 'N/A')})",
-            f"  - I-Low: {breakdown.get('i_low_db', 0):.1f} дБ SPL ({interpretation.get('i_low_status', 'N/A')})",
+            f"  - I-Low: {breakdown.get('i_low_db', 0):.1f} дБ SPL"
+            f"{' (оценка)' if dsi_result.get('approximate') else ''} ({interpretation.get('i_low_status', 'N/A')})",
             f"  - Jitter: {breakdown.get('jitter_percent', 0):.2f}% ({interpretation.get('jitter_status', 'N/A')})",
             DSI_NOTE,
         ])
+        if dsi_result.get('approximate'):
+            updated_report.append(dsi_result.get('estimate_note', ''))
         return updated_report
     
     @staticmethod
@@ -502,6 +513,10 @@ class ParkinsonAnalyzer:
             "jitter_percent": round(float(features.get('jitter_percent', 0.0) or 0.0), 2),
         }
         calibrated = features.get('i_low_calibrated', 0.0) == 1.0
+        # Без калибровки тест DSI оценивает I-Low по поправке модели (обычная громкость
+        # многих людей на этой модели) или по обычной громкости самого человека
+        i_low_method = (protocol or {}).get('i_low_method')
+        self_reference = i_low_method in ('self_reference', 'model_reference')
         
         reasons = []
         if protocol and protocol['missing']:
@@ -510,7 +525,7 @@ class ParkinsonAnalyzer:
             reasons.append("Нужна отдельная запись с заданиями DSI: самая долгая гласная «а» "
                            "на одном выдохе, скольжение голосом до самой высокой ноты и самый "
                            "тихий голос. По обычной записи эти величины не измеряются.")
-        if not calibrated:
+        if not calibrated and not self_reference:
             reasons.append("Нужна калибровка громкости микрофона: без нее неизвестно, насколько "
                            "тихий самый тихий голос в децибелах (I-Low), а этот параметр "
                            "сильно влияет на DSI.")
@@ -519,7 +534,32 @@ class ParkinsonAnalyzer:
             # Параметры измерены по упражнениям: показываем их, даже если DSI не считается
             protocol_info = {"measured": True, "attempts": protocol['attempts'],
                              "i_low_dbfs": round(protocol['i_low_dbfs'], 1),
+                             "i_low_method": protocol.get('i_low_method'),
+                             "soft_below_comfortable_db": protocol.get('soft_below_comfortable_db'),
+                             "comfortable_dbfs": protocol.get('comfortable_dbfs'),
+                             "model_offset": protocol.get('model_offset'),
                              "interpretation": self._dsi_parameter_status(breakdown)}
+            if self_reference and not calibrated:
+                # Погрешность I-Low переходит в DSI с весом 0.26: ±5 дБ (обычная громкость
+                # разных людей) дает ±1.3, поправка модели по многим людям - около ±0.8
+                if i_low_method == 'model_reference':
+                    sd_db = model_offset_sd(protocol)
+                    note = ("Оценка: микрофон не откалиброван, поэтому самый тихий голос пересчитан "
+                            "в децибелы по средней громкости многих людей, записавшихся на такой же "
+                            "модели устройства.")
+                else:
+                    sd_db = COMFORTABLE_SPL_SD_DB
+                    note = ("Оценка: микрофон не откалиброван, поэтому самый тихий голос "
+                            "пересчитан в децибелы по вашей обычной громкости (считаем ее "
+                            "около 70 дБ на 30 см).")
+                uncertainty = round(0.26 * sd_db, 1)
+                protocol_info.update({
+                    "approximate": True,
+                    "uncertainty": uncertainty,
+                    "estimate_note": (f"{note} Точность примерно ±{uncertainty}. Для наблюдения "
+                                      "за изменениями записывайтесь на том же устройстве и на том же "
+                                      "расстоянии."),
+                })
         if reasons:
             return {
                 "dsi_score": None,
