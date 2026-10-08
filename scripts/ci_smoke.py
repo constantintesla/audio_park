@@ -82,7 +82,12 @@ def check_recording_tasks(tmp: str, results_dir: str) -> None:
     protocol = analyzer.analyze_audio_file(vowel_path, save_raw=False,
                                            device_info={"task": "dsi", "dsi_segments": segments})
     assert protocol["dsi"].get("measured"), protocol["dsi"]
-    assert protocol["dsi"]["dsi_score"] is None, "DSI без калибровки"
+    # Без калибровки I-Low оценивается по обычной громкости (упражнение vowel): DSI - оценка
+    assert protocol["dsi"]["dsi_score"] is not None and protocol["dsi"].get("approximate"), protocol["dsi"]
+    no_reference = analyzer.analyze_audio_file(
+        vowel_path, save_raw=False,
+        device_info={"task": "dsi", "dsi_segments": [s for s in segments if s["task"] != "vowel"]})
+    assert no_reference["dsi"]["dsi_score"] is None, "DSI без калибровки и без обычной «а»"
     assert protocol["dsi"]["dsi_breakdown"]["mpt_sec"] > 3.0, protocol["dsi"]
     calibrated = analyzer.analyze_audio_file(vowel_path, save_raw=False,
                                              device_info={"task": "dsi", "dsi_segments": segments,

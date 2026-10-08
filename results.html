@@ -393,14 +393,18 @@
             const interpretation = dsi.interpretation || {};
             const dot = dsiScore >= 1.6 ? 'dot-ok' : dsiScore >= 0.0 ? 'dot-warn' : dsiScore >= -2.0 ? 'dot-mid' : 'dot-risk';
             // Тест DSI без калибровки: показываем измеренные упражнения и почему нет итога
+            const scoreText = dsi.approximate
+                ? `≈ ${dsiScore.toFixed(1)} <small class="text-muted">± ${(dsi.uncertainty || 0).toFixed(1)}</small>`
+                : dsiScore.toFixed(2);
             const scoreBlock = hasScore ? `
-                            <h2 class="display-4">${dsiScore.toFixed(2)}</h2>
+                            <h2 class="display-4">${scoreText}</h2>
                             <p class="lead"><span class="dot ${dot}"></span> ${dsi.dsi_range || ''}</p>
-                            <p class="text-muted"><small>Здоровый голос: около +1.6 и выше (шкала от -5 до +5)</small></p>` : `
+                            <p class="text-muted"><small>Здоровый голос: около +1.6 и выше (шкала от -5 до +5)</small></p>
+                            ${dsi.approximate ? `<p class="text-muted mb-0"><small>${dsi.estimate_note || ''}</small></p>` : ''}` : `
                             <p class="lead mb-1">Итог DSI не рассчитан</p>
                             <p class="text-muted mb-0"><small>${dsi.reason || ''}</small></p>`;
             const iLowText = (breakdown.i_low_db || 0) > 0
-                ? (breakdown.i_low_db).toFixed(1)
+                ? (breakdown.i_low_db).toFixed(1) + (dsi.approximate ? ' (оценка)' : '')
                 : (dsi.i_low_dbfs ? `${dsi.i_low_dbfs.toFixed(1)} dBFS (без калибровки)` : '—');
             const row = (name, value, status) => `
                 <tr><td><strong>${name}</strong></td><td>${value}</td><td><small>${status || 'N/A'}</small></td></tr>`;
