@@ -35,6 +35,7 @@ from feature_extractor import FeatureExtractor
 from symptom_analyzer import SymptomAnalyzer
 from recording_quality import assess_recording_quality
 from robust_features import compute_cpps
+from dsi_protocol import parse_segments, segment_audio, measure_dsi_tasks
 
 
 DSI_FORMULA = "DSI = 0.13 × MPT + 0.0053 × F0-High - 0.26 × I-Low - 1.18 × Jitter(%) + 12.4"
@@ -172,17 +173,34 @@ class ParkinsonAnalyzer:
             # 2. Извлечение признаков
             # I-Low (абсолютный уровень для DSI) считается по исходному сигналу
             # с калибровкой устройства, если приложение ее передало
+            # В тесте DSI голос оцениваем по спокойной «а», а параметры DSI -
+            # по своим упражнениям (границы упражнений передает приложение)
+            dsi_segments = (parse_segments(device_info.get('dsi_segments'))
+                            if device_info.get('task') == 'dsi' else [])
+            feature_audio, feature_raw = audio, raw_audio
+            if dsi_segments:
+                vowel = segment_audio(audio, sr, dsi_segments, 'vowel')
+                if vowel:
+                    feature_audio = np.concatenate(vowel)
+                    feature_raw = np.concatenate(segment_audio(raw_audio, sr, dsi_segments, 'vowel'))
             all_features = self.feature_extractor.extract_all_features(
-                audio, level_audio=raw_audio,
+                feature_audio, level_audio=feature_raw,
                 spl_offset_db=device_info.get('spl_offset_db'))
-            all_features['cpps_db'] = compute_cpps(audio, sr)
+            all_features['cpps_db'] = compute_cpps(feature_audio, sr)
+            dsi_protocol = None
+            if dsi_segments:
+                dsi_protocol = measure_dsi_tasks(raw_audio, audio, sr, dsi_segments,
+                                                 device_info.get('spl_offset_db'))
+                for key in ('mpt_sec', 'f0_high_hz', 'i_low_db', 'i_low_dbfs', 'i_low_calibrated'):
+                    all_features[key] = dsi_protocol[key]
             
             # 3. Анализ симптомов: что можно оценить, зависит от типа записи
             recording_task = self._detect_recording_task(all_features, device_info)
             analysis = self.symptom_analyzer.analyze(all_features, task=recording_task)
             
             # 4. Расчет DSI (Dysphonia Severity Index)
-            dsi_result = self._calculate_dsi(all_features, task=recording_task)
+            dsi_result = self._calculate_dsi(all_features, task=recording_task,
+                                             protocol=dsi_protocol)
             
             # 5. Получение визуализаций
             waveform_data = self.audio_processor.get_waveform(audio)
@@ -458,7 +476,8 @@ class ParkinsonAnalyzer:
             return 'vowel'
         return 'speech'
     
-    def _calculate_dsi(self, features: Dict[str, float], task: str = 'speech') -> Dict:
+    def _calculate_dsi(self, features: Dict[str, float], task: str = 'speech',
+                       protocol: Optional[Dict] = None) -> Dict:
         """
         Расчет DSI (Dysphonia Severity Index, Wuyts et al. 2000)
         
@@ -471,6 +490,7 @@ class ParkinsonAnalyzer:
         F0-High - обычным тоном, I-Low - громкостью речи), и формула дает
         около -11 даже для здорового голоса. Поэтому DSI считается только для
         записи с заданиями DSI (task='dsi') с откалиброванным микрофоном.
+        protocol - параметры, измеренные по отдельным упражнениям (dsi_protocol.py).
         
         Интерпретация (Wuyts 2000): +5 - здоровый голос, -5 - тяжелая дисфония,
         порог нормы около +1.6. DSI оценивает качество голоса, а не болезнь Паркинсона.
@@ -484,12 +504,22 @@ class ParkinsonAnalyzer:
         calibrated = features.get('i_low_calibrated', 0.0) == 1.0
         
         reasons = []
+        if protocol and protocol['missing']:
+            reasons.append("В тесте не хватает упражнений: " + ", ".join(protocol['missing']) + ".")
         if task != 'dsi':
             reasons.append("Нужна отдельная запись с заданиями DSI: самая долгая гласная «а» "
                            "на одном выдохе, скольжение голосом до самой высокой ноты и самый "
                            "тихий голос. По обычной записи эти величины не измеряются.")
         if not calibrated:
-            reasons.append("Нужна калибровка громкости микрофона (I-Low в дБ SPL).")
+            reasons.append("Нужна калибровка громкости микрофона: без нее неизвестно, насколько "
+                           "тихий самый тихий голос в децибелах (I-Low), а этот параметр "
+                           "сильно влияет на DSI.")
+        protocol_info = {}
+        if protocol:
+            # Параметры измерены по упражнениям: показываем их, даже если DSI не считается
+            protocol_info = {"measured": True, "attempts": protocol['attempts'],
+                             "i_low_dbfs": round(protocol['i_low_dbfs'], 1),
+                             "interpretation": self._dsi_parameter_status(breakdown)}
         if reasons:
             return {
                 "dsi_score": None,
@@ -498,6 +528,7 @@ class ParkinsonAnalyzer:
                 "reason": " ".join(reasons),
                 "dsi_breakdown": breakdown,
                 "formula": DSI_FORMULA,
+                **protocol_info,
             }
         
         values = list(breakdown.values())
@@ -531,15 +562,25 @@ class ParkinsonAnalyzer:
             "dsi_range": dsi_range,
             "status": "ok",
             "dsi_breakdown": breakdown,
-            "interpretation": {
-                "mpt_status": "Низкий" if mpt_sec < 10 else "Нормальный" if mpt_sec >= 15 else "Снижен",
-                "f0_high_status": "Низкий" if f0_high_hz < 250 else "Нормальный" if f0_high_hz >= 400 else "Снижен",
-                "i_low_status": "Повышен" if i_low_db > 55 else "Нормальный" if i_low_db <= 45 else "Пограничный",
-                "jitter_status": "Высокий" if jitter_percent > 1.5 else "Нормальный" if jitter_percent < 1.0 else "Повышен",
-                "note": DSI_NOTE,
-            },
             "formula": DSI_FORMULA,
-            "i_low_dbfs": round(float(features.get('i_low_dbfs', 0.0)), 1)
+            "i_low_dbfs": round(float(features.get('i_low_dbfs', 0.0)), 1),
+            **protocol_info,
+            "interpretation": {**self._dsi_parameter_status(breakdown), "note": DSI_NOTE},
+        }
+    
+    @staticmethod
+    def _dsi_parameter_status(breakdown: Dict[str, float]) -> Dict[str, str]:
+        """Оценка каждого параметра DSI относительно нормы (I-Low - только в дБ SPL)"""
+        mpt_sec = breakdown['mpt_sec']
+        f0_high_hz = breakdown['f0_high_hz']
+        i_low_db = breakdown['i_low_db']
+        jitter_percent = breakdown['jitter_percent']
+        return {
+            "mpt_status": "Низкий" if mpt_sec < 10 else "Нормальный" if mpt_sec >= 15 else "Снижен",
+            "f0_high_status": "Низкий" if f0_high_hz < 250 else "Нормальный" if f0_high_hz >= 400 else "Снижен",
+            "i_low_status": ("нужна калибровка" if i_low_db <= 0 else
+                             "Повышен" if i_low_db > 55 else "Нормальный" if i_low_db <= 45 else "Пограничный"),
+            "jitter_status": "Высокий" if jitter_percent > 1.5 else "Нормальный" if jitter_percent < 1.0 else "Повышен",
         }
     
     def _average_features(self, feature_list: list) -> Dict:

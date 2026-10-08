@@ -379,7 +379,8 @@
         // микрофона, иначе показываем, почему его нет.
         function renderDsiCard(dsi) {
             const dsiScore = dsi ? dsi.dsi_score : null;
-            if (dsiScore === null || dsiScore === undefined) {
+            const hasScore = dsiScore !== null && dsiScore !== undefined;
+            if (!hasScore && !(dsi && dsi.measured)) {
                 const reason = dsi && (dsi.reason || dsi.error);
                 if (!reason) return '';
                 return `
@@ -391,6 +392,16 @@
             const breakdown = dsi.dsi_breakdown || {};
             const interpretation = dsi.interpretation || {};
             const dot = dsiScore >= 1.6 ? 'dot-ok' : dsiScore >= 0.0 ? 'dot-warn' : dsiScore >= -2.0 ? 'dot-mid' : 'dot-risk';
+            // Тест DSI без калибровки: показываем измеренные упражнения и почему нет итога
+            const scoreBlock = hasScore ? `
+                            <h2 class="display-4">${dsiScore.toFixed(2)}</h2>
+                            <p class="lead"><span class="dot ${dot}"></span> ${dsi.dsi_range || ''}</p>
+                            <p class="text-muted"><small>Здоровый голос: около +1.6 и выше (шкала от -5 до +5)</small></p>` : `
+                            <p class="lead mb-1">Итог DSI не рассчитан</p>
+                            <p class="text-muted mb-0"><small>${dsi.reason || ''}</small></p>`;
+            const iLowText = (breakdown.i_low_db || 0) > 0
+                ? (breakdown.i_low_db).toFixed(1)
+                : (dsi.i_low_dbfs ? `${dsi.i_low_dbfs.toFixed(1)} dBFS (без калибровки)` : '—');
             const row = (name, value, status) => `
                 <tr><td><strong>${name}</strong></td><td>${value}</td><td><small>${status || 'N/A'}</small></td></tr>`;
             return `
@@ -399,17 +410,14 @@
                         <h5 class="mb-0">DSI (Dysphonia Severity Index)</h5>
                     </div>
                     <div class="card-body">
-                        <div class="text-center mb-3">
-                            <h2 class="display-4">${dsiScore.toFixed(2)}</h2>
-                            <p class="lead"><span class="dot ${dot}"></span> ${dsi.dsi_range || ''}</p>
-                            <p class="text-muted"><small>Здоровый голос: около +1.6 и выше (шкала от -5 до +5)</small></p>
+                        <div class="text-center mb-3">${scoreBlock}
                         </div>
                         <table class="table table-sm table-bordered">
                             <thead class="table-light"><tr><th>Параметр</th><th>Значение</th><th>Оценка</th></tr></thead>
                             <tbody>
                                 ${row('MPT, сек (норма 15-30)', (breakdown.mpt_sec || 0).toFixed(2), interpretation.mpt_status)}
                                 ${row('F0-High, Гц (норма 400-600)', (breakdown.f0_high_hz || 0).toFixed(1), interpretation.f0_high_status)}
-                                ${row('I-Low, дБ SPL (норма до 45)', (breakdown.i_low_db || 0).toFixed(1), interpretation.i_low_status)}
+                                ${row('I-Low, дБ SPL (норма до 45)', iLowText, interpretation.i_low_status)}
                                 ${row('Jitter, % (норма до 1.0)', (breakdown.jitter_percent || 0).toFixed(2), interpretation.jitter_status)}
                             </tbody>
                         </table>

@@ -76,6 +76,18 @@ def check_recording_tasks(tmp: str, results_dir: str) -> None:
     dsi = analyzer.analyze_audio_file(vowel_path, save_raw=False,
                                       device_info={"task": "dsi", "spl_offset_db": 100.0})
     assert dsi["dsi"]["dsi_score"] is not None, dsi["dsi"]
+
+    # Тест DSI с границами упражнений: параметры меряются по своим упражнениям
+    segments = [{"task": t, "start_sec": 0.0, "end_sec": 4.0} for t in ("mpt", "glide", "soft", "vowel")]
+    protocol = analyzer.analyze_audio_file(vowel_path, save_raw=False,
+                                           device_info={"task": "dsi", "dsi_segments": segments})
+    assert protocol["dsi"].get("measured"), protocol["dsi"]
+    assert protocol["dsi"]["dsi_score"] is None, "DSI без калибровки"
+    assert protocol["dsi"]["dsi_breakdown"]["mpt_sec"] > 3.0, protocol["dsi"]
+    calibrated = analyzer.analyze_audio_file(vowel_path, save_raw=False,
+                                             device_info={"task": "dsi", "dsi_segments": segments,
+                                                          "spl_offset_db": 100.0})
+    assert calibrated["dsi"]["dsi_score"] is not None, calibrated["dsi"]
     print("recording tasks: ok")
 
 

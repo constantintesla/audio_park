@@ -11,6 +11,7 @@ from flask import Flask, request, jsonify, send_from_directory, Response
 from flask_cors import CORS
 import logging
 import numpy as np
+from dsi_protocol import parse_segments
 
 from speaker_baseline import compare_to_baseline
 
@@ -129,6 +130,7 @@ DEVICE_INFO_FIELDS = {
     'noise_floor_dbfs': float, # уровень шума по калибровочной тишине перед записью
     'spl_offset_db': float,    # поправка dBFS -> dB SPL из калибровки устройства
     'task': str,               # что записано: 'speech' / 'vowel' / 'dsi' (см. README)
+    'dsi_segments': parse_segments,  # границы упражнений теста DSI (см. dsi_protocol.py)
 }
 
 
