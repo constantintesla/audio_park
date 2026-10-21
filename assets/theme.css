@@ -755,6 +755,11 @@ main {
 
 .dsi-step-say {
     font-weight: 500;
+    white-space: pre-line;
+}
+
+.step-emphasis {
+    text-decoration: underline;
 }
 
 .dsi-step-actions {

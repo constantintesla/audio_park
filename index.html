@@ -64,10 +64,11 @@
                 <div class="capture-grid">
                     <div class="capture-panel">
                         <h3>Запись с микрофона</h3>
-                        <p class="hint">Держите устройство на расстоянии 20–30 см и произнесите протяжное «а-а-а» или фразу. «Тест DSI» проведет по 4 упражнениям для индекса DSI.</p>
+                        <p class="hint">Держите устройство на расстоянии 20–30 см и произнесите протяжное «а-а-а» или фразу. «Тест DSI» проведет по 4 упражнениям для индекса DSI, «Речевые задания» — по заданиям для оценки речи: долгая «а», чтение текста, слоги, фразы в разном темпе и интонация.</p>
                         <div class="record-actions">
                             <button id="record-btn" class="btn btn-record">Записать с микрофона</button>
                             <button id="dsi-test-btn" class="btn btn-outline-secondary" title="Пошаговый тест для индекса DSI: 4 упражнения, около 3 минут">Тест DSI</button>
+                            <button id="speech-test-btn" class="btn btn-outline-secondary" title="Пошаговые речевые задания: 11 заданий, около 8 минут">Речевые задания</button>
                         </div>
                         <div class="form-check mt-3">
                             <input class="form-check-input" type="checkbox" id="calibrate-check" checked>
@@ -291,6 +292,7 @@
     <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/wavesurfer.js@6/dist/wavesurfer.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.js"></script>
+    <script src="assets/speech_protocol.js"></script>
     
     <script>
         // Global variables
@@ -572,8 +574,8 @@
             
             let html = '';
             
-            // DSI Section
-            html += renderDsiCard(dsi);
+            // DSI Section (в речевых заданиях DSI не измеряется, вместо него - карточка заданий)
+            html += result.speech_protocol ? renderSpeechProtocolCard(result.speech_protocol) : renderDsiCard(dsi);
             
             // Jitter, shimmer и HNR по обычной речи не оцениваются (нормы - для протяжной гласной)
             const voiceQualityFromSpeech = result.recording_task === 'speech';
@@ -1139,18 +1141,21 @@
             recordBtn.addEventListener('click', async () => {
                 if (!isRecording) {
                     await startRecording();
-                } else if (rec && rec.dsi) {
-                    // Тест DSI прерывают целиком: незаконченный тест не анализируем
+                } else if (rec && rec.test) {
+                    // Пошаговый тест прерывают целиком: незаконченный тест не анализируем
                     cleanupRecording();
                 } else {
                     stopRecording();
                 }
             });
             document.getElementById('dsi-test-btn').addEventListener('click', async () => {
-                if (!isRecording) await startRecording({ dsi: true });
+                if (!isRecording) await startRecording({ test: 'dsi' });
             });
-            document.getElementById('dsi-try-btn').addEventListener('click', onDsiTryButton);
-            document.getElementById('dsi-next-btn').addEventListener('click', () => nextDsiStep(rec));
+            document.getElementById('speech-test-btn').addEventListener('click', async () => {
+                if (!isRecording) await startRecording({ test: 'speech' });
+            });
+            document.getElementById('dsi-try-btn').addEventListener('click', onTestTryButton);
+            document.getElementById('dsi-next-btn').addEventListener('click', () => nextTestStep(rec));
         }
         
         function initAnalyzeButton() {
@@ -1315,8 +1320,9 @@
                     calibrate: document.getElementById('calibrate-check').checked,
                     phase: 'start', speechStart: null, plan: null,
                     stopped: false, clipUntil: 0, columns: [], raf: null,
-                    // Тест DSI: номер упражнения, попытки и границы попыток (в отсчетах)
-                    dsi: options.dsi ? { step: 0, tries: 0, tryStart: null, segments: [] } : null
+                    // Пошаговый тест (DSI или речевые задания): номер упражнения, попытки
+                    // и границы попыток (в отсчетах)
+                    test: options.test ? { ...TESTS[options.test], step: 0, tries: 0, tryStart: null, segments: [] } : null
                 };
                 processor.onaudioprocess = (e) => {
                     if (!rec || rec.stopped) return;
@@ -1331,8 +1337,9 @@
                 isRecording = true;
                 const recordBtn = document.getElementById('record-btn');
                 recordBtn.classList.add('recording');
-                recordBtn.textContent = options.dsi ? 'Прервать тест' : 'Остановить запись';
+                recordBtn.textContent = options.test ? 'Прервать тест' : 'Остановить запись';
                 document.getElementById('dsi-test-btn').disabled = true;
+                document.getElementById('speech-test-btn').disabled = true;
                 document.getElementById('analyze-btn').disabled = true;
                 document.getElementById('calibration-info').style.display = 'none';
                 document.getElementById('live-recorder').style.display = 'block';
@@ -1369,7 +1376,7 @@
         async function runRecordingPhases(state) {
             if (!state.calibrate) {
                 state.speechStart = 0;
-                if (state.dsi) return showDsiStep(state);
+                if (state.test) return showTestStep(state);
                 setRecPhase('speech', 'Идет запись. Говорите. Нажмите «Остановить», когда закончите');
                 return;
             }
@@ -1385,7 +1392,7 @@
             // С запасом на задержку динамик → микрофон (Bluetooth бывает до ~0.3 с)
             if (!await waitForSample(state, beep.end + Math.round(0.5 * state.sr))) return;
             state.speechStart = state.nSamples;
-            if (state.dsi) return showDsiStep(state);
+            if (state.test) return showTestStep(state);
             setRecPhase('speech', 'Идет запись. Говорите. Нажмите «Остановить», когда закончите');
         }
 
@@ -1421,30 +1428,132 @@
             }
         ];
 
-        function showDsiStep(state) {
-            const step = DSI_STEPS[state.dsi.step];
+        // Речевые задания из документа «Задания по голосу». В items - по одной фразе на попытку,
+        // *слово* - выделенное слово (логическое ударение)
+        const SPEECH_STEPS = [
+            {
+                task: 'mpt', tries: 3,
+                title: 'Долгая «а» (время максимальной фонации)',
+                text: 'Сделайте нормальный вдох, а затем произнесите звук «а» так долго и так ровно, как сможете, на вашей обычной громкости. ' +
+                      'Когда понадобится вдохнуть, просто остановитесь и нажмите «Готово». 3 попытки, засчитается лучшая.',
+                say: '«А-а-а-а-а…» ровно, обычной громкостью'
+            },
+            {
+                task: 'reading', tries: 1,
+                title: 'Чтение текста',
+                text: 'Нажмите «Начать попытку» и прочитайте текст с выражением. В конце нажмите «Готово».',
+                say: 'Буря на реке\n' +
+                     'В тихом селе жил рыбак Григорий. Как-то раз бежал он к реке и медленно, тихо бормотал: «Боже, дай удачи!» ' +
+                     'Вдруг взревел ветер, грянул гром, ударила молния. Григорий громко крикнул: «Вот это буря! Берегитесь!»\n' +
+                     'Он быстро закричал рыбакам: «Плывите, гребите, не зевайте! Скорее — к берегу!» Волны бились. ' +
+                     'Рыбаки воскликнули: «Кто нам поможет?». Тут примчались соседи: «Мы здесь! Держитесь!»\n' +
+                     'Буря утихла. Григорий улыбнулся и задумчиво сказал: «Жизнь — как река, полна вихрей».'
+            },
+            {
+                task: 'syl_sibilant', tries: 1,
+                title: 'Слоги: свистящие и шипящие',
+                text: 'Произнесите слоги в обычном темпе и повторите всю серию 3 раза подряд.',
+                say: 'са — ша — за — жа'
+            },
+            {
+                task: 'syl_sonorant', tries: 1,
+                title: 'Слоги: сонорные',
+                text: 'Произнесите слоги в обычном темпе и повторите всю серию 3 раза подряд.',
+                say: 'ла — ра — ра — ла'
+            },
+            {
+                task: 'syl_voicing', tries: 1,
+                title: 'Слоги: звонкие и глухие',
+                text: 'Произнесите слоги в обычном темпе, каждую тройку по одному разу.',
+                say: 'па — ба — па, та — да — та, ка — га — ка'
+            },
+            {
+                task: 'syl_palatal', tries: 1,
+                title: 'Слоги: твердые и мягкие',
+                text: 'Произнесите пары слогов в обычном темпе и повторите всю серию 2 раза подряд.',
+                say: 'са — ся, ла — ля, та — тя'
+            },
+            {
+                task: 'syl_airflow', tries: 1,
+                title: 'Слоги: тонус и воздушный поток',
+                text: 'Произнесите слоги в обычном темпе, четко, по порядку.',
+                say: 'ша ша ша\nса са са\nса — сы — су — се'
+            },
+            {
+                task: 'phrase_slow',
+                title: 'Фразы: читайте медленно',
+                text: 'Прочитайте фразу медленно. Одна попытка — одна фраза.',
+                items: ['Сегодня и нам необходимо вдумчиво и планомерно обсудить все детали.',
+                        'Тёплый солнечный луч медленно скользил по подоконнику тихой комнаты.',
+                        'Капля дождя повисла на кончике листа и долго не решалась упасть.']
+            },
+            {
+                task: 'phrase_fast',
+                title: 'Фразы: читайте быстро',
+                text: 'Прочитайте фразу быстро, но разборчиво. Одна попытка — одна фраза.',
+                items: ['Он быстро закрыл дверь, схватил ключи и выбежал наружу.',
+                        'Поезд резко остановился, пассажиры встали и зашевелились.',
+                        'Она включила телефон, прочитала сообщение и начала быстро собираться на утренний рейс.']
+            },
+            {
+                task: 'phrase_normal',
+                title: 'Фразы: читайте в обычном темпе',
+                text: 'Прочитайте фразу в обычном темпе. Одна попытка — одна фраза.',
+                items: ['Утром город просыпался, наполняясь звуками машин и голосами людей.',
+                        'Она закрыла книгу и задумалась о прочитанном.',
+                        'Вечером мы вышли на прогулку и долго разговаривали.']
+            },
+            {
+                task: 'intonation',
+                title: 'Интонация: вопрос к выделенному слову',
+                text: 'Задайте вопрос, выделив голосом подчеркнутое слово, затем прочитайте ответ.',
+                items: ['*Сергей* купил фрукты? — Да, Сергей.',
+                        'Сергей *купил* фрукты? — Нет, их купил Вячеслав.',
+                        'Сергей купил *фрукты*? — Нет, он купил овощи.']
+            }
+        ];
+
+        const TESTS = {
+            dsi: { steps: DSI_STEPS, task: 'dsi', segmentsKey: 'dsi_segments', stepName: 'Упражнение' },
+            speech: { steps: SPEECH_STEPS, task: 'speech_protocol', segmentsKey: 'protocol_segments', stepName: 'Задание' }
+        };
+
+        const stepTries = (step) => step.items ? step.items.length : step.tries;
+
+        function escapeStepText(text) {
+            return text.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+                .replace(/\*([^*]+)\*/g, '<strong class="step-emphasis">$1</strong>');
+        }
+
+        function showTestStep(state) {
+            const test = state.test;
+            const step = test.steps[test.step];
             setRecPhase('dsi-wait', 'Микрофон включен. Держите устройство на 30 см (длина линейки) весь тест. Прочитайте задание и нажмите «Начать попытку»');
             document.getElementById('dsi-step').style.display = 'block';
-            document.getElementById('dsi-step-count').textContent = `Упражнение ${state.dsi.step + 1} из ${DSI_STEPS.length}`;
-            document.getElementById('dsi-step-tries').textContent = `попытка ${state.dsi.tries + 1} из ${step.tries}`;
+            document.getElementById('dsi-step-count').textContent = `${test.stepName} ${test.step + 1} из ${test.steps.length}`;
+            document.getElementById('dsi-step-tries').textContent = step.items
+                ? `фраза ${test.tries + 1} из ${step.items.length}`
+                : `попытка ${test.tries + 1} из ${step.tries}`;
             document.getElementById('dsi-step-title').textContent = step.title;
             document.getElementById('dsi-step-text').textContent = step.text;
-            document.getElementById('dsi-step-say').textContent = 'Что сказать: ' + step.say;
+            const say = step.items ? step.items[test.tries] : step.say;
+            document.getElementById('dsi-step-say').innerHTML =
+                (step.items || step.task === 'reading' ? '' : 'Что сказать: ') + escapeStepText(say);
             const tryBtn = document.getElementById('dsi-try-btn');
             tryBtn.textContent = 'Начать попытку';
             tryBtn.disabled = false;
             // Перейти дальше можно после хотя бы одной попытки
             document.getElementById('dsi-next-btn').style.display =
-                state.dsi.tries > 0 && state.dsi.step < DSI_STEPS.length - 1 ? 'inline-block' : 'none';
+                test.tries > 0 && test.step < test.steps.length - 1 ? 'inline-block' : 'none';
         }
 
-        function onDsiTryButton() {
+        function onTestTryButton() {
             const state = rec;
-            if (!state || !state.dsi || state.speechStart === null) return;
-            const dsi = state.dsi;
-            const step = DSI_STEPS[dsi.step];
-            if (dsi.tryStart === null) {
-                dsi.tryStart = state.nSamples;
+            if (!state || !state.test || state.speechStart === null) return;
+            const test = state.test;
+            const step = test.steps[test.step];
+            if (test.tryStart === null) {
+                test.tryStart = state.nSamples;
                 setRecPhase('speech', `Идет попытка: ${step.title.toLowerCase()}. Нажмите «Готово», когда закончите`);
                 document.getElementById('dsi-try-btn').textContent = 'Готово';
                 document.getElementById('dsi-next-btn').style.display = 'none';
@@ -1452,32 +1561,33 @@
             }
             // Небольшой запас по краям: нажатие кнопки чуть запаздывает за голосом
             const margin = Math.round(0.3 * state.sr);
-            dsi.segments.push({
+            test.segments.push({
                 task: step.task,
-                start: Math.max(state.speechStart, dsi.tryStart - margin),
+                start: Math.max(state.speechStart, test.tryStart - margin),
                 end: state.nSamples + margin
             });
-            dsi.tryStart = null;
-            dsi.tries += 1;
-            if (dsi.tries >= step.tries) {
-                nextDsiStep(state);
+            test.tryStart = null;
+            test.tries += 1;
+            if (test.tries >= stepTries(step)) {
+                nextTestStep(state);
             } else {
-                showDsiStep(state);
+                showTestStep(state);
             }
         }
 
-        async function nextDsiStep(state) {
-            if (!state || !state.dsi || state.dsi.tryStart !== null) return;
-            state.dsi.step += 1;
-            state.dsi.tries = 0;
-            if (state.dsi.step < DSI_STEPS.length) {
-                showDsiStep(state);
+        async function nextTestStep(state) {
+            if (!state || !state.test || state.test.tryStart !== null) return;
+            const test = state.test;
+            test.step += 1;
+            test.tries = 0;
+            if (test.step < test.steps.length) {
+                showTestStep(state);
                 return;
             }
             // Все упражнения сделаны: дописываем запас после последней попытки и завершаем
             document.getElementById('dsi-try-btn').disabled = true;
             setRecPhase('dsi-wait', 'Тест записан, готовим запись к анализу');
-            const lastEnd = state.dsi.segments[state.dsi.segments.length - 1].end;
+            const lastEnd = test.segments[test.segments.length - 1].end;
             await waitForSample(state, lastEnd);
             stopRecording();
         }
@@ -1607,9 +1717,9 @@
                 performance.now() < rec.clipUntil ? 'visible' : 'hidden';
             const seconds = rec.speechStart !== null ? (rec.nSamples - rec.speechStart) / rec.sr : 0;
             let timerText = rec.phase === 'speech' ? `запись ${Math.max(0, seconds).toFixed(1)} с` : 'калибровка';
-            if (rec.dsi) {
-                timerText = rec.dsi.tryStart !== null
-                    ? `попытка ${((rec.nSamples - rec.dsi.tryStart) / rec.sr).toFixed(1)} с`
+            if (rec.test) {
+                timerText = rec.test.tryStart !== null
+                    ? `попытка ${((rec.nSamples - rec.test.tryStart) / rec.sr).toFixed(1)} с`
                     : (rec.speechStart !== null ? 'ожидание' : 'калибровка');
             }
             document.getElementById('rec-timer').textContent = timerText;
@@ -1634,6 +1744,7 @@
             document.getElementById('live-recorder').style.display = 'none';
             document.getElementById('dsi-step').style.display = 'none';
             document.getElementById('dsi-test-btn').disabled = false;
+            document.getElementById('speech-test-btn').disabled = false;
         }
 
         function stopRecording() {
@@ -1671,10 +1782,10 @@
                 calibrationWav = audioBufferToWav(calBuffer, state.sr);
             }
             const deviceInfo = buildDeviceInfo(state, calibration);
-            if (state.dsi) {
+            if (state.test) {
                 // Границы упражнений в секундах от начала отправляемой записи
-                deviceInfo.task = 'dsi';
-                deviceInfo.dsi_segments = state.dsi.segments.map(seg => ({
+                deviceInfo.task = state.test.task;
+                deviceInfo[state.test.segmentsKey] = state.test.segments.map(seg => ({
                     task: seg.task,
                     start_sec: round3((seg.start - state.speechStart) / state.sr),
                     end_sec: round3((Math.min(seg.end, state.nSamples) - state.speechStart) / state.sr)
@@ -2696,7 +2807,7 @@
             localResults.style.display = 'block';
             
             // Display DSI
-            displayDSI(result.dsi);
+            displayDSI(result.dsi, result.speech_protocol);
             
             // Risk badge
             const riskBadge = document.getElementById('risk-badge');
@@ -2810,10 +2921,10 @@
             }
         }
         
-        function displayDSI(dsiResult) {
+        function displayDSI(dsiResult, speechProtocol) {
             const dsiCard = document.getElementById('dsi-card');
             if (!dsiCard) return;
-            const html = renderDsiCard(dsiResult);
+            const html = speechProtocol ? renderSpeechProtocolCard(speechProtocol) : renderDsiCard(dsiResult);
             dsiCard.innerHTML = html;
             dsiCard.className = 'mt-4 mb-4';
             dsiCard.style.display = html ? 'block' : 'none';

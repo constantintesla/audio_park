@@ -102,6 +102,59 @@ def check_recording_tasks(tmp: str, results_dir: str) -> None:
     print("recording tasks: ok")
 
 
+def syllable_train(sr: int, rate: float, count: int, f0: float = 130.0) -> np.ndarray:
+    """Слоги с заданным темпом: озвонченный слог на 60% периода, затем тишина"""
+    period = int(sr / rate)
+    n = int(0.6 * period)
+    t = np.arange(n) / sr
+    phase = 2 * np.pi * f0 * t
+    syllable = sum(np.sin(k * phase) / k for k in range(1, 8)) * np.hanning(n)
+    return np.concatenate([np.concatenate([syllable, np.zeros(period - n)]) for _ in range(count)])
+
+
+def check_speech_protocol(tmp: str, results_dir: str) -> None:
+    """Речевые задания: каждое задание меряется по своему куску записи"""
+    from parkinson_analyzer import ParkinsonAnalyzer
+
+    sr = 22050
+    vowel_path = os.path.join(tmp, "vowel6.wav")
+    speech_path = os.path.join(tmp, "speech_r.wav")
+    make_vowel(vowel_path, sr=sr, seconds=6.0)
+    make_speech(speech_path, sr=sr, seconds=5.0)
+    parts, segments, pos = [], [], 0.0
+
+    def add(task, signal):
+        nonlocal pos
+        signal = np.concatenate([signal, np.zeros(int(0.5 * sr))])
+        parts.append(signal)
+        segments.append({"task": task, "start_sec": pos, "end_sec": pos + len(signal) / sr})
+        pos += len(signal) / sr
+
+    add("mpt", sf.read(vowel_path)[0])
+    add("reading", sf.read(speech_path)[0])
+    add("syl_sibilant", syllable_train(sr, 5.0, 12))
+    for rate, task in ((3.0, "phrase_slow"), (4.5, "phrase_normal"), (6.5, "phrase_fast")):
+        add(task, syllable_train(sr, rate, 12))
+    add("intonation", sf.read(speech_path)[0])
+    path = os.path.join(tmp, "protocol.wav")
+    sf.write(path, (0.5 * np.concatenate(parts)).astype(np.float32), sr)
+
+    analyzer = ParkinsonAnalyzer(save_raw_data=False, raw_data_dir=results_dir)
+    result = analyzer.analyze_audio_file(path, save_raw=False,
+                                         device_info={"task": "speech_protocol", "protocol_segments": segments})
+    protocol = result["speech_protocol"]
+    assert result["recording_task"] == "speech", result["recording_task"]
+    assert protocol["mpt"]["mpt_sec"] > 5.0, protocol["mpt"]
+    assert protocol["reading"]["rate_syl_sec"], protocol["reading"]
+    syllables = protocol["syllables"][0]
+    assert 4.0 <= syllables["rate_syl_sec"] <= 6.0 and syllables["cv_percent"] < 15, syllables
+    assert protocol["phrases"]["fast_to_slow_ratio"] > 1.5, protocol["phrases"]
+    assert protocol["intonation"]["f0_range_st"] is not None, protocol["intonation"]
+    assert any("Речевые задания" in line for line in result["report"]), result["report"]
+    assert any("сонорные" in m for m in protocol["missing"]), protocol["missing"]
+    print("speech protocol: ok")
+
+
 def check_device_model_stats() -> None:
     """Обычный уровень тестового звука и поправка громкости по модели устройства"""
     from device_model_stats import loop_gain_check, model_spl_offset
@@ -171,6 +224,7 @@ def main() -> None:
         make_vowel(wav_path)
         check_analyzer(wav_path, os.path.join(tmp, "results"))
         check_recording_tasks(tmp, os.path.join(tmp, "results"))
+        check_speech_protocol(tmp, os.path.join(tmp, "results"))
         check_device_model_stats()
         # api.py пишет results.json и results/ в текущую папку, поэтому запускаем его во временной
         os.chdir(tmp)

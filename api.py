@@ -12,6 +12,7 @@ from flask_cors import CORS
 import logging
 import numpy as np
 from dsi_protocol import parse_segments
+from speech_protocol import parse_protocol_segments
 from device_model_stats import loop_gain_check, model_spl_offset
 
 from speaker_baseline import compare_to_baseline
@@ -130,8 +131,9 @@ DEVICE_INFO_FIELDS = {
     'sample_rate': int,        # частота дискретизации записи
     'noise_floor_dbfs': float, # уровень шума по калибровочной тишине перед записью
     'spl_offset_db': float,    # поправка dBFS -> dB SPL из калибровки устройства
-    'task': str,               # что записано: 'speech' / 'vowel' / 'dsi' (см. README)
+    'task': str,               # что записано: 'speech' / 'vowel' / 'dsi' / 'speech_protocol' (см. README)
     'dsi_segments': parse_segments,  # границы упражнений теста DSI (см. dsi_protocol.py)
+    'protocol_segments': parse_protocol_segments,  # границы речевых заданий (см. speech_protocol.py)
 }
 
 

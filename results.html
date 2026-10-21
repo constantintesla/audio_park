@@ -57,6 +57,7 @@
     
     <!-- Scripts -->
     <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+    <script src="assets/speech_protocol.js"></script>
     
     <script>
         // Префикс пути, чтобы страница работала и в корне, и за прокси (например /audio_park)
@@ -232,8 +233,8 @@
             
             let html = '';
             
-            // DSI Section
-            html += renderDsiCard(dsi);
+            // DSI Section (в речевых заданиях DSI не измеряется, вместо него - карточка заданий)
+            html += result.speech_protocol ? renderSpeechProtocolCard(result.speech_protocol) : renderDsiCard(dsi);
             
             // Jitter, shimmer и HNR по обычной речи не оцениваются (нормы - для протяжной гласной)
             const voiceQualityFromSpeech = result.recording_task === 'speech';
