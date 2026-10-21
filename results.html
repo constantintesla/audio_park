@@ -233,8 +233,8 @@
             
             let html = '';
             
-            // DSI Section (в речевых заданиях DSI не измеряется, вместо него - карточка заданий)
-            html += result.speech_protocol ? renderSpeechProtocolCard(result.speech_protocol) : renderDsiCard(dsi);
+            // DSI и речевые задания (в старых записях речевых заданий DSI не измерялся)
+            html += renderTestCards(result);
             
             // Jitter, shimmer и HNR по обычной речи не оцениваются (нормы - для протяжной гласной)
             const voiceQualityFromSpeech = result.recording_task === 'speech';

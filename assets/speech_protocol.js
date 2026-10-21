@@ -50,9 +50,17 @@ function renderSpeechProtocolCard(sp) {
                 ${notes ? `<ul class="mb-2">${notes}</ul>` : ''}
                 ${missing}
                 <div class="alert alert-info mb-0" role="alert">
-                    <small>Интонация, громкость и темп в общем отчете оценены по чтению текста.
+                    <small>Интонация, громкость и темп в общем отчете оценены по чтению текста, охриплость — по спокойной «а».
                     Ориентиры примерные, это измерения, а не диагноз.</small>
                 </div>
             </div>
         </div>`;
+}
+
+// Карточки DSI и речевых заданий. renderDsiCard объявлена на каждой странице
+function renderTestCards(result) {
+    const sp = result.speech_protocol;
+    // В записи только с речевыми заданиями DSI не измерялся
+    if (sp && result.recording_task !== 'exam') return renderSpeechProtocolCard(sp);
+    return renderDsiCard(result.dsi || {}) + renderSpeechProtocolCard(sp);
 }
