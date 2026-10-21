@@ -36,6 +36,7 @@ from symptom_analyzer import SymptomAnalyzer
 from recording_quality import assess_recording_quality
 from robust_features import compute_cpps
 from dsi_protocol import parse_segments, segment_audio, measure_dsi_tasks, COMFORTABLE_SPL_SD_DB
+from speech_protocol import parse_protocol_segments, measure_speech_tasks, protocol_report
 
 
 def model_offset_sd(protocol: Dict) -> float:
@@ -183,7 +184,14 @@ class ParkinsonAnalyzer:
             # по своим упражнениям (границы упражнений передает приложение)
             dsi_segments = (parse_segments(device_info.get('dsi_segments'))
                             if device_info.get('task') == 'dsi' else [])
+            # В речевых заданиях интонацию, темп и громкость оцениваем по чтению текста
+            protocol_segments = (parse_protocol_segments(device_info.get('protocol_segments'))
+                                 if device_info.get('task') == 'speech_protocol' else [])
             feature_audio, feature_raw = audio, raw_audio
+            reading = segment_audio(audio, sr, protocol_segments, 'reading')
+            if reading:
+                feature_audio = np.concatenate(reading)
+                feature_raw = np.concatenate(segment_audio(raw_audio, sr, protocol_segments, 'reading'))
             if dsi_segments:
                 vowel = segment_audio(audio, sr, dsi_segments, 'vowel')
                 if vowel:
@@ -199,6 +207,7 @@ class ParkinsonAnalyzer:
                                                  device_info.get('spl_offset_db'), model_offset)
                 for key in ('mpt_sec', 'f0_high_hz', 'i_low_db', 'i_low_dbfs', 'i_low_calibrated'):
                     all_features[key] = dsi_protocol[key]
+            speech_protocol = measure_speech_tasks(audio, sr, protocol_segments) if protocol_segments else None
             
             # 3. Анализ симптомов: что можно оценить, зависит от типа записи
             recording_task = self._detect_recording_task(all_features, device_info)
@@ -280,6 +289,8 @@ class ParkinsonAnalyzer:
                                                           analysis.get('exceeded_thresholds', []),
                                                           all_features)
             report = self._add_dsi_to_report(analysis['report'], dsi_result)
+            if speech_protocol:
+                report = report + protocol_report(speech_protocol)
             report = self._add_quality_to_report(report, quality)
             if quality['verdict'] == 'reject':
                 recommendation = ("Запись непригодна для анализа, результаты ненадежны. "
@@ -309,6 +320,7 @@ class ParkinsonAnalyzer:
                 },
                 "dsi": dsi_result,
                 "recording_task": recording_task,
+                "speech_protocol": speech_protocol,
                 "symptom_scores": {
                     **analysis['symptom_scores'],
                     "pd_risk": analysis['pd_risk']  # Для обратной совместимости
@@ -479,6 +491,8 @@ class ParkinsonAnalyzer:
         гласная - это один длинный непрерывный озвонченный участок.
         """
         task = str(device_info.get('task') or '').strip().lower()
+        if task == 'speech_protocol':
+            return 'speech'
         if task in ('speech', 'vowel', 'dsi'):
             return task
         longest = features.get('longest_voiced_sec', 0.0)

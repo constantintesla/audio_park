@@ -36,13 +36,13 @@ COMFORTABLE_SPL_DB = 70.0
 COMFORTABLE_SPL_SD_DB = 5.0
 
 
-def parse_segments(raw) -> List[Dict]:
+def parse_segments(raw, tasks=DSI_TASKS, max_segments: int = MAX_SEGMENTS) -> List[Dict]:
     """Проверка и нормализация границ упражнений; некорректные отбрасываются"""
     if not isinstance(raw, list):
         return []
     segments = []
-    for item in raw[:MAX_SEGMENTS]:
-        if not isinstance(item, dict) or item.get('task') not in DSI_TASKS:
+    for item in raw[:max_segments]:
+        if not isinstance(item, dict) or item.get('task') not in tasks:
             continue
         try:
             start = float(item.get('start_sec'))
