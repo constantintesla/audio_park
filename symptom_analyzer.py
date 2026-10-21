@@ -59,7 +59,9 @@ class SymptomAnalyzer:
             типу записи оценить нельзя, имеют оценку None.
         """
         is_vowel = task in ('vowel', 'dsi')
-        skipped = self.SPEECH_ONLY if is_vowel else self.VOWEL_ONLY
+        # Обследование: есть и гласная, и речь, оцениваются все симптомы
+        is_exam = task == 'exam'
+        skipped = () if is_exam else self.SPEECH_ONLY if is_vowel else self.VOWEL_ONLY
         
         # Оценка симптомов (0-3: Нет/Легкий/Умеренный/Тяжелый, None - не оценивался)
         scorers = {
@@ -73,7 +75,8 @@ class SymptomAnalyzer:
                           for name, scorer in scorers.items()}
         
         # Подсчет признаков, превышающих пороги
-        skipped_thresholds = self.SPEECH_ONLY_THRESHOLDS if is_vowel else self.VOWEL_ONLY_THRESHOLDS
+        skipped_thresholds = (() if is_exam else
+                              self.SPEECH_ONLY_THRESHOLDS if is_vowel else self.VOWEL_ONLY_THRESHOLDS)
         exceeded_thresholds = [t for t in self._count_exceeded_thresholds(features)
                                if t not in skipped_thresholds]
         
@@ -83,7 +86,9 @@ class SymptomAnalyzer:
         
         # Генерация отчета
         report = self._generate_report(features, symptom_scores, exceeded_thresholds)
-        if is_vowel:
+        if is_exam:
+            pass
+        elif is_vowel:
             report.append("- Интонация, громкость и темп речи не оценивались: это запись "
                           "протяжной гласной, для них нужна обычная речь.")
         else:
@@ -93,7 +98,7 @@ class SymptomAnalyzer:
         
         return {
             'symptom_scores': symptom_scores,
-            'recording_task': 'vowel' if is_vowel else 'speech',
+            'recording_task': 'exam' if is_exam else 'vowel' if is_vowel else 'speech',
             'pd_risk': pd_risk_data['risk_text'],  # Для обратной совместимости
             'pd_risk_data': pd_risk_data,  # Полные данные о риске
             'exceeded_thresholds': exceeded_thresholds,

@@ -136,6 +136,10 @@ def check_speech_protocol(tmp: str, results_dir: str) -> None:
     for rate, task in ((3.0, "phrase_slow"), (4.5, "phrase_normal"), (6.5, "phrase_fast")):
         add(task, syllable_train(sr, rate, 12))
     add("intonation", sf.read(speech_path)[0])
+    vowel = sf.read(vowel_path)[0]
+    add("glide", vowel)
+    add("soft", 0.1 * vowel)
+    add("vowel", vowel)
     path = os.path.join(tmp, "protocol.wav")
     sf.write(path, (0.5 * np.concatenate(parts)).astype(np.float32), sr)
 
@@ -152,6 +156,17 @@ def check_speech_protocol(tmp: str, results_dir: str) -> None:
     assert protocol["intonation"]["f0_range_st"] is not None, protocol["intonation"]
     assert any("Речевые задания" in line for line in result["report"]), result["report"]
     assert any("сонорные" in m for m in protocol["missing"]), protocol["missing"]
+
+    # Обследование: задания DSI и речевые задания в одной записи
+    dsi_segments = [seg for seg in segments if seg["task"] in ("mpt", "glide", "soft", "vowel")]
+    exam = analyzer.analyze_audio_file(path, save_raw=False,
+                                       device_info={"task": "exam", "dsi_segments": dsi_segments,
+                                                    "protocol_segments": segments})
+    assert exam["recording_task"] == "exam", exam["recording_task"]
+    assert exam["dsi"].get("measured") and exam["dsi"]["dsi_score"] is not None, exam["dsi"]
+    assert exam["speech_protocol"]["mpt"]["mpt_sec"] > 5.0, exam["speech_protocol"]
+    scores = exam["symptom_scores"]
+    assert scores["hoarseness"] is not None and scores["monopitch"] is not None, scores
     print("speech protocol: ok")
 
 

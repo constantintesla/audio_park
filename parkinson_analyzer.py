@@ -38,6 +38,9 @@ from robust_features import compute_cpps
 from dsi_protocol import parse_segments, segment_audio, measure_dsi_tasks, COMFORTABLE_SPL_SD_DB
 from speech_protocol import parse_protocol_segments, measure_speech_tasks, protocol_report
 
+# Признаки качества голоса: в обследовании они берутся по спокойной «а», а не по чтению
+VOWEL_FEATURES = ('jitter', 'shimmer', 'hnr', 'cpps')
+
 
 def model_offset_sd(protocol: Dict) -> float:
     """Разброс поправки модели, дБ (хранится в протоколе теста)"""
@@ -182,29 +185,38 @@ class ParkinsonAnalyzer:
             # с калибровкой устройства, если приложение ее передало
             # В тесте DSI голос оцениваем по спокойной «а», а параметры DSI -
             # по своим упражнениям (границы упражнений передает приложение)
+            # В речевых заданиях интонацию, темп и громкость оцениваем по чтению текста.
+            # Обследование (task='exam') - оба набора заданий в одной записи
+            task = device_info.get('task')
             dsi_segments = (parse_segments(device_info.get('dsi_segments'))
-                            if device_info.get('task') == 'dsi' else [])
-            # В речевых заданиях интонацию, темп и громкость оцениваем по чтению текста
+                            if task in ('dsi', 'exam') else [])
             protocol_segments = (parse_protocol_segments(device_info.get('protocol_segments'))
-                                 if device_info.get('task') == 'speech_protocol' else [])
-            feature_audio, feature_raw = audio, raw_audio
+                                 if task in ('speech_protocol', 'exam') else [])
+            spl_offset = device_info.get('spl_offset_db')
+            vowel = segment_audio(audio, sr, dsi_segments, 'vowel')
             reading = segment_audio(audio, sr, protocol_segments, 'reading')
-            if reading:
+            feature_audio, feature_raw = audio, raw_audio
+            if vowel:
+                feature_audio = np.concatenate(vowel)
+                feature_raw = np.concatenate(segment_audio(raw_audio, sr, dsi_segments, 'vowel'))
+            elif reading:
                 feature_audio = np.concatenate(reading)
                 feature_raw = np.concatenate(segment_audio(raw_audio, sr, protocol_segments, 'reading'))
-            if dsi_segments:
-                vowel = segment_audio(audio, sr, dsi_segments, 'vowel')
-                if vowel:
-                    feature_audio = np.concatenate(vowel)
-                    feature_raw = np.concatenate(segment_audio(raw_audio, sr, dsi_segments, 'vowel'))
             all_features = self.feature_extractor.extract_all_features(
-                feature_audio, level_audio=feature_raw,
-                spl_offset_db=device_info.get('spl_offset_db'))
+                feature_audio, level_audio=feature_raw, spl_offset_db=spl_offset)
             all_features['cpps_db'] = compute_cpps(feature_audio, sr)
+            if vowel and reading:
+                # Голос (jitter, shimmer, HNR, CPPS) - по спокойной «а», остальное - по чтению
+                speech_features = self.feature_extractor.extract_all_features(
+                    np.concatenate(reading),
+                    level_audio=np.concatenate(segment_audio(raw_audio, sr, protocol_segments, 'reading')),
+                    spl_offset_db=spl_offset)
+                all_features = {**speech_features,
+                                **{k: v for k, v in all_features.items() if k.startswith(VOWEL_FEATURES)}}
             dsi_protocol = None
             if dsi_segments:
                 dsi_protocol = measure_dsi_tasks(raw_audio, audio, sr, dsi_segments,
-                                                 device_info.get('spl_offset_db'), model_offset)
+                                                 spl_offset, model_offset)
                 for key in ('mpt_sec', 'f0_high_hz', 'i_low_db', 'i_low_dbfs', 'i_low_calibrated'):
                     all_features[key] = dsi_protocol[key]
             speech_protocol = measure_speech_tasks(audio, sr, protocol_segments) if protocol_segments else None
@@ -483,8 +495,9 @@ class ParkinsonAnalyzer:
     @staticmethod
     def _detect_recording_task(features: Dict[str, float], device_info: Dict) -> str:
         """
-        Тип записи: 'speech' (обычная речь), 'vowel' (протяжная гласная)
-        или 'dsi' (набор заданий для DSI).
+        Тип записи: 'speech' (обычная речь), 'vowel' (протяжная гласная),
+        'dsi' (набор заданий для DSI) или 'exam' (обследование: задания DSI и речевые
+        задания в одной записи, голос оценивается по гласной, интонация и темп - по чтению).
         
         Приложение может передать его в device_info['task']. Иначе определяем сами:
         в обычной речи тон прерывается на глухих согласных и паузах, а протяжная
@@ -493,7 +506,7 @@ class ParkinsonAnalyzer:
         task = str(device_info.get('task') or '').strip().lower()
         if task == 'speech_protocol':
             return 'speech'
-        if task in ('speech', 'vowel', 'dsi'):
+        if task in ('speech', 'vowel', 'dsi', 'exam'):
             return task
         longest = features.get('longest_voiced_sec', 0.0)
         voiced = features.get('voiced_sec', 0.0)
@@ -535,7 +548,7 @@ class ParkinsonAnalyzer:
         reasons = []
         if protocol and protocol['missing']:
             reasons.append("В тесте не хватает упражнений: " + ", ".join(protocol['missing']) + ".")
-        if task != 'dsi':
+        if task not in ('dsi', 'exam'):
             reasons.append("Нужна отдельная запись с заданиями DSI: самая долгая гласная «а» "
                            "на одном выдохе, скольжение голосом до самой высокой ноты и самый "
                            "тихий голос. По обычной записи эти величины не измеряются.")
