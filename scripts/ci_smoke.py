@@ -9,6 +9,7 @@ import tempfile
 
 import numpy as np
 import soundfile as sf
+from scipy.signal import lfilter as scipy_lfilter
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, ROOT)
@@ -170,6 +171,56 @@ def check_speech_protocol(tmp: str, results_dir: str) -> None:
     print("speech protocol: ok")
 
 
+def check_measurements() -> None:
+    """Измерения сходятся с заданными в синтетическом сигнале"""
+    import parselmouth
+    from parselmouth.praat import call
+    from feature_extractor import FeatureExtractor, syllable_nuclei
+
+    sr = 16000
+    rng = np.random.default_rng(2)
+    # Гласная из импульсов с заданным разбросом периода (0.5%) и амплитуды (5%)
+    signal, pos = np.zeros(sr * 3), 0
+    while pos < len(signal) - 200:
+        period = int(round(sr / 120 * (1 + 0.005 * rng.standard_normal())))
+        signal[pos] = 1 + 0.05 * rng.standard_normal()
+        pos += period
+    for f, bw in ((730, 80), (1150, 90), (2500, 120)):
+        r = np.exp(-np.pi * bw / sr)
+        signal = scipy_lfilter([1 - 2 * r * np.cos(2 * np.pi * f / sr) + r * r],
+                               [1, -2 * r * np.cos(2 * np.pi * f / sr), r * r], signal)
+    signal = 0.3 * signal / np.max(np.abs(signal))
+    features = FeatureExtractor(sample_rate=sr).extract_all_features(signal)
+    sound = parselmouth.Sound(signal / np.max(np.abs(signal)), sampling_frequency=sr)
+    pp = call(sound, "To PointProcess (periodic, cc)", 50, 500)
+    jitter = 100 * call(pp, "Get jitter (local)", 0, 0, 0.0001, 0.02, 1.3)
+    shimmer = 100 * call([sound, pp], "Get shimmer (local)", 0, 0, 0.0001, 0.02, 1.3, 1.6)
+    assert abs(features["jitter_percent"] - jitter) < 0.01, (features["jitter_percent"], jitter)
+    assert abs(features["shimmer_percent"] - shimmer) < 0.01 and shimmer > 3.0, (features["shimmer_percent"], shimmer)
+
+    # «ша-ша-ша»: шипящий шум перед каждым слогом - не отдельный слог
+    syllables = syllable_train(sr, 4.0, 12)
+    period = len(syllables) // 12
+    noise = rng.standard_normal(int(0.1 * sr)) * np.hanning(int(0.1 * sr))
+    noise = np.diff(noise, prepend=0.0)  # шум с подъемом к высоким частотам, как «ш»
+    noise *= 0.3 * np.sqrt(np.mean(syllables[:period] ** 2)) / np.sqrt(np.mean(noise ** 2))
+    for k in range(12):
+        start = k * period + int(0.6 * period)
+        syllables[start:start + len(noise)] += noise[:max(0, min(len(noise), len(syllables) - start))]
+    piece = np.concatenate([np.zeros(sr // 2), syllables, np.zeros(sr // 2)])
+    nuclei, _, _ = syllable_nuclei(piece, sr)
+    assert len(nuclei) == 12, f"слогов {len(nuclei)} вместо 12"
+
+    # Паузы в шумной комнате (шум на 25 дБ тише речи) не пропадают
+    phrase = syllable_train(sr, 5.0, 10)
+    speech = np.concatenate([phrase, np.zeros(sr // 2), phrase, np.zeros(sr // 2), phrase])
+    level = np.sqrt(np.mean(phrase ** 2))
+    speech += level * 10 ** (-25 / 20) * rng.standard_normal(len(speech))
+    _, _, pause_ratio = syllable_nuclei(speech, sr)
+    assert 0.1 < pause_ratio < 0.4, f"доля пауз {pause_ratio:.2f} в шумной записи"
+    print("measurements: ok")
+
+
 def check_device_model_stats() -> None:
     """Обычный уровень тестового звука и поправка громкости по модели устройства"""
     from device_model_stats import loop_gain_check, model_spl_offset
@@ -240,6 +291,7 @@ def main() -> None:
         check_analyzer(wav_path, os.path.join(tmp, "results"))
         check_recording_tasks(tmp, os.path.join(tmp, "results"))
         check_speech_protocol(tmp, os.path.join(tmp, "results"))
+        check_measurements()
         check_device_model_stats()
         # api.py пишет results.json и results/ в текущую папку, поэтому запускаем его во временной
         os.chdir(tmp)

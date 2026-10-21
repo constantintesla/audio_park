@@ -15,7 +15,7 @@ import numpy as np
 import parselmouth
 from scipy.signal import medfilt
 
-from feature_extractor import PRAAT_DB_AT_FULL_SCALE
+from feature_extractor import PRAAT_DB_AT_FULL_SCALE, frame_db
 
 DSI_TASKS = ('mpt', 'glide', 'soft', 'vowel')
 TASK_NAMES = {
@@ -67,19 +67,20 @@ def segment_audio(audio: np.ndarray, sr: int, segments: List[Dict], task: str) -
     return pieces
 
 
-def _phonation_time(piece: np.ndarray, sr: int) -> float:
+def _phonation_time(piece: np.ndarray, sr: int, floor_db: Optional[float] = None) -> float:
     """
     Самый длинный непрерывный звук в попытке, сек.
-    Звук - кадры не тише 25 дБ от громкой части попытки; провалы
-    до 0.2 с (вдох не успеть) не прерывают фонацию.
+    Звук - кадры не тише 25 дБ от громкой части попытки и не ближе 6 дБ к шуму
+    комнаты floor_db (noise_floor_db всей записи: сама попытка почти вся - голос,
+    по ней шум не оценить); провалы до 0.2 с (вдох не успеть) не прерывают фонацию.
     """
-    hop = int(0.01 * sr)
-    frame = int(0.025 * sr)
-    if len(piece) < frame:
+    db = frame_db(piece, sr)
+    if len(db) == 0:
         return 0.0
-    frames = np.lib.stride_tricks.sliding_window_view(piece, frame)[::hop]
-    db = 10 * np.log10(np.mean(frames ** 2, axis=1) + 1e-12)
-    loud = db > np.percentile(db, 95) - 25.0
+    threshold = np.percentile(db, 95) - 25.0
+    if floor_db is not None:
+        threshold = max(threshold, floor_db + 6.0)
+    loud = db > threshold
     max_gap = 20
     longest = current = gap = 0
     for is_loud in loud:
@@ -92,6 +93,19 @@ def _phonation_time(piece: np.ndarray, sr: int) -> float:
             current = gap = 0
         longest = max(longest, current)
     return longest * 0.01
+
+
+def noise_floor_db(audio: np.ndarray, sr: int) -> Optional[float]:
+    """
+    Шум комнаты по всей записи теста, дБ (10% самых тихих кадров).
+    Между попытками человек читает задание и молчит, так что тишины в записи много.
+    Если тихие кадры почти так же громки, как голос, тишины в записи нет - шум не оценить.
+    """
+    db = frame_db(audio, sr)
+    if len(db) == 0:
+        return None
+    floor = float(np.percentile(db, 10))
+    return floor if floor < np.percentile(db, 95) - 10.0 else None
 
 
 def _highest_f0(piece: np.ndarray, sr: int) -> float:
@@ -137,8 +151,9 @@ def measure_dsi_tasks(raw_audio: np.ndarray, audio: np.ndarray, sr: int,
         mpt_sec, f0_high_hz, i_low_dbfs, i_low_db, i_low_calibrated, а также
         missing (упражнения, которых нет в записи) и attempts (значения попыток)
     """
+    floor_db = noise_floor_db(audio, sr)
     attempts = {
-        'mpt': [round(_phonation_time(p, sr), 2) for p in segment_audio(audio, sr, segments, 'mpt')],
+        'mpt': [round(_phonation_time(p, sr, floor_db), 2) for p in segment_audio(audio, sr, segments, 'mpt')],
         'glide': [round(_highest_f0(p, sr), 1) for p in segment_audio(audio, sr, segments, 'glide')],
         'soft_dbfs': [],
     }
