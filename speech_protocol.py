@@ -21,9 +21,9 @@ from typing import Dict, List, Optional
 
 import numpy as np
 import parselmouth
-from scipy.signal import find_peaks
 
-from dsi_protocol import parse_segments, segment_audio, _phonation_time
+from dsi_protocol import parse_segments, segment_audio, _phonation_time, noise_floor_db
+from feature_extractor import frame_db, silence_threshold_db, syllable_nuclei
 
 SYLLABLE_TASKS = {
     'syl_sibilant': 'свистящие и шипящие (са-ша-за-жа)',
@@ -59,40 +59,6 @@ def parse_protocol_segments(raw) -> List[Dict]:
     return parse_segments(raw, tasks=PROTOCOL_TASKS, max_segments=MAX_SEGMENTS)
 
 
-def _syllable_nuclei(piece: np.ndarray, sr: int):
-    """
-    Ядра слогов как пики громкости (как rate_syl_sec в feature_extractor.py).
-
-    Returns:
-        (времена пиков в секундах, длительность звучания без пауз, доля пауз)
-    """
-    hop = int(0.01 * sr)
-    frame = int(0.025 * sr)
-    if len(piece) < frame + 10 * hop:
-        return np.array([]), 0.0, 0.0
-    frames = np.lib.stride_tricks.sliding_window_view(piece, frame)[::hop]
-    db = 10 * np.log10(np.mean(frames ** 2, axis=1) + 1e-12)
-    kernel = np.hanning(7)
-    db = np.convolve(db, kernel / kernel.sum(), mode='same')
-    threshold = np.percentile(db, 99) - 25.0
-    speech = db > threshold
-    idx = np.flatnonzero(speech)
-    if len(idx) == 0:
-        return np.array([]), 0.0, 0.0
-    first, last = idx[0], idx[-1] + 1
-    pause = run = 0
-    for is_speech in speech[first:last]:
-        if is_speech:
-            if run >= 25:  # пауза - тишина от 0.25 с
-                pause += run
-            run = 0
-        else:
-            run += 1
-    span = last - first
-    peaks, _ = find_peaks(db, height=threshold, prominence=3.0, distance=8)
-    return peaks * 0.01, (span - pause) * 0.01, pause / span if span else 0.0
-
-
 def _f0_semitones(piece: np.ndarray, sr: int) -> np.ndarray:
     """Тон озвонченных кадров в полутонах относительно медианы"""
     sound = parselmouth.Sound(piece / (np.max(np.abs(piece)) + 1e-10), sampling_frequency=sr)
@@ -109,12 +75,10 @@ def _f0_range_st(st: np.ndarray) -> Optional[float]:
 
 def _intensity_range_db(piece: np.ndarray, sr: int) -> Optional[float]:
     """Размах громкости звучащих кадров (5-95 перцентиль), дБ"""
-    hop, frame = int(0.01 * sr), int(0.025 * sr)
-    if len(piece) < frame:
+    db = frame_db(piece, sr)
+    if len(db) == 0:
         return None
-    frames = np.lib.stride_tricks.sliding_window_view(piece, frame)[::hop]
-    db = 10 * np.log10(np.mean(frames ** 2, axis=1) + 1e-12)
-    db = db[db > np.percentile(db, 99) - 25.0]
+    db = db[db > silence_threshold_db(db)]
     return round(float(np.percentile(db, 95) - np.percentile(db, 5)), 1) if len(db) >= 10 else None
 
 
@@ -123,7 +87,7 @@ def _syllable_series(piece: np.ndarray, sr: int) -> Dict:
     Повторение слогов: темп (слогов в секунду) и ровность (разброс интервалов между слогами).
     Паузы длиннее 0.6 с (между сериями) в ровность не входят.
     """
-    peaks, sounding, _ = _syllable_nuclei(piece, sr)
+    peaks, sounding, _ = syllable_nuclei(piece, sr)
     result = {'syllables': int(len(peaks)), 'rate_syl_sec': None, 'cv_percent': None,
               'duration_sec': round(len(piece) / sr, 1)}
     if len(peaks) >= 3:
@@ -137,7 +101,7 @@ def _syllable_series(piece: np.ndarray, sr: int) -> Dict:
 
 def _phrase_rate(piece: np.ndarray, sr: int) -> Optional[float]:
     """Темп артикуляции фразы, слогов в секунду без пауз"""
-    peaks, sounding, _ = _syllable_nuclei(piece, sr)
+    peaks, sounding, _ = syllable_nuclei(piece, sr)
     return round(float(len(peaks) / sounding), 1) if sounding > 0.3 and len(peaks) >= 3 else None
 
 
@@ -152,7 +116,8 @@ def measure_speech_tasks(audio: np.ndarray, sr: int, segments: List[Dict]) -> Di
     pieces = {task: segment_audio(audio, sr, segments, task) for task in PROTOCOL_TASKS}
     notes = []
 
-    mpt_attempts = [round(_phonation_time(p, sr), 2) for p in pieces['mpt']]
+    floor_db = noise_floor_db(audio, sr)
+    mpt_attempts = [round(_phonation_time(p, sr, floor_db), 2) for p in pieces['mpt']]
     mpt = {'mpt_sec': max(mpt_attempts, default=None), 'attempts': mpt_attempts}
     if mpt['mpt_sec'] is not None and mpt['mpt_sec'] < MPT_SHORT_SEC:
         notes.append(f"Долгая «а» длится {mpt['mpt_sec']:.1f} с: заметно короче обычного "
@@ -162,7 +127,7 @@ def measure_speech_tasks(audio: np.ndarray, sr: int, segments: List[Dict]) -> Di
     reading = None
     if pieces['reading']:
         piece = np.concatenate(pieces['reading'])
-        peaks, sounding, pause_ratio = _syllable_nuclei(piece, sr)
+        peaks, sounding, pause_ratio = syllable_nuclei(piece, sr)
         st = _f0_semitones(piece, sr)
         reading = {
             'duration_sec': round(len(piece) / sr, 1),
