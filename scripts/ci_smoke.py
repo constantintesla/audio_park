@@ -281,6 +281,28 @@ def check_api(wav_path: str) -> None:
     assert result["quality"]["metrics"]["noise_floor_source"] == "app_calibration"
     cal_path = result["raw_data"]["files"].get("calibration_audio")
     assert cal_path and os.path.exists(cal_path), "файл калибровки не сохранен"
+
+    # Обследование: запись каждой попытки отдельно и архив прогона
+    segments = [{"task": "mpt", "start_sec": 0.0, "end_sec": 1.5}, {"task": "vowel", "start_sec": 1.5, "end_sec": 3.0}]
+    data = {"file": (io.BytesIO(audio), "exam.wav"), "username": "ci",
+            "device_info": json.dumps({"task": "exam", "dsi_segments": segments,
+                                       "protocol_segments": segments[:1]}),
+            "calibration_file": (io.BytesIO(audio), "calibration.wav")}
+    result = client.post("/api/analyze", data=data, content_type="multipart/form-data").get_json()
+    attempts = result["task_recordings"]
+    assert [a["task"] for a in attempts] == ["mpt", "vowel"], attempts  # долгая «а» в обоих списках - одна попытка
+    clip = client.get(f"/api/audio/{result['_index']}/task/1")
+    assert clip.status_code == 200, clip.status_code
+    piece, sr = sf.read(io.BytesIO(clip.data))
+    assert abs(len(piece) / sr - 1.5) < 0.01, len(piece) / sr
+    listed = client.get("/api/results").get_json()["results"]
+    assert any(r["_index"] == result["_index"] and len(r["task_recordings"]) == 2 for r in listed)
+    archive = client.get(f"/api/archive/{result['_index']}")
+    assert archive.status_code == 200 and "attachment" in archive.headers["Content-Disposition"]
+    import zipfile
+    names = zipfile.ZipFile(io.BytesIO(archive.data)).namelist()
+    for name in ("recording.wav", "calibration.wav", "results.json", "tasks/01_mpt_1.wav", "tasks/02_vowel_1.wav"):
+        assert name in names, names
     print("api: ok")
 
 

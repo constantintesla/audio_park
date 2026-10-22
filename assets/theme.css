@@ -1189,3 +1189,139 @@ main {
         height: 300px;
     }
 }
+
+/* Блок «задание — запись» в результатах */
+.task-rec-full {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    flex-wrap: wrap;
+    padding-bottom: 14px;
+    margin-bottom: 4px;
+    border-bottom: 1px solid var(--border);
+}
+
+.task-rec-full:last-child {
+    border-bottom: 0;
+    padding-bottom: 0;
+    margin-bottom: 0;
+}
+
+.task-rec {
+    padding: 14px 0;
+    border-bottom: 1px solid var(--border);
+}
+
+.task-rec:last-child {
+    border-bottom: 0;
+    padding-bottom: 0;
+}
+
+.task-rec-head {
+    display: flex;
+    gap: 12px;
+    align-items: flex-start;
+}
+
+.task-rec-head h6 {
+    margin: 2px 0 2px;
+    font-weight: 600;
+}
+
+.task-rec-num {
+    flex: 0 0 26px;
+    height: 26px;
+    border-radius: 50%;
+    background: var(--accent-soft);
+    color: var(--accent);
+    font-size: 13px;
+    font-weight: 600;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+}
+
+.task-rec-say {
+    margin: 0;
+    color: var(--text-muted);
+    font-size: 14px;
+}
+
+.task-rec-tries {
+    list-style: none;
+    margin: 10px 0 0 38px;
+    padding: 0;
+    display: grid;
+    grid-template-columns: minmax(0, 1fr);
+    gap: 8px;
+}
+
+.task-rec-try {
+    background: var(--surface-muted);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+    padding: 8px 10px;
+}
+
+.task-rec-try-head {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    flex-wrap: wrap;
+    font-size: 14px;
+}
+
+.task-rec-try-label {
+    font-weight: 500;
+    font-size: 14px;
+}
+
+.task-rec-value {
+    color: var(--text);
+    font-variant-numeric: tabular-nums;
+}
+
+.task-rec-phrase {
+    margin: 4px 0 0;
+    font-size: 14px;
+    color: var(--text-muted);
+}
+
+.task-rec-player {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    margin-top: 6px;
+}
+
+.task-rec-card audio {
+    height: 34px;
+    flex: 1 1 auto;
+    min-width: 0;
+    max-width: 420px;
+}
+
+@media (max-width: 576px) {
+    .task-rec-tries {
+        margin-left: 0;
+    }
+}
+
+@media (min-width: 768px) {
+    .task-rec-try {
+        display: grid;
+        grid-template-columns: minmax(0, 1fr) auto;
+        column-gap: 16px;
+        align-items: center;
+    }
+
+    .task-rec-try .task-rec-player {
+        grid-column: 2;
+        grid-row: 1 / span 2;
+        margin-top: 0;
+    }
+
+    .task-rec-try audio {
+        width: 320px;
+    }
+}

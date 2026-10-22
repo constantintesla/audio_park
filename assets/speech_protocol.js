@@ -57,10 +57,12 @@ function renderSpeechProtocolCard(sp) {
         </div>`;
 }
 
-// Карточки DSI и речевых заданий. renderDsiCard объявлена на каждой странице
+// Записи заданий, карточки DSI и речевых заданий. renderDsiCard объявлена на каждой странице,
+// renderTaskRecordings - в exam_tasks.js
 function renderTestCards(result) {
     const sp = result.speech_protocol;
+    const recordings = renderTaskRecordings(result);
     // В записи только с речевыми заданиями DSI не измерялся
-    if (sp && result.recording_task !== 'exam') return renderSpeechProtocolCard(sp);
-    return renderDsiCard(result.dsi || {}) + renderSpeechProtocolCard(sp);
+    if (sp && result.recording_task !== 'exam') return recordings + renderSpeechProtocolCard(sp);
+    return recordings + renderDsiCard(result.dsi || {}) + renderSpeechProtocolCard(sp);
 }
