@@ -19,7 +19,7 @@ import librosa
 from scipy import signal
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
-from feature_extractor import FeatureExtractor  # noqa: E402
+from app.feature_extractor import FeatureExtractor  # noqa: E402
 from spectral_equalizer import SpectralEqualizer  # noqa: E402
 
 SR_SYNTH = 44100

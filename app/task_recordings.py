@@ -15,8 +15,8 @@ from typing import Dict, List, Optional
 import numpy as np
 import soundfile as sf
 
-from dsi_protocol import TASK_NAMES as DSI_TASK_NAMES
-from speech_protocol import TASK_NAMES as SPEECH_TASK_NAMES, SYLLABLE_TASKS
+from app.dsi_protocol import TASK_NAMES as DSI_TASK_NAMES
+from app.speech_protocol import TASK_NAMES as SPEECH_TASK_NAMES, SYLLABLE_TASKS
 
 TASK_NAMES = {**SPEECH_TASK_NAMES, **DSI_TASK_NAMES, 'mpt': SPEECH_TASK_NAMES['mpt']}
 

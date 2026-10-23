@@ -30,13 +30,13 @@ try:
 except ImportError:
     HAS_MATPLOTLIB = False
 
-from audio_processor import AudioProcessor
-from feature_extractor import FeatureExtractor
-from symptom_analyzer import SymptomAnalyzer
-from recording_quality import assess_recording_quality
-from robust_features import compute_cpps
-from dsi_protocol import parse_segments, segment_audio, measure_dsi_tasks, COMFORTABLE_SPL_SD_DB
-from speech_protocol import parse_protocol_segments, measure_speech_tasks, protocol_report
+from app.audio_processor import AudioProcessor
+from app.feature_extractor import FeatureExtractor
+from app.symptom_analyzer import SymptomAnalyzer
+from app.recording_quality import assess_recording_quality
+from app.robust_features import compute_cpps
+from app.dsi_protocol import parse_segments, segment_audio, measure_dsi_tasks, COMFORTABLE_SPL_SD_DB
+from app.speech_protocol import parse_protocol_segments, measure_speech_tasks, protocol_report
 
 # Признаки качества голоса: в обследовании они берутся по спокойной «а», а не по чтению
 VOWEL_FEATURES = ('jitter', 'shimmer', 'hnr', 'cpps')

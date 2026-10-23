@@ -30,4 +30,4 @@ RUN mkdir -p /app/results && \
 EXPOSE 5000
 
 # Команда по умолчанию (запуск API)
-CMD ["python", "start_api.py"]
+CMD ["python", "-m", "app"]

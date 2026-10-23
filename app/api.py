@@ -10,12 +10,12 @@ from flask import Flask, request, jsonify, send_from_directory, Response
 from flask_cors import CORS
 import logging
 import numpy as np
-from dsi_protocol import parse_segments
-from speech_protocol import parse_protocol_segments
-from device_model_stats import loop_gain_check, model_spl_offset
+from app.dsi_protocol import parse_segments
+from app.speech_protocol import parse_protocol_segments
+from app.device_model_stats import loop_gain_check, model_spl_offset
 
-from speaker_baseline import compare_to_baseline
-from task_recordings import task_attempts, source_audio, clip_wav, clip_filename, build_archive
+from app.speaker_baseline import compare_to_baseline
+from app.task_recordings import task_attempts, source_audio, clip_wav, clip_filename, build_archive
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -24,7 +24,10 @@ app = Flask(__name__)
 # Разрешить CORS для веб-интерфейса со всех источников для всех маршрутов
 CORS(app, resources={r"/*": {"origins": "*"}})
 
-# Путь к файлу для хранения результатов
+# Страницы веб-интерфейса и assets/
+WEB_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 'web')
+
+# Данные хранятся в текущей папке (в контейнере это /app, туда смонтированы тома)
 RESULTS_FILE = "results.json"
 RESULTS_DIR = "results"
 
@@ -207,7 +210,7 @@ def save_calibration_audio(file, result: Dict) -> None:
 def analyze_audio():
     """Анализ аудиофайла с сохранением сырых данных"""
     try:
-        from parkinson_analyzer import ParkinsonAnalyzer
+        from app.parkinson_analyzer import ParkinsonAnalyzer
         
         # Проверка наличия файла
         if 'file' not in request.files:
@@ -373,7 +376,7 @@ def get_results():
 def recalculate_all():
     """Пересчет всех результатов с обновленными параметрами (без капов и фолбеков)"""
     try:
-        from parkinson_analyzer import ParkinsonAnalyzer
+        from app.parkinson_analyzer import ParkinsonAnalyzer
         
         logger.info("🔄 Начало пересчета всех результатов...")
         results = load_results()
@@ -555,7 +558,7 @@ def get_visualization_data(index: int):
         
         if audio_file_for_f0:
             try:
-                from audio_processor import AudioProcessor
+                from app.audio_processor import AudioProcessor
                 import librosa
                 import numpy as np
                 
@@ -742,7 +745,7 @@ def get_audio_file(index: int):
         # Пробуем обработанный аудио
         processed_audio = raw_data.get('files', {}).get('processed_audio')
         if processed_audio and os.path.exists(processed_audio):
-            return send_from_directory(os.path.dirname(processed_audio), 
+            return send_from_directory(os.path.abspath(os.path.dirname(processed_audio)), 
                                      os.path.basename(processed_audio),
                                      mimetype='audio/wav')
         
@@ -756,7 +759,7 @@ def get_audio_file(index: int):
                 '.mp3': 'audio/mpeg'
             }
             mimetype = mimetype_map.get(ext, 'audio/wav')
-            return send_from_directory(os.path.dirname(original_audio),
+            return send_from_directory(os.path.abspath(os.path.dirname(original_audio)),
                                      os.path.basename(original_audio),
                                      mimetype=mimetype)
         
@@ -851,19 +854,19 @@ def is_recent(result: Dict, days: int = 7) -> bool:
 @app.route('/')
 def index():
     """Главная страница - отдача index.html"""
-    return send_from_directory('.', 'index.html')
+    return send_from_directory(WEB_DIR, 'index.html')
 
 
 @app.route('/results')
 def results_page():
     """Страница со списком всех результатов"""
-    return send_from_directory('.', 'results.html')
+    return send_from_directory(WEB_DIR, 'results.html')
 
 
 @app.route('/visualization')
 def visualization():
     """Страница визуализации параметров"""
-    return send_from_directory('.', 'visualization.html')
+    return send_from_directory(WEB_DIR, 'visualization.html')
 
 
 @app.route('/api/export/csv', methods=['GET'])
@@ -1235,21 +1238,15 @@ def generate_html_report(results: List[Dict]) -> str:
     return html
 
 
-PUBLIC_PAGES = {'index.html', 'results.html', 'visualization.html'}
-
-
 @app.route('/<path:path>')
 def serve_static(path):
     """Отдача статических файлов"""
     try:
-        # Наружу отдаются только страницы и assets/: иначе по прямой ссылке
-        # можно было бы скачать results.json, .env или исходный код
+        # Отдаются только файлы из web/: данные и исходники лежат вне ее
         if path.startswith('api/'):
             return jsonify({"error": "Неверный маршрут"}), 404
-        if not (path.startswith('assets/') or path in PUBLIC_PAGES):
-            return jsonify({"error": "Файл не найден"}), 404
         
-        return send_from_directory('.', path)
+        return send_from_directory(WEB_DIR, path)
     except Exception as e:
         logger.error(f"Ошибка при отдаче статического файла {path}: {e}")
         # Для несуществующих файлов возвращаем 404, а не 500

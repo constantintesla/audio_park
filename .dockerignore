@@ -6,7 +6,6 @@ scripts/
 *.md
 Dockerfile
 docker-compose*.yml
-START_LOCAL.*
 
 # Python
 __pycache__/

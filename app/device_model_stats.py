@@ -19,7 +19,7 @@ from typing import Dict, List, Optional
 
 import numpy as np
 
-from dsi_protocol import COMFORTABLE_SPL_DB
+from app.dsi_protocol import COMFORTABLE_SPL_DB
 
 MIN_LOOP_RECORDINGS = 3     # записей модели с калибровкой, чтобы знать обычный уровень свипа
 LOOP_GAIN_TOLERANCE_DB = 6  # отличие больше - предупреждаем

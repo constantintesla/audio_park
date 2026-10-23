@@ -48,7 +48,7 @@ def make_speech(path: str, sr: int = 22050, seconds: float = 4.0) -> None:
 
 def check_recording_tasks(tmp: str, results_dir: str) -> None:
     """DSI и охриплость считаются только там, где их можно измерить"""
-    from parkinson_analyzer import ParkinsonAnalyzer
+    from app.parkinson_analyzer import ParkinsonAnalyzer
 
     analyzer = ParkinsonAnalyzer(save_raw_data=False, raw_data_dir=results_dir)
     vowel_path = os.path.join(tmp, "vowel.wav")
@@ -115,7 +115,7 @@ def syllable_train(sr: int, rate: float, count: int, f0: float = 130.0) -> np.nd
 
 def check_speech_protocol(tmp: str, results_dir: str) -> None:
     """Речевые задания: каждое задание меряется по своему куску записи"""
-    from parkinson_analyzer import ParkinsonAnalyzer
+    from app.parkinson_analyzer import ParkinsonAnalyzer
 
     sr = 22050
     vowel_path = os.path.join(tmp, "vowel6.wav")
@@ -175,7 +175,7 @@ def check_measurements() -> None:
     """Измерения сходятся с заданными в синтетическом сигнале"""
     import parselmouth
     from parselmouth.praat import call
-    from feature_extractor import FeatureExtractor, syllable_nuclei
+    from app.feature_extractor import FeatureExtractor, syllable_nuclei
 
     sr = 16000
     rng = np.random.default_rng(2)
@@ -223,7 +223,7 @@ def check_measurements() -> None:
 
 def check_device_model_stats() -> None:
     """Обычный уровень тестового звука и поправка громкости по модели устройства"""
-    from device_model_stats import loop_gain_check, model_spl_offset
+    from app.device_model_stats import loop_gain_check, model_spl_offset
 
     info = {"device_model": "Pixel 7", "mic_mode": "unprocessed", "device_id": "me"}
     history = [{"device_info": {"device_model": "Pixel 7", "mic_mode": "unprocessed", "device_id": f"d{i}"},
@@ -241,7 +241,7 @@ def check_device_model_stats() -> None:
 
 
 def check_analyzer(wav_path: str, results_dir: str) -> None:
-    from parkinson_analyzer import ParkinsonAnalyzer
+    from app.parkinson_analyzer import ParkinsonAnalyzer
 
     analyzer = ParkinsonAnalyzer(save_raw_data=False, raw_data_dir=results_dir)
     result = analyzer.analyze_audio_file(wav_path, save_raw=False, result_id="ci_smoke")
@@ -253,7 +253,7 @@ def check_analyzer(wav_path: str, results_dir: str) -> None:
 
 
 def check_api(wav_path: str) -> None:
-    import api
+    from app import api
 
     client = api.app.test_client()
     for route in ("/", "/results", "/visualization", "/api/results", "/api/stats",
