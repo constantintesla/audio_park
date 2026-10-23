@@ -6,7 +6,7 @@
 - NIH 2025 (12 вокальных биомаркеров)
 """
 import numpy as np
-from typing import Dict, List, Tuple
+from typing import Dict, List
 
 
 class SymptomAnalyzer:

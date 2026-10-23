@@ -23,7 +23,7 @@ except ImportError:
 try:
     from api import app
 except ImportError as e:
-    print("Ошибка: Flask не установлен")
+    print(f"Ошибка: не установлена зависимость ({e})")
     print("Установите зависимости: pip install -r requirements.txt")
     sys.exit(1)
 

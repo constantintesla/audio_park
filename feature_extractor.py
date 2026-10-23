@@ -273,7 +273,6 @@ class FeatureExtractor:
         
         # Уровень 1: Базовая фильтрация через IQR (межквартильный размах)
         # Используем более мягкий порог: 2.5 * IQR вместо 1.5 * IQR
-        median_f0 = np.median(f0_values)
         q1 = np.percentile(f0_values, 25)
         q3 = np.percentile(f0_values, 75)
         iqr = q3 - q1
@@ -321,7 +320,6 @@ class FeatureExtractor:
         if len(filtered_f0) < 2:
             # Если фильтрация удалила слишком много, используем исходные значения с мягкой фильтрацией
             if len(f0_values) > 10:
-                median_f0 = np.median(f0_values)
                 q1 = np.percentile(f0_values, 25)
                 q3 = np.percentile(f0_values, 75)
                 iqr = q3 - q1
@@ -595,7 +593,6 @@ class FeatureExtractor:
                         search_region = autocorr[min_lag:max_lag]
                         if len(search_region) > 0:
                             peak_idx = np.argmax(search_region) + min_lag
-                            peak_value = autocorr[peak_idx]
                             
                             # Энергия вокруг пика (гармоническая)
                             peak_width = max(2, int(self.sample_rate / 2000))  # ±0.5ms вокруг пика

@@ -8,7 +8,7 @@ import numpy as np
 import os
 import shutil
 from datetime import datetime
-from typing import Dict, Optional, List, Tuple, Any
+from typing import Dict, Optional, List, Any
 import argparse
 import sys
 import logging
@@ -649,28 +649,6 @@ class ParkinsonAnalyzer:
                              "Повышен" if i_low_db > 55 else "Нормальный" if i_low_db <= 45 else "Пограничный"),
             "jitter_status": "Высокий" if jitter_percent > 1.5 else "Нормальный" if jitter_percent < 1.0 else "Повышен",
         }
-    
-    def _average_features(self, feature_list: list) -> Dict:
-        """Усреднение признаков из нескольких сегментов"""
-        if not feature_list:
-            return {}
-        
-        averaged = {}
-        keys = set()
-        
-        # Собираем все ключи
-        for feat in feature_list:
-            keys.update(feat.keys())
-        
-        # Усредняем по каждому ключу
-        for key in keys:
-            values = [feat.get(key, 0) for feat in feature_list if feat.get(key, 0) != 0]
-            if values:
-                averaged[key] = np.mean(values)
-            else:
-                averaged[key] = 0.0
-        
-        return averaged
     
     def _generate_waveform_base64(self, audio: np.ndarray, sr: int) -> Optional[str]:
         """Генерация base64 изображения волновой формы"""

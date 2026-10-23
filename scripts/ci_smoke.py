@@ -256,9 +256,14 @@ def check_api(wav_path: str) -> None:
     import api
 
     client = api.app.test_client()
-    for route in ("/", "/results", "/visualization", "/api/results", "/api/stats"):
+    for route in ("/", "/results", "/visualization", "/api/results", "/api/stats",
+                  "/assets/theme.css", "/assets/exam_tasks.js"):
         resp = client.get(route)
         assert resp.status_code == 200, f"GET {route} -> {resp.status_code}"
+    # Данные и исходники по прямой ссылке не отдаются
+    for route in ("/results.json", "/api.py", "/.env", "/requirements.txt"):
+        resp = client.get(route)
+        assert resp.status_code == 404, f"GET {route} -> {resp.status_code}, ожидался 404"
     with open(wav_path, "rb") as f:
         data = {"file": (io.BytesIO(f.read()), "ci_smoke.wav"), "username": "ci"}
     resp = client.post("/api/analyze", data=data, content_type="multipart/form-data")
