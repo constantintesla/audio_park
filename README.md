@@ -45,10 +45,10 @@ docker compose up -d --build
 
 ```bash
 pip install -r requirements.txt
-python start_api.py
+python -m app
 ```
 
-На Windows то же самое делает `START_LOCAL.bat`, на Linux/Mac — `./START_LOCAL.sh`.
+На Windows то же самое делает `scripts\START_LOCAL.bat`, на Linux/Mac — `./scripts/START_LOCAL.sh`.
 
 ### Проверка
 
@@ -62,11 +62,11 @@ python scripts/ci_smoke.py
 ### Из командной строки и из кода
 
 ```bash
-python parkinson_analyzer.py audio_file.wav -o report.json
+python -m app.parkinson_analyzer audio_file.wav -o report.json
 ```
 
 ```python
-from parkinson_analyzer import ParkinsonAnalyzer
+from app.parkinson_analyzer import ParkinsonAnalyzer
 
 result = ParkinsonAnalyzer().analyze_audio_file("audio.wav")
 ```
@@ -127,27 +127,27 @@ DSI коррелирует с Voice Handicap Index и идеален для мо
 
 ```
 audio_park/
-├── api.py                 # Flask: веб-страницы и API
-├── start_api.py           # Запуск сервера (читает .env)
-├── parkinson_analyzer.py  # Основной анализатор: загрузка → признаки → симптомы → отчет
-├── audio_processor.py     # Загрузка, ресемплинг до 16 кГц, нормализация громкости (LUFS)
-├── feature_extractor.py   # Акустические признаки (jitter, shimmer, HNR, F0, темп, паузы…)
-├── symptom_analyzer.py    # Оценка симптомов 0-3 и риска ПД
-├── recording_quality.py   # Качество записи (SNR, клиппинг, длительность)
-├── robust_features.py     # Признаки, устойчивые к устройству (CPPS)
-├── speaker_baseline.py    # Сравнение с прошлыми записями человека на том же устройстве
-├── dsi_protocol.py        # Задания DSI: MPT, F0-High, I-Low
-├── speech_protocol.py     # Речевые задания (чтение, слоги, фразы, интонация)
-├── task_recordings.py     # Записи отдельных попыток и ZIP-архив прогона
-├── device_model_stats.py  # Поправка громкости по модели устройства
-├── index.html, results.html, visualization.html   # Страницы веб-интерфейса
-├── assets/                # CSS и JS для страниц
-├── scripts/ci_smoke.py    # Smoke-тест для CI
-├── experiments/           # Исследования, в рабочем сервере не используются
-│                          # (выравнивание АЧХ устройств: spectral_equalizer.py, eq_device_sim.py)
-├── .github/workflows/     # CI: smoke-тест и выкладка на сервер
-├── Dockerfile, docker-compose.yml       # Локальный запуск в Docker
-└── docker-compose.prod.yml              # Конфигурация сервера (используется при выкладке)
+├── app/                       # Код сервера (Python-пакет)
+│   ├── __main__.py            # Запуск: python -m app (читает .env)
+│   ├── api.py                 # Flask: веб-страницы и API
+│   ├── parkinson_analyzer.py  # Основной анализатор: загрузка → признаки → симптомы → отчет
+│   ├── audio_processor.py     # Загрузка, ресемплинг до 16 кГц, нормализация громкости (LUFS)
+│   ├── feature_extractor.py   # Акустические признаки (jitter, shimmer, HNR, F0, темп, паузы…)
+│   ├── symptom_analyzer.py    # Оценка симптомов 0-3 и риска ПД
+│   ├── recording_quality.py   # Качество записи (SNR, клиппинг, длительность)
+│   ├── robust_features.py     # Признаки, устойчивые к устройству (CPPS)
+│   ├── speaker_baseline.py    # Сравнение с прошлыми записями человека на том же устройстве
+│   ├── dsi_protocol.py        # Задания DSI: MPT, F0-High, I-Low
+│   ├── speech_protocol.py     # Речевые задания (чтение, слоги, фразы, интонация)
+│   ├── task_recordings.py     # Записи отдельных попыток и ZIP-архив прогона
+│   └── device_model_stats.py  # Поправка громкости по модели устройства
+├── web/                       # Веб-интерфейс: index.html, results.html, visualization.html, assets/
+├── scripts/                   # ci_smoke.py (тест для CI), START_LOCAL.sh / .bat (запуск без Docker)
+├── experiments/               # Исследования, в рабочем сервере не используются
+│                              # (выравнивание АЧХ устройств: spectral_equalizer.py, eq_device_sim.py)
+├── .github/workflows/         # CI: smoke-тест и выкладка на сервер
+├── Dockerfile, docker-compose.yml   # Локальный запуск в Docker
+└── docker-compose.prod.yml          # Конфигурация сервера (используется при выкладке)
 ```
 
 Данные (`results.json` и папка `results/`) создаются при работе и в git не хранятся.
