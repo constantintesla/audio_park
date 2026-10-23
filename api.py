@@ -16,6 +16,7 @@ from speech_protocol import parse_protocol_segments
 from device_model_stats import loop_gain_check, model_spl_offset
 
 from speaker_baseline import compare_to_baseline
+from task_recordings import task_attempts, source_audio, clip_wav, clip_filename, build_archive
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -264,6 +265,9 @@ def analyze_audio():
             cleaned_result = clean_json_values(result)
             results.append(cleaned_result)
             save_results(results)
+            # В ответ (не в файл): индекс для ссылок на записи заданий и сами попытки
+            result['_index'] = len(results) - 1
+            result['task_recordings'] = task_attempts(cleaned_result)
             
             # Проверяем наличие сырых данных в результате
             if 'raw_data' in result:
@@ -346,6 +350,7 @@ def get_results():
             # Не мутируем исходный объект, чтобы не портить данные на диске
             result_with_index = dict(result)
             result_with_index['_index'] = original_index
+            result_with_index['task_recordings'] = task_attempts(result)
             indexed_results.append(result_with_index)
         
         # Сортировка по дате (новые первыми), но индекс остаётся исходным
@@ -461,7 +466,10 @@ def get_result(index: int):
         if index < 0 or index >= len(results):
             return jsonify({"error": "Индекс вне диапазона"}), 404
         
-        return jsonify(results[index]), 200
+        result = dict(results[index])
+        result['_index'] = index
+        result['task_recordings'] = task_attempts(result)
+        return jsonify(result), 200
         
     except Exception as e:
         logger.error(f"Ошибка получения результата: {e}")
@@ -761,6 +769,54 @@ def get_audio_file(index: int):
         
     except Exception as e:
         logger.error(f"Ошибка получения аудиофайла: {e}")
+        return jsonify({"error": str(e)}), 500
+
+
+def _download_name(result: Dict, index: int) -> str:
+    """Имя архива: пользователь и время записи (латиница и цифры, чтобы не ломать заголовок)"""
+    info = result.get('user_info') or {}
+    stamp = ''.join(ch for ch in str(info.get('timestamp', ''))[:16] if ch.isdigit())
+    user = ''.join(ch for ch in str(info.get('tg_username', '')) if ch.isascii() and (ch.isalnum() or ch in '-_'))
+    return '_'.join(part for part in ('audio_park', user, stamp or str(index)) if part)
+
+
+@app.route('/api/audio/<int:index>/task/<int:n>', methods=['GET'])
+def get_task_audio(index: int, n: int):
+    """Запись одной попытки задания; ?download=1 - скачать файлом"""
+    try:
+        results = load_results()
+        if index < 0 or index >= len(results):
+            return jsonify({"error": "Индекс вне диапазона"}), 404
+        result = results[index]
+        attempts = task_attempts(result)
+        source = source_audio(result)
+        if n < 0 or n >= len(attempts) or not source:
+            return jsonify({"error": "Запись задания не найдена"}), 404
+        item = attempts[n]
+        headers = {}
+        if request.args.get('download'):
+            name = f"{_download_name(result, index)}_{clip_filename(item)}"
+            headers['Content-Disposition'] = f'attachment; filename="{name}"'
+        return Response(clip_wav(source, item['start_sec'], item['end_sec']),
+                        mimetype='audio/wav', headers=headers)
+    except Exception as e:
+        logger.error(f"Ошибка получения записи задания: {e}", exc_info=True)
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route('/api/archive/<int:index>', methods=['GET'])
+def get_archive(index: int):
+    """ZIP всего прогона: запись целиком, записи заданий и results.json"""
+    try:
+        results = load_results()
+        if index < 0 or index >= len(results):
+            return jsonify({"error": "Индекс вне диапазона"}), 404
+        result = results[index]
+        name = _download_name(result, index) + '.zip'
+        return Response(build_archive(result), mimetype='application/zip',
+                        headers={'Content-Disposition': f'attachment; filename="{name}"'})
+    except Exception as e:
+        logger.error(f"Ошибка сборки архива: {e}", exc_info=True)
         return jsonify({"error": str(e)}), 500
 
 

@@ -239,6 +239,8 @@ audio_park/
 - `GET /api/stats` - Получить статистику
 - `GET /api/visualization/<index>` - Получить данные для визуализации
 - `GET /api/audio/<index>` - Получить аудиофайл
+- `GET /api/audio/<index>/task/<n>` - Запись одной попытки задания обследования (`?download=1` - скачать), список попыток - поле `task_recordings` в `/api/results`
+- `GET /api/archive/<index>` - ZIP всего прогона: вся запись, калибровка, записи заданий (`tasks/`) и `results.json`
 - `GET /api/export/csv` - Экспорт результатов в CSV
 - `GET /api/export/json` - Экспорт результатов в JSON
 - `GET /api/export/html` - Экспорт результатов в HTML отчет
