@@ -3,7 +3,6 @@ API сервер для сохранения и получения резуль�
 """
 import os
 import json
-import csv
 import math
 from datetime import datetime
 from typing import List, Dict, Any, Optional
@@ -209,7 +208,6 @@ def analyze_audio():
     """Анализ аудиофайла с сохранением сырых данных"""
     try:
         from parkinson_analyzer import ParkinsonAnalyzer
-        from datetime import datetime
         
         # Проверка наличия файла
         if 'file' not in request.files:
@@ -376,7 +374,6 @@ def recalculate_all():
     """Пересчет всех результатов с обновленными параметрами (без капов и фолбеков)"""
     try:
         from parkinson_analyzer import ParkinsonAnalyzer
-        from datetime import datetime
         
         logger.info("🔄 Начало пересчета всех результатов...")
         results = load_results()
@@ -559,12 +556,10 @@ def get_visualization_data(index: int):
         if audio_file_for_f0:
             try:
                 from audio_processor import AudioProcessor
-                from feature_extractor import FeatureExtractor
                 import librosa
                 import numpy as np
                 
                 audio_processor = AudioProcessor(target_sr=16000)
-                feature_extractor = FeatureExtractor(sample_rate=16000)
                 
                 # Загрузка аудио
                 audio, sr = audio_processor.load_audio(audio_file_for_f0)
@@ -1240,13 +1235,19 @@ def generate_html_report(results: List[Dict]) -> str:
     return html
 
 
+PUBLIC_PAGES = {'index.html', 'results.html', 'visualization.html'}
+
+
 @app.route('/<path:path>')
 def serve_static(path):
     """Отдача статических файлов"""
     try:
-        # Игнорируем запросы к API маршрутам
+        # Наружу отдаются только страницы и assets/: иначе по прямой ссылке
+        # можно было бы скачать results.json, .env или исходный код
         if path.startswith('api/'):
             return jsonify({"error": "Неверный маршрут"}), 404
+        if not (path.startswith('assets/') or path in PUBLIC_PAGES):
+            return jsonify({"error": "Файл не найден"}), 404
         
         return send_from_directory('.', path)
     except Exception as e:

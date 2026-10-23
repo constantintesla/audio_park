@@ -27,106 +27,48 @@
 - Пересчет всех результатов с обновленными алгоритмами
 - Экспорт результатов (CSV, JSON, HTML)
 
-## Установка
+## Запуск
 
-### Вариант 1: Docker (рекомендуется)
+Рабочий сервер обновляется сам: после слияния в `main` GitHub Actions проверяет код
+и выкладывает его на lab-сервер (https://msr25.ru/audio_park/). Подробнее — в [DEPLOY.md](DEPLOY.md).
 
-**Локальная разработка:**
+### Локально в Docker
+
 ```bash
-# Создайте .env файл
 cp env.example .env
-
-# Запустите
-docker-compose --env-file .env up -d
+docker compose up -d --build
 ```
 
-**Production (хостинг):**
-```bash
-# Используйте production конфигурацию
-docker-compose -f docker-compose.prod.yml --env-file .env up -d --build
-```
+Веб-интерфейс: http://localhost:5000. Логи: `docker compose logs -f`, остановка: `docker compose down`.
 
-**Подробные инструкции:** [DEPLOY.md](DEPLOY.md)
-
-### Вариант 2: Локальная установка
+### Локально без Docker
 
 ```bash
 pip install -r requirements.txt
-```
-
-## Быстрый старт
-
-### 🐳 Запуск в Docker (рекомендуется)
-
-**Самый простой способ:**
-
-```bash
-# Linux/Mac
-chmod +x START.sh
-./START.sh
-
-# Windows
-START.bat
-
-# Или вручную
-docker-compose up -d
-```
-
-**Веб-интерфейс:** http://localhost:5000
-
-### 💻 Локальный запуск (без Docker)
-
-**Быстрый способ:**
-
-```bash
-# Windows
-START_LOCAL.bat
-
-# Linux/Mac
-chmod +x START_LOCAL.sh
-./START_LOCAL.sh
-```
-
-**Или вручную:**
-
-1. **Установите зависимости:**
-```bash
-pip install -r requirements.txt
-```
-
-2. **Настройте переменные окружения:**
-
-Создайте файл `.env` на основе `env.example`:
-```bash
-cp env.example .env
-```
-
-3. **Запустите API сервер:**
-```bash
 python start_api.py
 ```
 
-4. **Откройте веб-интерфейс:** `http://localhost:5000`
+На Windows то же самое делает `START_LOCAL.bat`, на Linux/Mac — `./START_LOCAL.sh`.
 
-### Использование из командной строки:
+### Проверка
 
 ```bash
-python parkinson_analyzer.py audio_file.wav
+python scripts/ci_smoke.py
 ```
 
-Сохранить результат в файл:
+Тот же smoke-тест запускается в CI на каждый pull request: синтетические записи
+проходят через анализатор и веб-API.
+
+### Из командной строки и из кода
+
 ```bash
 python parkinson_analyzer.py audio_file.wav -o report.json
 ```
 
-### Программное использование:
-
 ```python
 from parkinson_analyzer import ParkinsonAnalyzer
 
-analyzer = ParkinsonAnalyzer()
-result = analyzer.analyze_audio_file("audio.wav")
-print(result)
+result = ParkinsonAnalyzer().analyze_audio_file("audio.wav")
 ```
 
 ## Веб-интерфейс
@@ -181,41 +123,34 @@ DSI коррелирует с Voice Handicap Index и идеален для мо
 
 **Важно:** Все параметры возвращаются с реальными значениями без искусственных ограничений. При ≥3 признаках, превышающих пороги: **89% точность** (Daoudi 2022).
 
-## Зависимости
-
-- `librosa`: Обработка аудио и спектральный анализ
-- `parselmouth`: Извлечение F0 и анализ pitch через Praat
-- `numpy`: Численные вычисления
-- `scipy`: Фильтрация сигналов
-- `soundfile`: Чтение аудиофайлов
-- `flask`: Веб-сервер и API
-- `flask-cors`: CORS поддержка для API
-- `requests`: HTTP запросы
-
 ## Структура проекта
 
 ```
 audio_park/
-├── api.py                 # API сервер с веб-интерфейсом
-├── parkinson_analyzer.py  # Основной анализатор
-├── feature_extractor.py   # Извлечение признаков
-├── symptom_analyzer.py    # Анализ симптомов
-├── audio_processor.py     # Обработка аудио
-├── recording_quality.py   # Проверка качества записи (SNR, клиппинг, длительность)
+├── api.py                 # Flask: веб-страницы и API
+├── start_api.py           # Запуск сервера (читает .env)
+├── parkinson_analyzer.py  # Основной анализатор: загрузка → признаки → симптомы → отчет
+├── audio_processor.py     # Загрузка, ресемплинг до 16 кГц, нормализация громкости (LUFS)
+├── feature_extractor.py   # Акустические признаки (jitter, shimmer, HNR, F0, темп, паузы…)
+├── symptom_analyzer.py    # Оценка симптомов 0-3 и риска ПД
+├── recording_quality.py   # Качество записи (SNR, клиппинг, длительность)
 ├── robust_features.py     # Признаки, устойчивые к устройству (CPPS)
 ├── speaker_baseline.py    # Сравнение с прошлыми записями человека на том же устройстве
-├── start_api.py          # Запуск API
-├── index.html            # Главная страница веб-интерфейса
-├── results.html          # Страница со списком всех результатов
-├── visualization.html    # Страница визуализации параметров
-├── requirements.txt      # Зависимости
-├── results.json          # Хранилище результатов (создается автоматически)
-└── results/              # Директория с сырыми данными каждого анализа
-    └── {result_id}/      # Папка для каждого анализа
-        ├── original.*    # Исходный аудиофайл
-        ├── waveform_data.json
-        └── spectrogram_meta.json
+├── dsi_protocol.py        # Задания DSI: MPT, F0-High, I-Low
+├── speech_protocol.py     # Речевые задания (чтение, слоги, фразы, интонация)
+├── task_recordings.py     # Записи отдельных попыток и ZIP-архив прогона
+├── device_model_stats.py  # Поправка громкости по модели устройства
+├── index.html, results.html, visualization.html   # Страницы веб-интерфейса
+├── assets/                # CSS и JS для страниц
+├── scripts/ci_smoke.py    # Smoke-тест для CI
+├── experiments/           # Исследования, в рабочем сервере не используются
+│                          # (выравнивание АЧХ устройств: spectral_equalizer.py, eq_device_sim.py)
+├── .github/workflows/     # CI: smoke-тест и выкладка на сервер
+├── Dockerfile, docker-compose.yml       # Локальный запуск в Docker
+└── docker-compose.prod.yml              # Конфигурация сервера (используется при выкладке)
 ```
+
+Данные (`results.json` и папка `results/`) создаются при работе и в git не хранятся.
 
 ## Хранение результатов
 
@@ -327,15 +262,6 @@ audio_park/
   на этом же устройстве (нужно не меньше 3 пригодных записей, до этого
   статус `collecting`). Признаки с `robust_z` по модулю больше 2.5
   попадают в `flagged_features`.
-
-## Безопасность
-
-⚠️ **ВАЖНО:** Никогда не храните токены в коде!
-
-- Используйте переменные окружения через файл `.env`
-- Файл `.env` автоматически исключен из Git
-
-**Подробнее:** [DEPLOY.md](DEPLOY.md#безопасность)
 
 ## Пересчет результатов
 

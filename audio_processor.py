@@ -3,7 +3,7 @@
 """
 import librosa
 import numpy as np
-from typing import Tuple, List, Optional, Dict
+from typing import Tuple, List, Dict
 
 
 class AudioProcessor:
@@ -140,104 +140,6 @@ class AudioProcessor:
         info['gain_db'] = float(gain_db)
         info['normalized'] = True
         return normalized.astype(audio.dtype, copy=False), info
-    
-    def noise_reduction(self, audio: np.ndarray) -> np.ndarray:
-        """
-        Простая редукция шума
-        
-        Args:
-            audio: Аудиомассив
-        
-        Returns:
-            Очищенный аудиомассив
-        
-        Примечание: Используется мягкая фильтрация, чтобы не искажать речевой сигнал.
-        Для анализа голоса важно сохранить естественные характеристики сигнала.
-        """
-        try:
-            from scipy import signal
-            
-            # Мягкая фильтрация очень низкочастотного шума (ниже 50 Гц)
-            # Это удаляет гул и низкочастотные артефакты, не затрагивая речевой сигнал
-            # Речь обычно находится в диапазоне 80-8000 Гц
-            nyquist = self.target_sr / 2
-            low_cutoff = 50.0 / nyquist  # 50 Гц high-pass фильтр
-            
-            # Используем более мягкий фильтр (2-й порядок вместо 3-го)
-            # и более низкую частоту среза, чтобы не искажать речь
-            b, a = signal.butter(2, low_cutoff, 'high')
-            filtered_audio = signal.filtfilt(b, a, audio)
-            
-            # Нормализация для сохранения динамического диапазона
-            # Не перенормализуем слишком сильно, чтобы сохранить естественную громкость
-            max_val = np.max(np.abs(filtered_audio))
-            if max_val > 0:
-                # Мягкая нормализация: масштабируем только если сигнал слишком тихий
-                if max_val < 0.1:
-                    filtered_audio = filtered_audio * (0.5 / max_val)
-                else:
-                    # Если сигнал уже достаточно громкий, только слегка нормализуем
-                    filtered_audio = filtered_audio * min(1.0, 0.95 / max_val)
-            
-            return filtered_audio
-        except Exception as e:
-            # Если фильтрация не удалась, возвращаем исходный сигнал
-            print(f"Предупреждение: ошибка фильтрации шума: {str(e)}")
-            return audio
-    
-    def segment_utterances(self, audio: np.ndarray, sr: int, 
-                          min_duration: float = 0.5,
-                          silence_threshold: float = 0.02) -> List[np.ndarray]:
-        """
-        Сегментация на высказывания по паузам
-        
-        Args:
-            audio: Аудиомассив
-            sr: Частота дискретизации
-            min_duration: Минимальная длительность сегмента (сек)
-            silence_threshold: Порог тишины для обнаружения пауз
-        
-        Returns:
-            Список сегментов аудио
-        """
-        # Обнаружение пауз
-        frame_length = int(0.025 * sr)  # 25ms кадры
-        hop_length = int(0.010 * sr)    # 10ms шаг
-        
-        rms = librosa.feature.rms(y=audio, frame_length=frame_length, 
-                                 hop_length=hop_length)[0]
-        
-        # Пороговое значение для тишины
-        silence_frames = rms < silence_threshold
-        
-        # Поиск границ сегментов
-        segments = []
-        start_idx = 0
-        
-        for i in range(1, len(silence_frames)):
-            # Начало нового сегмента
-            if silence_frames[i-1] and not silence_frames[i]:
-                if start_idx > 0:
-                    end_idx = (i - 1) * hop_length
-                    segment = audio[start_idx:end_idx]
-                    if len(segment) / sr >= min_duration:
-                        segments.append(segment)
-                start_idx = i * hop_length
-            # Конец сегмента
-            elif not silence_frames[i-1] and silence_frames[i]:
-                pass  # Продолжаем
-        
-        # Добавляем последний сегмент
-        if start_idx < len(audio):
-            segment = audio[start_idx:]
-            if len(segment) / sr >= min_duration:
-                segments.append(segment)
-        
-        # Если не найдено сегментов, возвращаем весь файл
-        if not segments:
-            segments = [audio]
-        
-        return segments
     
     def get_waveform(self, audio: np.ndarray) -> dict:
         """

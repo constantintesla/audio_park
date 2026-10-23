@@ -19,7 +19,7 @@
 import numpy as np
 import librosa
 from scipy import signal
-from typing import Dict, Iterable, Optional, Tuple
+from typing import Iterable
 
 
 class SpectralEqualizer:
