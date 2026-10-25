@@ -12,6 +12,9 @@ fi
 
 PYTHON_CMD=$(command -v python3 || command -v python)
 
+# Работаем из корня репозитория
+cd "$(dirname "$0")/.."
+
 # Проверка наличия .env файла
 if [ ! -f .env ]; then
     echo "📝 Создание .env файла из примера..."
@@ -29,4 +32,4 @@ echo "✅ Запуск веб-интерфейса на http://localhost:5000"
 echo "⚠️  Для остановки нажмите Ctrl+C"
 echo ""
 
-exec $PYTHON_CMD start_api.py
+exec $PYTHON_CMD -m app

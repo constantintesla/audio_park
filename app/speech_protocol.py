@@ -22,8 +22,8 @@ from typing import Dict, List, Optional
 import numpy as np
 import parselmouth
 
-from dsi_protocol import parse_segments, segment_audio, _phonation_time, noise_floor_db
-from feature_extractor import frame_db, silence_threshold_db, syllable_nuclei
+from app.dsi_protocol import parse_segments, segment_audio, _phonation_time, noise_floor_db
+from app.feature_extractor import frame_db, silence_threshold_db, syllable_nuclei
 
 SYLLABLE_TASKS = {
     'syl_sibilant': 'свистящие и шипящие (са-ша-за-жа)',

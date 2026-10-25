@@ -1269,7 +1269,7 @@
 
         function getUserMediaFn() {
             if (window.location.protocol === 'file:') {
-                throw new Error('Страница открыта напрямую из файла. Пожалуйста, запустите сервер (python start_api.py) и откройте страницу через http://localhost:5000');
+                throw new Error('Страница открыта напрямую из файла. Пожалуйста, запустите сервер (python -m app) и откройте страницу через http://localhost:5000');
             }
             if (navigator.mediaDevices && navigator.mediaDevices.getUserMedia) {
                 return navigator.mediaDevices.getUserMedia.bind(navigator.mediaDevices);

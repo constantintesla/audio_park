@@ -15,7 +15,7 @@ import numpy as np
 import parselmouth
 from scipy.signal import medfilt
 
-from feature_extractor import PRAAT_DB_AT_FULL_SCALE, frame_db
+from app.feature_extractor import PRAAT_DB_AT_FULL_SCALE, frame_db
 
 DSI_TASKS = ('mpt', 'glide', 'soft', 'vowel')
 TASK_NAMES = {
