@@ -86,6 +86,7 @@
                                 <p id="dsi-step-say" class="dsi-step-say"></p>
                                 <div class="dsi-step-actions">
                                     <button id="dsi-try-btn" class="btn btn-primary">Начать попытку</button>
+                                    <button id="dsi-redo-btn" class="btn btn-outline-secondary" style="display: none;">Перезаписать задание</button>
                                     <button id="dsi-next-btn" class="btn btn-outline-secondary" style="display: none;">Следующее упражнение</button>
                                 </div>
                             </div>
@@ -281,6 +282,45 @@
             <p class="mt-2">Загрузка результатов...</p>
         </div>
         
+        <!-- Перед обследованием: браузер не может выключить обработку звука в системе и устройстве -->
+        <dialog id="exam-disclaimer" class="app-modal" aria-labelledby="exam-disclaimer-title">
+            <div class="app-modal-body">
+                <h3 id="exam-disclaimer-title">Перед обследованием отключите «улучшения» звука</h3>
+                <p>Система и устройство часто сами обрабатывают голос: убирают шум, выравнивают громкость, срезают частоты. Для звонков это удобно, но голос меняется, и измерения получаются неверными. Браузер выключить это не может, поэтому проверьте, пожалуйста, вручную:</p>
+                <ul class="disclaimer-list">
+                    <li><strong>Windows 11:</strong> Параметры → Система → Звук → ваш микрофон → «Улучшение звука» (Audio enhancements): «Выкл.». Если есть, выключите там же «Голосовая четкость» (Voice Clarity) и «Эффекты Windows Studio» (шумоподавление, фокусировка голоса).</li>
+                    <li><strong>Windows 10:</strong> Панель управления → Звук → вкладка «Запись» → микрофон → «Свойства» → вкладка «Улучшения»: отметьте «Отключить все звуковые эффекты».</li>
+                    <li><strong>Программы производителя:</strong> Realtek Audio Console, Dolby Audio / Dolby Atmos, MaxxAudio (Dell), HP Audio Control, Lenovo Vantage («Умное шумоподавление»), ASUS AI Noise Cancelling: выключите шумоподавление, эхоподавление и эффекты для микрофона.</li>
+                    <li><strong>Программы, подменяющие микрофон:</strong> Krisp, NVIDIA Broadcast / RTX Voice. Если браузер спросит, какой микрофон использовать, выберите обычный, а не «Krisp Microphone» или «NVIDIA Broadcast».</li>
+                    <li><strong>iPhone, iPad, Mac:</strong> во время записи откройте Пункт управления → «Режим микрофона» → «Стандартный» (не «Изоляция голоса» и не «Широкий спектр»).</li>
+                    <li><strong>Android:</strong> если в настройках звука или звонков есть «Шумоподавление», «Четкость голоса» или «Фокус на голосе» (Samsung), выключите их.</li>
+                    <li><strong>Гарнитуры:</strong> Bluetooth-наушники (AirPods и другие) сильно сжимают звук. Лучше встроенный или проводной микрофон.</li>
+                </ul>
+                <p class="text-muted small">Еще закройте программы, которые могут занимать микрофон: Zoom, Teams, Telegram, Discord. Тест займет около 10 минут, держите устройство на расстоянии 30 см.</p>
+                <div class="form-check mt-2">
+                    <input class="form-check-input" type="checkbox" id="exam-disclaimer-check">
+                    <label class="form-check-label" for="exam-disclaimer-check">Я проверил(а) и отключил(а) обработку звука</label>
+                </div>
+            </div>
+            <div class="app-modal-actions">
+                <button id="exam-disclaimer-cancel" class="btn btn-outline-secondary">Отмена</button>
+                <button id="exam-disclaimer-start" class="btn btn-primary" disabled>Начать обследование</button>
+            </div>
+        </dialog>
+
+        <!-- После обследования: прослушать задания, перезаписать любое и отправить на анализ -->
+        <dialog id="exam-review" class="app-modal app-modal-wide" aria-labelledby="exam-review-title">
+            <div class="app-modal-body">
+                <h3 id="exam-review-title">Обследование записано</h3>
+                <p>Прослушайте задания. Если какое-то не получилось, нажмите «Перезаписать»: запишутся только его попытки, остальные останутся. Микрофон на паузе.</p>
+                <ol id="exam-review-list" class="review-list"></ol>
+            </div>
+            <div class="app-modal-actions">
+                <button id="exam-review-abort" class="btn btn-outline-secondary">Прервать тест</button>
+                <button id="exam-review-submit" class="btn btn-primary">Отправить на анализ</button>
+            </div>
+        </dialog>
+
         <!-- Footer -->
         <div class="footer">
             <p>Система предназначена для исследовательских целей и не заменяет медицинскую диагностику.</p>
@@ -1150,11 +1190,13 @@
                     stopRecording();
                 }
             });
-            document.getElementById('exam-test-btn').addEventListener('click', async () => {
-                if (!isRecording) await startRecording({ test: 'exam' });
+            document.getElementById('exam-test-btn').addEventListener('click', () => {
+                if (!isRecording) openExamDisclaimer();
             });
             document.getElementById('dsi-try-btn').addEventListener('click', onTestTryButton);
             document.getElementById('dsi-next-btn').addEventListener('click', () => nextTestStep(rec));
+            document.getElementById('dsi-redo-btn').addEventListener('click', () => redoCurrentStep(rec));
+            initExamDialogs();
         }
         
         function initAnalyzeButton() {
@@ -1324,7 +1366,7 @@
                     test: options.test ? { ...TESTS[options.test], step: 0, tries: 0, tryStart: null, segments: [] } : null
                 };
                 processor.onaudioprocess = (e) => {
-                    if (!rec || rec.stopped) return;
+                    if (!rec || rec.stopped || rec.paused) return;
                     const data = new Float32Array(e.inputBuffer.getChannelData(0));
                     rec.chunks.push(data);
                     rec.nSamples += data.length;
@@ -1413,12 +1455,17 @@
 
         const stepTries = (step) => step.items ? step.items.length : step.tries;
 
+        // Уйти с задания можно после хотя бы одной попытки или если его старые попытки
+        // еще не заменены (нажали «Перезаписать», но ничего не записали)
+        const canLeaveStep = (test) => test.tries > 0 || test.pendingReplace === test.steps[test.step].task;
+
         function showTestStep(state) {
             const test = state.test;
             const step = test.steps[test.step];
             setRecPhase('dsi-wait', 'Микрофон включен. Держите устройство на 30 см (длина линейки) весь тест. Прочитайте задание и нажмите «Начать попытку»');
             document.getElementById('dsi-step').style.display = 'block';
-            document.getElementById('dsi-step-count').textContent = `${test.stepName} ${test.step + 1} из ${test.steps.length}`;
+            document.getElementById('dsi-step-count').textContent =
+                `${test.redo ? 'Перезапись: ' : ''}${test.stepName} ${test.step + 1} из ${test.steps.length}`;
             document.getElementById('dsi-step-tries').textContent = step.items
                 ? `фраза ${test.tries + 1} из ${step.items.length}`
                 : `попытка ${test.tries + 1} из ${step.tries}`;
@@ -1430,9 +1477,20 @@
             const tryBtn = document.getElementById('dsi-try-btn');
             tryBtn.textContent = 'Начать попытку';
             tryBtn.disabled = false;
-            // Перейти дальше можно после хотя бы одной попытки
-            document.getElementById('dsi-next-btn').style.display =
-                test.tries > 0 && test.step < test.steps.length - 1 ? 'inline-block' : 'none';
+            const nextBtn = document.getElementById('dsi-next-btn');
+            nextBtn.textContent = test.redo ? 'Вернуться к списку' : 'Следующее упражнение';
+            nextBtn.style.display =
+                canLeaveStep(test) && (test.redo || test.step < test.steps.length - 1) ? 'inline-block' : 'none';
+            document.getElementById('dsi-redo-btn').style.display = test.tries > 0 ? 'inline-block' : 'none';
+        }
+
+        // Перезапись задания: старые попытки заменяются, как только записана первая новая
+        function redoCurrentStep(state) {
+            if (!state || !state.test || state.test.tryStart !== null) return;
+            const test = state.test;
+            test.pendingReplace = test.steps[test.step].task;
+            test.tries = 0;
+            showTestStep(state);
         }
 
         function onTestTryButton() {
@@ -1445,13 +1503,19 @@
                 setRecPhase('speech', `Идет попытка: ${step.title.toLowerCase()}. Нажмите «Готово», когда закончите`);
                 document.getElementById('dsi-try-btn').textContent = 'Готово';
                 document.getElementById('dsi-next-btn').style.display = 'none';
+                document.getElementById('dsi-redo-btn').style.display = 'none';
                 return;
             }
             // Небольшой запас по краям: нажатие кнопки чуть запаздывает за голосом
             const margin = Math.round(0.3 * state.sr);
+            if (test.pendingReplace === step.task) {
+                test.segments = test.segments.filter(seg => seg.task !== step.task);
+                test.pendingReplace = null;
+            }
             test.segments.push({
                 task: step.task,
-                start: Math.max(state.speechStart, test.tryStart - margin),
+                // После паузы не захватываем звук до нее
+                start: Math.max(state.speechStart, test.resumedAt || 0, test.tryStart - margin),
                 end: state.nSamples + margin
             });
             test.tryStart = null;
@@ -1466,18 +1530,150 @@
         async function nextTestStep(state) {
             if (!state || !state.test || state.test.tryStart !== null) return;
             const test = state.test;
-            test.step += 1;
-            test.tries = 0;
-            if (test.step < test.steps.length) {
-                showTestStep(state);
-                return;
+            test.pendingReplace = null;
+            if (!test.redo) {
+                test.step += 1;
+                test.tries = 0;
+                if (test.step < test.steps.length) {
+                    showTestStep(state);
+                    return;
+                }
             }
-            // Все упражнения сделаны: дописываем запас после последней попытки и завершаем
+            // Все упражнения сделаны (или перезаписано одно): дописываем запас после
+            // последней попытки, ставим микрофон на паузу и показываем список заданий
             document.getElementById('dsi-try-btn').disabled = true;
-            setRecPhase('dsi-wait', 'Тест записан, готовим запись к анализу');
-            const lastEnd = test.segments[test.segments.length - 1].end;
-            await waitForSample(state, lastEnd);
-            stopRecording();
+            document.getElementById('dsi-next-btn').style.display = 'none';
+            document.getElementById('dsi-redo-btn').style.display = 'none';
+            setRecPhase('dsi-wait', 'Тест записан. Прослушайте задания и отправьте на анализ');
+            const lastEnd = Math.max(0, ...test.segments.map(seg => seg.end));
+            if (!await waitForSample(state, lastEnd) || rec !== state) return;
+            state.paused = true;
+            test.redo = false;
+            openExamReview(state);
+        }
+
+        // ===== Окна обследования: предупреждение перед стартом и список заданий в конце =====
+        let reviewPlayer = null;     // { audio, url, button } - что сейчас играет в списке заданий
+
+        function initExamDialogs() {
+            const disclaimer = document.getElementById('exam-disclaimer');
+            const check = document.getElementById('exam-disclaimer-check');
+            const startBtn = document.getElementById('exam-disclaimer-start');
+            check.addEventListener('change', () => { startBtn.disabled = !check.checked; });
+            document.getElementById('exam-disclaimer-cancel').addEventListener('click', () => disclaimer.close());
+            startBtn.addEventListener('click', async () => {
+                disclaimer.close();
+                if (!isRecording) await startRecording({ test: 'exam' });
+            });
+
+            const review = document.getElementById('exam-review');
+            // Esc не закрывает список: тест можно только отправить или прервать
+            review.addEventListener('cancel', (e) => e.preventDefault());
+            document.getElementById('exam-review-submit').addEventListener('click', async () => {
+                closeExamReview();
+                if (stopRecording()) await analyzeAudio();
+            });
+            document.getElementById('exam-review-abort').addEventListener('click', () => {
+                if (!confirm('Прервать тест? Все записанные задания будут удалены.')) return;
+                closeExamReview();
+                cleanupRecording();
+            });
+        }
+
+        function openExamDisclaimer() {
+            document.getElementById('exam-disclaimer-check').checked = false;
+            document.getElementById('exam-disclaimer-start').disabled = true;
+            document.getElementById('exam-disclaimer').showModal();
+        }
+
+        function openExamReview(state) {
+            // Склеиваем куски один раз: дальше попытки вырезаются из одного массива
+            if (state.chunks.length !== 1) {
+                const flat = new Float32Array(state.nSamples);
+                let pos = 0;
+                for (const chunk of state.chunks) { flat.set(chunk, pos); pos += chunk.length; }
+                state.chunks = [flat];
+            }
+            const test = state.test;
+            const list = document.getElementById('exam-review-list');
+            list.innerHTML = '';
+            test.steps.forEach((step, i) => {
+                const segs = test.segments.filter(seg => seg.task === step.task);
+                const row = document.createElement('li');
+                row.className = 'review-row';
+                const title = document.createElement('div');
+                title.className = 'review-title';
+                title.textContent = step.title;
+                const meta = document.createElement('small');
+                meta.textContent = segs.length ? `попыток: ${segs.length}` : 'нет записи';
+                title.appendChild(meta);
+                const actions = document.createElement('div');
+                actions.className = 'review-actions';
+                segs.forEach((seg, k) => {
+                    const btn = document.createElement('button');
+                    btn.className = 'btn btn-outline-secondary btn-sm review-play';
+                    btn.dataset.label = segs.length > 1 ? `▶ ${k + 1}` : '▶ Слушать';
+                    btn.textContent = btn.dataset.label;
+                    btn.title = `Прослушать попытку ${k + 1}`;
+                    btn.addEventListener('click', () => toggleReviewPlayback(state, seg, btn));
+                    actions.appendChild(btn);
+                });
+                const redo = document.createElement('button');
+                redo.className = 'btn btn-outline-secondary btn-sm';
+                redo.textContent = 'Перезаписать';
+                redo.addEventListener('click', () => redoExamStep(state, i));
+                actions.appendChild(redo);
+                row.append(title, actions);
+                list.appendChild(row);
+            });
+            const dialog = document.getElementById('exam-review');
+            if (!dialog.open) dialog.showModal();
+        }
+
+        function stopReviewPlayback() {
+            if (!reviewPlayer) return;
+            reviewPlayer.audio.pause();
+            URL.revokeObjectURL(reviewPlayer.url);
+            reviewPlayer.button.textContent = reviewPlayer.button.dataset.label;
+            reviewPlayer = null;
+        }
+
+        function toggleReviewPlayback(state, seg, button) {
+            const same = reviewPlayer && reviewPlayer.button === button;
+            stopReviewPlayback();
+            if (same) return;
+            const samples = state.chunks[0].subarray(seg.start, Math.min(seg.end, state.nSamples));
+            const buffer = audioContext.createBuffer(1, samples.length, state.sr);
+            buffer.getChannelData(0).set(samples);
+            const url = URL.createObjectURL(audioBufferToWav(buffer, state.sr));
+            const audio = new Audio(url);
+            reviewPlayer = { audio, url, button };
+            button.textContent = '■ Стоп';
+            audio.addEventListener('ended', () => { if (reviewPlayer && reviewPlayer.audio === audio) stopReviewPlayback(); });
+            audio.play().catch(() => stopReviewPlayback());
+        }
+
+        function closeExamReview() {
+            stopReviewPlayback();
+            const dialog = document.getElementById('exam-review');
+            if (dialog.open) dialog.close();
+        }
+
+        // Перезапись одного задания из списка: микрофон снова пишет, после него - назад к списку
+        function redoExamStep(state, index) {
+            if (rec !== state) return;
+            closeExamReview();
+            const test = state.test;
+            test.step = index;
+            test.tries = 0;
+            test.tryStart = null;
+            test.redo = true;
+            test.pendingReplace = test.steps[index].task;
+            test.resumedAt = state.nSamples;
+            state.paused = false;
+            document.getElementById('dsi-try-btn').disabled = false;
+            showTestStep(state);
+            document.getElementById('dsi-step').scrollIntoView({ behavior: 'smooth', block: 'center' });
         }
 
         // Время AudioContext -> номер отсчета в записи (с точностью до буфера; задержку уточняем по записи)
@@ -1626,6 +1822,7 @@
             }
             rec = null;
             isRecording = false;
+            closeExamReview();
             const recordBtn = document.getElementById('record-btn');
             recordBtn.classList.remove('recording');
             recordBtn.textContent = 'Записать с микрофона';
@@ -1635,7 +1832,7 @@
         }
 
         function stopRecording() {
-            if (!rec) return;
+            if (!rec) return false;
             const state = rec;
             state.stopped = true;
             cleanupRecording();
@@ -1648,12 +1845,12 @@
             }
             if (state.speechStart === null) {
                 alert('Запись остановлена во время калибровки. Нажмите «Записать» еще раз и дождитесь сигнала «говорите».');
-                return;
+                return false;
             }
             const speech = all.subarray(state.speechStart);
             if (speech.length < state.sr * 0.5) {
                 alert('Запись слишком короткая. Попробуйте еще раз.');
-                return;
+                return false;
             }
 
             audioBuffer = audioContext.createBuffer(1, speech.length, state.sr);
@@ -1691,6 +1888,7 @@
             displayCalibration(calibration);
             initWaveform(audioBuffer);
             document.getElementById('analyze-btn').disabled = false;
+            return true;
         }
 
         // Уровни кадров в dBFS (25 мс, шаг 10 мс — как в recording_quality.py)

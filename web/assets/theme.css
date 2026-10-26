@@ -1325,3 +1325,103 @@ main {
         width: 320px;
     }
 }
+
+/* Модальные окна обследования (нативный <dialog>) */
+.app-modal {
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    padding: 0;
+    width: min(640px, calc(100vw - 32px));
+    max-height: calc(100vh - 48px);
+    background: var(--surface);
+    color: var(--text);
+    box-shadow: 0 12px 40px rgba(16, 24, 40, 0.18);
+}
+
+.app-modal-wide {
+    width: min(760px, calc(100vw - 32px));
+}
+
+.app-modal[open] {
+    display: flex;
+    flex-direction: column;
+}
+
+.app-modal::backdrop {
+    background: rgba(16, 24, 40, 0.45);
+}
+
+.app-modal-body {
+    padding: 20px 22px 8px;
+    overflow-y: auto;
+}
+
+.app-modal-body h3 {
+    font-size: 18px;
+    font-weight: 600;
+    margin: 0 0 10px;
+}
+
+.app-modal-body p {
+    font-size: 14px;
+}
+
+.app-modal-actions {
+    display: flex;
+    justify-content: flex-end;
+    flex-wrap: wrap;
+    gap: 8px;
+    padding: 12px 22px 18px;
+    border-top: 1px solid var(--border);
+}
+
+.disclaimer-list {
+    font-size: 14px;
+    padding-left: 18px;
+    margin-bottom: 10px;
+}
+
+.disclaimer-list li {
+    margin-bottom: 6px;
+}
+
+.review-list {
+    list-style: none;
+    counter-reset: review;
+    padding: 0;
+    margin: 0;
+}
+
+.review-row {
+    counter-increment: review;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    flex-wrap: wrap;
+    gap: 8px;
+    padding: 10px 0;
+    border-top: 1px solid var(--border);
+}
+
+.review-title {
+    font-size: 14px;
+    font-weight: 500;
+    flex: 1 1 260px;
+}
+
+.review-title::before {
+    content: counter(review) '. ';
+    color: var(--text-muted);
+}
+
+.review-title small {
+    display: block;
+    font-weight: 400;
+    color: var(--text-muted);
+}
+
+.review-actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+}
