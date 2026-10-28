@@ -30,7 +30,7 @@ try:
 except ImportError:
     HAS_MATPLOTLIB = False
 
-from app.audio_processor import AudioProcessor
+from app.audio_processor import AudioProcessor, REPORT_SPECTROGRAM_FRAMES
 from app.feature_extractor import FeatureExtractor
 from app.symptom_analyzer import SymptomAnalyzer
 from app.recording_quality import assess_recording_quality
@@ -231,7 +231,8 @@ class ParkinsonAnalyzer:
             
             # 5. Получение визуализаций
             waveform_data = self.audio_processor.get_waveform(audio)
-            freqs, times, spectrogram = self.audio_processor.get_spectrogram(audio, sr)
+            freqs, times, spectrogram = self.audio_processor.get_spectrogram(
+                audio, sr, max_frames=REPORT_SPECTROGRAM_FRAMES)
             
             # Сохранение сырых данных визуализаций
             if should_save_raw and result_dir:

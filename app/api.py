@@ -15,6 +15,7 @@ from app.speech_protocol import parse_protocol_segments
 from app.device_model_stats import loop_gain_check, model_spl_offset
 
 from app.speaker_baseline import compare_to_baseline
+from app.audio_processor import thin_spectrogram, SPECTROGRAM_TIMES
 from app.task_recordings import task_attempts, source_audio, clip_wav, clip_filename, build_archive
 
 logging.basicConfig(level=logging.INFO)
@@ -33,6 +34,25 @@ RESULTS_DIR = "results"
 
 # Создание директории для результатов, если её нет
 os.makedirs(RESULTS_DIR, exist_ok=True)
+
+# После анализа и визуализации освобожденная память остается у процесса
+# (так работает malloc в glibc), и контейнер долго держит пиковый объем.
+# malloc_trim возвращает свободные страницы системе.
+try:
+    import ctypes
+    _malloc_trim = ctypes.CDLL('libc.so.6').malloc_trim
+except (OSError, AttributeError):
+    _malloc_trim = None
+
+HEAVY_ENDPOINTS = {'analyze_audio', 'recalculate_all', 'get_visualization_data'}
+
+
+@app.teardown_request
+def release_memory(exc=None):
+    if _malloc_trim is not None and request.endpoint in HEAVY_ENDPOINTS:
+        import gc
+        gc.collect()
+        _malloc_trim(0)
 
 
 def load_results() -> List[Dict]:
@@ -98,6 +118,15 @@ def clean_json_values(obj: Any) -> Any:
     else:
         # Для остальных типов (str, None, bool) возвращаем как есть
         return obj
+
+
+def without_visuals(result: Dict) -> Dict:
+    """
+    Результат без картинок (base64 PNG): они нужны только в ответе на анализ.
+    В results.json они занимали почти весь объем (~0,5 МБ на запись), а файл
+    читается целиком при каждом запросе списка и статистики.
+    """
+    return {k: v for k, v in result.items() if k != 'visuals'}
 
 
 def save_results(results: List[Dict]):
@@ -263,7 +292,7 @@ def analyze_audio():
                     result.get('features', {}), results,
                     result['user_info']['tg_user_id'], device_info,
                     result.get('quality', {}).get('unreliable_features'))
-            cleaned_result = clean_json_values(result)
+            cleaned_result = clean_json_values(without_visuals(result))
             results.append(cleaned_result)
             save_results(results)
             # В ответ (не в файл): индекс для ссылок на записи заданий и сами попытки
@@ -428,7 +457,7 @@ def recalculate_all():
                     new_result['calibration'] = result['calibration']
                 
                 # Обновляем результат в списке
-                results[idx] = clean_json_values(new_result)
+                results[idx] = clean_json_values(without_visuals(new_result))
                 recalculated += 1
                 logger.info(f"✅ Результат {idx + 1} пересчитан успешно")
                 
@@ -496,18 +525,6 @@ def get_visualization_data(index: int):
         if not data_directory or not os.path.exists(data_directory):
             return jsonify({"error": "Директория с сырыми данными не найдена"}), 404
         
-        # Загрузка waveform данных
-        waveform_data = None
-        waveform_file = raw_data.get('files', {}).get('waveform_data')
-        if waveform_file and os.path.exists(waveform_file):
-            try:
-                with open(waveform_file, 'r', encoding='utf-8') as f:
-                    waveform_data = json.load(f)
-                # Очистка от NaN
-                waveform_data = clean_json_values(waveform_data) if waveform_data else None
-            except Exception as e:
-                logger.warning(f"Ошибка загрузки waveform данных: {e}")
-        
         # Загрузка данных сегментов
         segments_data = []
         segment_features_file = raw_data.get('files', {}).get('segment_features')
@@ -543,6 +560,7 @@ def get_visualization_data(index: int):
                 audio_url = f"/api/audio/{index}"
         
         # Вычисление F0 данных из аудио (если доступно)
+        waveform_data = None
         f0_data = None
         intensity_data = None
         spectrogram_data = None
@@ -566,6 +584,8 @@ def get_visualization_data(index: int):
                 
                 # Загрузка аудио
                 audio, sr = audio_processor.load_audio(audio_file_for_f0)
+                waveform_data = clean_json_values(audio_processor.get_waveform(
+                    audio_processor.normalize_loudness(audio, sr)[0]))
                 
                 # Извлечение F0
                 try:
@@ -654,27 +674,22 @@ def get_visualization_data(index: int):
                         intensity_data = None
                 
                 # Извлечение спектрограммы
-                freqs, times, spectrogram = audio_processor.get_spectrogram(audio, sr)
+                freqs, times, spectrogram = audio_processor.get_spectrogram(
+                    audio, sr, max_frames=SPECTROGRAM_TIMES)
                 # Ограничиваем частоты до 5kHz для визуализации
                 freq_mask = freqs <= 5000
                 freqs_filtered = freqs[freq_mask]
                 spectrogram_filtered = spectrogram[freq_mask, :]
                 
-                # Очистка от NaN и inf
-                # Фильтруем частоты
+                # Странице нужна сетка не больше 300 x 80: полную спектрограмму
+                # длинной записи (миллионы чисел) не держим в памяти списками
+                freqs_filtered, times_thin, spectrogram_thin = thin_spectrogram(
+                    freqs_filtered, times, spectrogram_filtered)
                 freq_valid = [float(f) for f in freqs_filtered if np.isfinite(f)]
-                # Фильтруем времена
-                times_valid = [float(t) for t in times if np.isfinite(t)]
-                # Фильтруем magnitude (заменяем NaN и inf на -80 dB)
-                magnitude_cleaned = []
-                for row in spectrogram_filtered:
-                    cleaned_row = []
-                    for val in row:
-                        if np.isfinite(val):
-                            cleaned_row.append(float(val))
-                        else:
-                            cleaned_row.append(-80.0)  # Минимальное значение для визуализации
-                    magnitude_cleaned.append(cleaned_row)
+                times_valid = [float(t) for t in times_thin if np.isfinite(t)]
+                # NaN и inf заменяем на -80 dB (минимальное значение для визуализации)
+                magnitude_cleaned = np.round(np.where(np.isfinite(spectrogram_thin),
+                                                      spectrogram_thin, -80.0), 1).tolist()
                 
                 spectrogram_data = {
                     'frequencies': freq_valid,
@@ -686,6 +701,20 @@ def get_visualization_data(index: int):
                 logger.error(f"Ошибка обработки аудио для визуализации: {e}")
                 import traceback
                 traceback.print_exc()
+        
+        # Без аудио волну берем из сохраненного файла (старые записи хранят в нем
+        # каждый отсчет, поэтому прореживаем так же, как при расчете из аудио)
+        waveform_file = raw_data.get('files', {}).get('waveform_data')
+        if waveform_data is None and waveform_file and os.path.exists(waveform_file):
+            try:
+                from app.audio_processor import AudioProcessor
+                with open(waveform_file, 'r', encoding='utf-8') as f:
+                    saved = json.load(f)
+                amplitude = np.nan_to_num(np.asarray(saved.get('amplitude', []), dtype=float))
+                del saved
+                waveform_data = clean_json_values(AudioProcessor(target_sr=16000).get_waveform(amplitude))
+            except Exception as e:
+                logger.warning(f"Ошибка загрузки waveform данных: {e}")
         
         # Подготовка данных сегментов с временными метками
         segments_with_time = []
@@ -816,6 +845,12 @@ def get_archive(index: int):
     except Exception as e:
         logger.error(f"Ошибка сборки архива: {e}", exc_info=True)
         return jsonify({"error": str(e)}), 500
+
+
+@app.route('/api/health', methods=['GET'])
+def health():
+    """Проверка, что сервер жив (для healthcheck): results.json не читает"""
+    return jsonify({"status": "ok"}), 200
 
 
 @app.route('/api/stats', methods=['GET'])
