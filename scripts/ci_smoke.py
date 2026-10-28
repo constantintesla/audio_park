@@ -319,6 +319,11 @@ def check_api(wav_path: str) -> None:
     assert len(spec["magnitude"]) == len(spec["frequencies"]) and len(spec["magnitude"][0]) == len(spec["times"])
     with open("results.json", encoding="utf-8") as f:
         assert not any("visuals" in r for r in json.load(f)), "картинки base64 попали в results.json"
+    # Страница грузит каждый график отдельно
+    part = client.get(f"/api/visualization/{result['_index']}?part=spectrogram").get_json()
+    assert set(part) == {"spectrogram", "audio_url"} and part["spectrogram"]["magnitude"], list(part)
+    assert client.get(f"/api/visualization/{result['_index']}?part=nope").status_code == 400
+    assert "visuals" not in client.get(f"/api/results/{result['_index']}").get_json()
     saved = result["raw_data"]["files"]["waveform_data"]
     assert os.path.getsize(saved) < 1_000_000, f"waveform_data.json {os.path.getsize(saved)} байт"
     print("api: ok")

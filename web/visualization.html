@@ -69,8 +69,8 @@
                         <div id="waveform"></div>
                     </div>
                     <div class="player-controls">
-                        <button onclick="wavesurfer.playPause()">Воспроизвести / пауза</button>
-                        <button onclick="wavesurfer.stop()">Стоп</button>
+                        <button onclick="wavesurfer && wavesurfer.playPause()">Воспроизвести / пауза</button>
+                        <button onclick="wavesurfer && wavesurfer.stop()">Стоп</button>
                     </div>
                 </div>
             </div>
@@ -84,6 +84,7 @@
                 </div>
                 <div class="chart-container">
                     <canvas id="waveform-chart"></canvas>
+                    <div class="chart-status">Загрузка графика...</div>
                 </div>
             </div>
             
@@ -96,6 +97,7 @@
                 </div>
                 <div class="chart-container tall">
                     <canvas id="f0-chart"></canvas>
+                    <div class="chart-status">Загрузка графика...</div>
                 </div>
             </div>
             
@@ -103,11 +105,23 @@
             <div class="card">
                 <div class="card-header">Спектрограмма</div>
                 <div class="info-box">
-                    <strong>Описание:</strong> Спектрограмма показывает распределение энергии по частотам во времени. 
-                    Отсюда извлекается параметр <strong>HNR</strong> (отношение гармоник к шуму) и другие спектральные признаки.
+                    <strong>Как читать:</strong> по горизонтали время, по вертикали частота, чем темнее, тем громче.
+                    Голос виден как стопка горизонтальных полос: нижняя полоса - основной тон (F0), выше - гармоники, кратные ему.
+                    Четкие ровные полосы - чистый голос; размытые полосы и «туман» между ними - шум или охриплость (это же меряет <strong>HNR</strong>).
+                    Светлые промежутки - паузы. Колесо мыши - увеличить, двойной щелчок - вернуть весь график.
                 </div>
                 <div class="chart-container tall">
                     <canvas id="spectrogram-chart"></canvas>
+                    <div class="chart-status">Загрузка графика...</div>
+                </div>
+                <div class="spectrogram-legend">
+                    <div class="colorbar">
+                        <span>тихо</span>
+                        <span class="colorbar-strip" id="spectrogram-colorbar"></span>
+                        <span>громко</span>
+                        <span id="spectrogram-range"></span>
+                    </div>
+                    <div class="spectrogram-readout" id="spectrogram-readout">Наведите на график, чтобы увидеть уровень</div>
                 </div>
             </div>
             
@@ -120,6 +134,7 @@
                 </div>
                 <div class="chart-container">
                     <canvas id="intensity-chart"></canvas>
+                    <div class="chart-status">Загрузка графика...</div>
                 </div>
             </div>
             
@@ -177,14 +192,6 @@
             return sampled;
         }
 
-        function runRenderTasks(tasks) {
-            if (!tasks.length) return;
-            requestAnimationFrame(() => {
-                const task = tasks.shift();
-                task();
-                runRenderTasks(tasks);
-            });
-        }
         
         // Префикс пути, чтобы страница работала и в корне, и за прокси (например /audio_park)
         const API_URL = window.location.pathname.replace(/\/(index\.html|results|visualization)?\/?$/, '');
@@ -228,6 +235,36 @@
             }
         }
         
+        // Графики грузятся по одному, когда до них докрутили: страница не ждет,
+        // пока сервер посчитает все графики, и не качает запись целиком
+        const CHARTS = [
+            { part: 'waveform', canvas: 'waveform-chart', draw: (d) => createWaveformChart(d), ok: (d) => d.time && d.amplitude },
+            { part: 'f0_data', canvas: 'f0-chart', draw: (d) => createF0Chart(d), ok: (d) => d.time && d.values },
+            { part: 'spectrogram', canvas: 'spectrogram-chart', draw: (d) => createSpectrogramChart(d), ok: (d) => d.times && d.frequencies },
+            { part: 'intensity', canvas: 'intensity-chart', draw: (d) => createIntensityChart(d), ok: (d) => d.time && d.values }
+        ];
+        let partRequests = {};
+        let chartObserver = null;
+        
+        // Один запрос на график, даже если он нужен и плееру, и графику волны
+        function fetchPart(index, part) {
+            const key = `${index}:${part}`;
+            if (!partRequests[key]) {
+                partRequests[key] = fetch(`${API_URL}/api/visualization/${index}?part=${part}`)
+                    .then(r => r.json())
+                    .then(data => {
+                        if (data.error) throw new Error(data.error);
+                        return data;
+                    });
+            }
+            return partRequests[key];
+        }
+        
+        function setChartStatus(canvasId, text) {
+            const status = document.getElementById(canvasId).parentElement.querySelector('.chart-status');
+            if (status) status.textContent = text;
+        }
+        
         // Загрузка визуализации
         async function loadVisualization() {
             const select = document.getElementById('result-select');
@@ -243,22 +280,14 @@
             document.getElementById('error-container').innerHTML = '';
             
             try {
-                // Загрузка результата
+                // Параметры приходят сразу, графики догружаются по мере прокрутки
                 const resultResponse = await fetch(`${API_URL}/api/results/${index}`);
                 const result = await resultResponse.json();
-                currentData = result;
-                
-                // Загрузка данных визуализации
-                const vizResponse = await fetch(`${API_URL}/api/visualization/${index}`);
-                const vizData = await vizResponse.json();
-                
-                if (vizData.error) {
-                    throw new Error(vizData.error);
+                if (result.error) {
+                    throw new Error(result.error);
                 }
-                
-                // Отображение данных
-                displayVisualization(result, vizData);
-                
+                currentData = result;
+                displayVisualization(result, index);
             } catch (error) {
                 showError('Ошибка загрузки визуализации: ' + error.message);
                 console.error(error);
@@ -268,39 +297,41 @@
         }
         
         // Отображение визуализации
-        function displayVisualization(result, vizData) {
+        function displayVisualization(result, index) {
             document.getElementById('content').style.display = 'block';
+            partRequests = {};
+            Object.values(charts).forEach(chart => chart.destroy());
+            charts = {};
             
-            // Отображение параметров
             displayParameters(result);
+            initAudioPlayer(index);
             
-            // Инициализация аудио плеера
-            if (vizData.audio_url) {
-                initAudioPlayer(API_URL + vizData.audio_url);
-            } else {
-                document.querySelector('.audio-player').innerHTML = 
-                    '<div class="error">Аудиофайл недоступен</div>';
-            }
-            
-            // Создание графиков (пошагово, чтобы не блокировать UI)
-            const renderTasks = [];
-            if (vizData.waveform && vizData.waveform.time && vizData.waveform.amplitude) {
-                renderTasks.push(() => createWaveformChart(vizData.waveform));
-            }
-            
-            if (vizData.f0_data && vizData.f0_data.time && vizData.f0_data.values) {
-                renderTasks.push(() => createF0Chart(vizData.f0_data));
-            }
-            
-            if (vizData.spectrogram) {
-                renderTasks.push(() => createSpectrogramChart(vizData.spectrogram));
-            }
-            
-            if (vizData.intensity && vizData.intensity.time && vizData.intensity.values) {
-                renderTasks.push(() => createIntensityChart(vizData.intensity));
-            }
-            
-            runRenderTasks(renderTasks);
+            if (chartObserver) chartObserver.disconnect();
+            const byCanvas = {};
+            CHARTS.forEach(spec => {
+                byCanvas[spec.canvas] = spec;
+                setChartStatus(spec.canvas, 'Загрузка графика...');
+            });
+            chartObserver = new IntersectionObserver((entries) => {
+                entries.forEach(entry => {
+                    if (!entry.isIntersecting) return;
+                    chartObserver.unobserve(entry.target);
+                    const spec = byCanvas[entry.target.id];
+                    fetchPart(index, spec.part)
+                        .then(data => {
+                            const d = data[spec.part] || {};
+                            if (!spec.ok(d)) {
+                                setChartStatus(spec.canvas, 'Нет данных для этого графика');
+                                return;
+                            }
+                            setChartStatus(spec.canvas, '');
+                            // Отрисовка в следующем кадре, чтобы не блокировать прокрутку
+                            requestAnimationFrame(() => spec.draw(d));
+                        })
+                        .catch(error => setChartStatus(spec.canvas, 'Не удалось загрузить график: ' + error.message));
+                });
+            }, { rootMargin: '200px 0px' });
+            CHARTS.forEach(spec => chartObserver.observe(document.getElementById(spec.canvas)));
         }
         
         // Отображение параметров
@@ -422,29 +453,44 @@
             });
         }
         
-        // Инициализация аудио плеера
-        function initAudioPlayer(audioUrl) {
+            // Инициализация аудио плеера: волну рисуем по точкам с сервера,
+        // а сама запись подгружается потоком при воспроизведении
+        function initAudioPlayer(index) {
             if (wavesurfer) {
                 wavesurfer.destroy();
+                wavesurfer = null;
             }
-            
-            wavesurfer = WaveSurfer.create({
-                container: '#waveform',
-                waveColor: '#7fa8bb',
-                progressColor: '#0e5a78',
-                cursorColor: '#b42318',
-                barWidth: 2,
-                barRadius: 3,
-                responsive: true,
-                height: 100,
-                normalize: true
-            });
-            
-            wavesurfer.load(audioUrl);
-            
-            wavesurfer.on('timeupdate', (time) => {
-                currentTime = time;
-                updateChartsTime(time);
+            fetchPart(index, 'waveform').then(data => {
+                const waveform = data.waveform || {};
+                const container = document.getElementById('waveform');
+                container.innerHTML = '';
+                if (!data.audio_url) {
+                    container.innerHTML = '<div class="error">Аудиофайл недоступен</div>';
+                    return;
+                }
+                const options = {
+                    container: '#waveform',
+                    waveColor: '#7fa8bb',
+                    progressColor: '#0e5a78',
+                    cursorColor: '#b42318',
+                    barWidth: 2,
+                    barRadius: 3,
+                    height: 100,
+                    normalize: true,
+                    url: API_URL + data.audio_url
+                };
+                if (waveform.amplitude && waveform.amplitude.length && waveform.duration) {
+                    options.peaks = [waveform.amplitude];
+                    options.duration = waveform.duration;
+                }
+                wavesurfer = WaveSurfer.create(options);
+                wavesurfer.on('timeupdate', (time) => {
+                    currentTime = time;
+                    updateChartsTime(time);
+                });
+            }).catch(error => {
+                document.getElementById('waveform').innerHTML =
+                    `<div class="error">Не удалось загрузить запись: ${error.message}</div>`;
             });
         }
         
@@ -618,123 +664,158 @@
             });
         }
         
-        // Создание спектрограммы
+        // Цвета спектрограммы: от белого (тихо) к темно-синему (громко)
+        const SPECTROGRAM_COLORS = [
+            [0.0, [255, 255, 255]],
+            [0.35, [191, 214, 224]],
+            [0.65, [61, 133, 163]],
+            [0.85, [14, 90, 120]],
+            [1.0, [8, 30, 46]]
+        ];
+        // Тише этого уровня (дБ от самого громкого места) - белый фон
+        const SPECTROGRAM_VISIBLE_DB = -60;
+        
+        function spectrogramColor(t) {
+            t = Math.max(0, Math.min(1, t));
+            for (let k = 1; k < SPECTROGRAM_COLORS.length; k++) {
+                const [t1, c1] = SPECTROGRAM_COLORS[k];
+                if (t <= t1) {
+                    const [t0, c0] = SPECTROGRAM_COLORS[k - 1];
+                    const w = (t - t0) / (t1 - t0);
+                    return c0.map((v, i) => Math.round(v + (c1[i] - v) * w));
+                }
+            }
+            return SPECTROGRAM_COLORS[SPECTROGRAM_COLORS.length - 1][1];
+        }
+        
+        // Спектрограмма рисуется одной картинкой (по пикселю на ячейку сетки),
+        // а не тысячами точек: так она не тормозит при наведении и масштабе
         function createSpectrogramChart(spectrogramData) {
-            const ctx = document.getElementById('spectrogram-chart').getContext('2d');
-            
+            const canvas = document.getElementById('spectrogram-chart');
             if (charts.spectrogram) {
                 charts.spectrogram.destroy();
             }
+            const times = spectrogramData.times;
+            const freqs = spectrogramData.frequencies;
+            const magnitude = spectrogramData.magnitude;
+            const dbMax = spectrogramData.db_max ?? 0;
+            const dbMin = SPECTROGRAM_VISIBLE_DB;
+            const w = times.length;
+            const h = freqs.length;
             
-            if (!spectrogramData || !spectrogramData.times || !spectrogramData.frequencies) {
-                ctx.fillStyle = '#999';
-                ctx.font = '16px Arial';
-                ctx.fillText('Данные спектрограммы недоступны', 10, 50);
-                return;
-            }
-            
-            // Подготовка данных для тепловой карты (упрощенная версия)
-            // Берем каждый 10-й элемент для производительности
-            const data = [];
-            const timeStep = Math.max(1, Math.floor(spectrogramData.times.length / 300));
-            const freqStep = Math.max(1, Math.floor(spectrogramData.frequencies.length / 80));
-            for (let i = 0; i < spectrogramData.times.length; i += timeStep) {
-                for (let j = 0; j < spectrogramData.frequencies.length; j += freqStep) {
-                    if (spectrogramData.magnitude && 
-                        spectrogramData.magnitude[j] && 
-                        spectrogramData.magnitude[j][i] !== undefined) {
-                        const value = spectrogramData.magnitude[j][i];
-                        if (value > -80) { // Фильтр шума
-                            data.push({
-                                x: spectrogramData.times[i],
-                                y: spectrogramData.frequencies[j],
-                                v: value
-                            });
-                            if (data.length >= MAX_POINTS.spectrogram) {
-                                break;
-                            }
-                        }
-                    }
-                }
-                if (data.length >= MAX_POINTS.spectrogram) {
-                    break;
+            const image = document.createElement('canvas');
+            image.width = w;
+            image.height = h;
+            const pixels = image.getContext('2d').createImageData(w, h);
+            for (let i = 0; i < h; i++) {
+                const row = magnitude[i] || [];
+                const y = h - 1 - i;  // низкие частоты внизу
+                for (let j = 0; j < w; j++) {
+                    const [r, g, b] = spectrogramColor((row[j] - dbMin) / (dbMax - dbMin));
+                    const o = (y * w + j) * 4;
+                    pixels.data[o] = r;
+                    pixels.data[o + 1] = g;
+                    pixels.data[o + 2] = b;
+                    pixels.data[o + 3] = 255;
                 }
             }
+            image.getContext('2d').putImageData(pixels, 0, 0);
             
-            if (data.length === 0) {
-                ctx.fillStyle = '#999';
-                ctx.font = '16px Arial';
-                ctx.fillText('Нет данных для отображения', 10, 50);
-                return;
-            }
+            // Шаг сетки: картинка покрывает от первой ячейки до конца последней
+            const dt = w > 1 ? times[1] - times[0] : 1;
+            const df = h > 1 ? freqs[1] - freqs[0] : 1;
+            const tEnd = times[w - 1] + dt;
+            const fEnd = freqs[h - 1] + df;
             
-            charts.spectrogram = new Chart(ctx, {
+            const imagePlugin = {
+                id: 'spectrogramImage',
+                beforeDatasetsDraw(chart) {
+                    const { ctx, chartArea, scales: { x, y } } = chart;
+                    // Видимая часть картинки при увеличении
+                    const sx = (x.min - times[0]) / (tEnd - times[0]) * w;
+                    const sw = (x.max - x.min) / (tEnd - times[0]) * w;
+                    const sy = (1 - y.max / fEnd) * h;
+                    const sh = (y.max - y.min) / fEnd * h;
+                    ctx.save();
+                    ctx.beginPath();
+                    ctx.rect(chartArea.left, chartArea.top, chartArea.width, chartArea.height);
+                    ctx.clip();
+                    ctx.imageSmoothingEnabled = true;
+                    ctx.drawImage(image, sx, sy, sw, sh,
+                                  chartArea.left, chartArea.top, chartArea.width, chartArea.height);
+                    ctx.restore();
+                }
+            };
+            
+            charts.spectrogram = new Chart(canvas.getContext('2d'), {
                 type: 'scatter',
-                data: {
-                    datasets: [{
-                        label: 'Спектрограмма',
-                        data: data,
-                        backgroundColor: (ctx) => {
-                            const value = ctx.raw.v;
-                            const alpha = Math.max(0, Math.min(1, (value + 80) / 80)); // Нормализация -80 до 0 dB
-                            return `rgba(14, 90, 120, ${alpha})`;
-                        },
-                        pointRadius: 2
-                    }]
-                },
+                data: { datasets: [{ data: [] }] },
+                plugins: [imagePlugin],
                 options: {
                     responsive: true,
                     maintainAspectRatio: false,
-                    parsing: false,
-                    normalized: true,
                     animation: false,
+                    events: [],
                     plugins: {
-                        legend: {
-                            display: false
-                        },
-                        tooltip: {
-                            enabled: true,
-                            callbacks: {
-                                label: (ctx) => {
-                                    return `Время: ${ctx.raw.x.toFixed(2)}с, Частота: ${ctx.raw.y.toFixed(0)}Hz, Уровень: ${ctx.raw.v.toFixed(1)}dB`;
-                                }
-                            }
-                        },
+                        legend: { display: false },
+                        tooltip: { enabled: false },
                         zoom: {
-                            zoom: {
-                                wheel: {
-                                    enabled: true
-                                },
-                                pinch: {
-                                    enabled: true
-                                },
-                                mode: 'xy'
-                            },
-                            pan: {
-                                enabled: true,
-                                mode: 'xy'
-                            }
+                            limits: { x: { min: times[0], max: tEnd, minRange: 0.5 } },
+                            zoom: { wheel: { enabled: true }, pinch: { enabled: true }, mode: 'x' },
+                            pan: { enabled: true, mode: 'x' }
                         }
                     },
                     scales: {
                         x: {
                             type: 'linear',
-                            title: {
-                                display: true,
-                                text: 'Время (сек)'
-                            }
+                            min: times[0],
+                            max: tEnd,
+                            title: { display: true, text: 'Время (сек)' },
+                            ticks: { callback: (v) => Number(v.toFixed(1)) }
                         },
                         y: {
                             type: 'linear',
-                            title: {
-                                display: true,
-                                text: 'Частота (Hz)'
-                            },
-                            max: 5000 // Ограничиваем до 5kHz для читаемости
+                            min: 0,
+                            max: Math.min(fEnd, 5000),
+                            title: { display: true, text: 'Частота (Гц)' },
+                            ticks: { stepSize: 500, callback: (v) => Math.round(v) }
                         }
                     }
                 }
             });
+            
+            // Шкала цвета
+            const stops = [];
+            for (let k = 0; k <= 10; k++) {
+                stops.push(`rgb(${spectrogramColor(k / 10).join(',')}) ${k * 10}%`);
+            }
+            document.getElementById('spectrogram-colorbar').style.background =
+                `linear-gradient(to right, ${stops.join(', ')})`;
+            document.getElementById('spectrogram-range').textContent =
+                `(${dbMin} ... ${dbMax} дБ от самого громкого места записи)`;
+            
+            // Значение под курсором: считаем по сетке, без поиска по точкам
+            const readout = document.getElementById('spectrogram-readout');
+            canvas.onmousemove = (event) => {
+                const chart = charts.spectrogram;
+                const rect = canvas.getBoundingClientRect();
+                const px = event.clientX - rect.left;
+                const py = event.clientY - rect.top;
+                const area = chart.chartArea;
+                if (px < area.left || px > area.right || py < area.top || py > area.bottom) {
+                    readout.textContent = 'Наведите на график, чтобы увидеть уровень';
+                    return;
+                }
+                const t = chart.scales.x.getValueForPixel(px);
+                const f = chart.scales.y.getValueForPixel(py);
+                const j = Math.min(w - 1, Math.max(0, Math.floor((t - times[0]) / dt)));
+                const i = Math.min(h - 1, Math.max(0, Math.floor(f / df)));
+                readout.textContent = `${t.toFixed(2)} с, ${Math.round(f)} Гц: ${magnitude[i][j].toFixed(0)} дБ`;
+            };
+            canvas.onmouseleave = () => {
+                readout.textContent = 'Наведите на график, чтобы увидеть уровень';
+            };
+            canvas.ondblclick = () => charts.spectrogram.resetZoom();
         }
         
         // Создание графика интенсивности
