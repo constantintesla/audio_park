@@ -15,7 +15,7 @@ from app.speech_protocol import parse_protocol_segments
 from app.device_model_stats import loop_gain_check, model_spl_offset
 
 from app.speaker_baseline import compare_to_baseline
-from app.audio_processor import thin_spectrogram, SPECTROGRAM_TIMES
+from app.visualization import PARTS as VIZ_PARTS, chart_data, saved_waveform
 from app.task_recordings import task_attempts, source_audio, clip_wav, clip_filename, build_archive
 
 logging.basicConfig(level=logging.INFO)
@@ -378,7 +378,7 @@ def get_results():
                 if result.get('user_info', {}).get('tg_user_id') != user_id:
                     continue
             # Не мутируем исходный объект, чтобы не портить данные на диске
-            result_with_index = dict(result)
+            result_with_index = without_visuals(result)
             result_with_index['_index'] = original_index
             result_with_index['task_recordings'] = task_attempts(result)
             indexed_results.append(result_with_index)
@@ -495,7 +495,7 @@ def get_result(index: int):
         if index < 0 or index >= len(results):
             return jsonify({"error": "Индекс вне диапазона"}), 404
         
-        result = dict(results[index])
+        result = without_visuals(results[index])
         result['_index'] = index
         result['task_recordings'] = task_attempts(result)
         return jsonify(result), 200
@@ -559,162 +559,39 @@ def get_visualization_data(index: int):
             if original_audio and os.path.exists(original_audio):
                 audio_url = f"/api/audio/{index}"
         
-        # Вычисление F0 данных из аудио (если доступно)
-        waveform_data = None
-        f0_data = None
-        intensity_data = None
-        spectrogram_data = None
+        # Какие графики нужны: страница просит каждый отдельно (part=...),
+        # без part считаются все сразу
+        part = request.args.get('part')
+        if part is not None and part not in VIZ_PARTS:
+            return jsonify({"error": f"Неизвестный график: {part}"}), 400
+        parts = (part,) if part else VIZ_PARTS
         
         # Используем обработанное аудио, если доступно, иначе исходное
-        audio_file_for_f0 = None
+        audio_file = None
         if processed_audio and os.path.exists(processed_audio):
-            audio_file_for_f0 = processed_audio
+            audio_file = processed_audio
         else:
             original_audio = raw_data.get('files', {}).get('original_audio')
             if original_audio and os.path.exists(original_audio):
-                audio_file_for_f0 = original_audio
+                audio_file = original_audio
         
-        if audio_file_for_f0:
+        charts = {p: {} for p in parts}
+        if audio_file:
             try:
-                from app.audio_processor import AudioProcessor
-                import librosa
-                import numpy as np
-                
-                audio_processor = AudioProcessor(target_sr=16000)
-                
-                # Загрузка аудио
-                audio, sr = audio_processor.load_audio(audio_file_for_f0)
-                waveform_data = clean_json_values(audio_processor.get_waveform(
-                    audio_processor.normalize_loudness(audio, sr)[0]))
-                
-                # Извлечение F0
-                try:
-                    import parselmouth
-                    audio_normalized = audio / (np.max(np.abs(audio)) + 1e-10)
-                    sound = parselmouth.Sound(audio_normalized, sampling_frequency=sr)
-                    pitch = sound.to_pitch_ac(time_step=0.01)
-                    
-                    f0_times = pitch.xs()
-                    f0_values = pitch.selected_array['frequency']
-                    
-                    # Фильтруем валидные значения (исключаем NaN и inf)
-                    valid_indices = (f0_values > 0) & np.isfinite(f0_values)
-                    if np.any(valid_indices):
-                        f0_times_valid = f0_times[valid_indices]
-                        f0_values_valid = f0_values[valid_indices]
-                        f0_mean = float(np.mean(f0_values_valid))
-                        # Проверяем на NaN и inf
-                        if not (math.isnan(f0_mean) or math.isinf(f0_mean)):
-                            f0_data = {
-                                'time': [float(t) for t in f0_times_valid if np.isfinite(t)],
-                                'values': [float(v) for v in f0_values_valid if np.isfinite(v)],
-                                'mean': f0_mean
-                            }
-                        else:
-                            f0_data = None
-                    else:
-                        f0_data = None
-                except Exception as e:
-                    logger.warning(f"Ошибка извлечения F0 через parselmouth: {e}")
-                    # Fallback на librosa
-                    f0 = librosa.pyin(audio, fmin=50, fmax=500)
-                    f0_times = librosa.frames_to_time(np.arange(len(f0[0])), sr=sr)
-                    valid_indices = ~np.isnan(f0[0]) & np.isfinite(f0[0])
-                    if np.any(valid_indices):
-                        f0_values_valid = f0[0][valid_indices]
-                        f0_times_valid = f0_times[valid_indices]
-                        f0_mean = float(np.mean(f0_values_valid))
-                        # Проверяем на NaN и inf
-                        if not (math.isnan(f0_mean) or math.isinf(f0_mean)):
-                            f0_data = {
-                                'time': [float(t) for t in f0_times_valid if np.isfinite(t)],
-                                'values': [float(v) for v in f0_values_valid if np.isfinite(v)],
-                                'mean': f0_mean
-                            }
-                        else:
-                            f0_data = None
-                    else:
-                        f0_data = None
-                
-                # Извлечение интенсивности
-                try:
-                    import parselmouth
-                    audio_normalized = audio / (np.max(np.abs(audio)) + 1e-10)
-                    sound = parselmouth.Sound(audio_normalized, sampling_frequency=sr)
-                    intensity = sound.to_intensity(time_step=0.01)
-                    intensity_times = intensity.xs()
-                    intensity_values = intensity.values[0]
-                    
-                    # Фильтруем NaN и inf значения
-                    valid_indices = np.isfinite(intensity_values)
-                    if np.any(valid_indices):
-                        intensity_data = {
-                            'time': [float(t) for t in intensity_times if np.isfinite(t)],
-                            'values': [float(v) for v in intensity_values[valid_indices] if np.isfinite(v)]
-                        }
-                    else:
-                        intensity_data = None
-                except Exception as e:
-                    logger.warning(f"Ошибка извлечения интенсивности: {e}")
-                    # Fallback через RMS
-                    frame_length = int(0.025 * sr)
-                    hop_length = int(0.010 * sr)
-                    rms = librosa.feature.rms(y=audio, frame_length=frame_length, hop_length=hop_length)[0]
-                    rms_times = librosa.frames_to_time(np.arange(len(rms)), sr=sr, hop_length=hop_length)
-                    # Конвертация в dB
-                    rms_db = 20 * np.log10(rms + 1e-10)
-                    # Фильтруем NaN и inf значения
-                    valid_indices = np.isfinite(rms_db)
-                    if np.any(valid_indices):
-                        intensity_data = {
-                            'time': [float(t) for t in rms_times if np.isfinite(t)],
-                            'values': [float(v) for v in rms_db[valid_indices] if np.isfinite(v)]
-                        }
-                    else:
-                        intensity_data = None
-                
-                # Извлечение спектрограммы
-                freqs, times, spectrogram = audio_processor.get_spectrogram(
-                    audio, sr, max_frames=SPECTROGRAM_TIMES)
-                # Ограничиваем частоты до 5kHz для визуализации
-                freq_mask = freqs <= 5000
-                freqs_filtered = freqs[freq_mask]
-                spectrogram_filtered = spectrogram[freq_mask, :]
-                
-                # Странице нужна сетка не больше 300 x 80: полную спектрограмму
-                # длинной записи (миллионы чисел) не держим в памяти списками
-                freqs_filtered, times_thin, spectrogram_thin = thin_spectrogram(
-                    freqs_filtered, times, spectrogram_filtered)
-                freq_valid = [float(f) for f in freqs_filtered if np.isfinite(f)]
-                times_valid = [float(t) for t in times_thin if np.isfinite(t)]
-                # NaN и inf заменяем на -80 dB (минимальное значение для визуализации)
-                magnitude_cleaned = np.round(np.where(np.isfinite(spectrogram_thin),
-                                                      spectrogram_thin, -80.0), 1).tolist()
-                
-                spectrogram_data = {
-                    'frequencies': freq_valid,
-                    'times': times_valid,
-                    'magnitude': magnitude_cleaned
-                }
-                
+                charts = chart_data(audio_file, parts)
             except Exception as e:
-                logger.error(f"Ошибка обработки аудио для визуализации: {e}")
-                import traceback
-                traceback.print_exc()
+                logger.error(f"Ошибка обработки аудио для визуализации: {e}", exc_info=True)
         
-        # Без аудио волну берем из сохраненного файла (старые записи хранят в нем
-        # каждый отсчет, поэтому прореживаем так же, как при расчете из аудио)
+        # Без аудио волну берем из сохраненного файла
         waveform_file = raw_data.get('files', {}).get('waveform_data')
-        if waveform_data is None and waveform_file and os.path.exists(waveform_file):
+        if 'waveform' in parts and not charts['waveform'] and waveform_file and os.path.exists(waveform_file):
             try:
-                from app.audio_processor import AudioProcessor
-                with open(waveform_file, 'r', encoding='utf-8') as f:
-                    saved = json.load(f)
-                amplitude = np.nan_to_num(np.asarray(saved.get('amplitude', []), dtype=float))
-                del saved
-                waveform_data = clean_json_values(AudioProcessor(target_sr=16000).get_waveform(amplitude))
+                charts['waveform'] = saved_waveform(waveform_file)
             except Exception as e:
                 logger.warning(f"Ошибка загрузки waveform данных: {e}")
+        
+        if part:
+            return jsonify(clean_json_values({**charts, 'audio_url': audio_url})), 200
         
         # Подготовка данных сегментов с временными метками
         segments_with_time = []
@@ -737,10 +614,7 @@ def get_visualization_data(index: int):
         
         # Формирование ответа
         visualization_data = {
-            'waveform': waveform_data or {},
-            'f0_data': f0_data or {},
-            'intensity': intensity_data or {},
-            'spectrogram': spectrogram_data or {},
+            **charts,
             'segments': segments_with_time,
             'audio_url': audio_url,
             'spectrogram_meta': spectrogram_meta or {}

@@ -1059,6 +1059,52 @@ main {
     height: 400px;
 }
 
+/* Подпись поверх графика, пока он грузится */
+.chart-status {
+    position: absolute;
+    inset: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    color: var(--text-muted);
+    font-size: 14px;
+    pointer-events: none;
+}
+
+.chart-status:empty {
+    display: none;
+}
+
+/* Шкала цвета и значение под курсором у спектрограммы */
+.spectrogram-legend {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 8px 16px;
+    margin: 0 20px 20px;
+    font-size: 13px;
+    color: var(--text-muted);
+}
+
+.colorbar {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+.colorbar-strip {
+    width: 180px;
+    height: 12px;
+    border: 1px solid var(--border);
+    border-radius: 3px;
+}
+
+.spectrogram-readout {
+    margin-left: auto;
+    font-variant-numeric: tabular-nums;
+    color: var(--text);
+}
+
 .loading {
     text-align: center;
     padding: 40px;
