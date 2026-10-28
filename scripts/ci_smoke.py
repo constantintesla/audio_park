@@ -256,7 +256,7 @@ def check_api(wav_path: str) -> None:
     from app import api
 
     client = api.app.test_client()
-    for route in ("/", "/results", "/visualization", "/api/results", "/api/stats",
+    for route in ("/", "/results", "/visualization", "/api/results", "/api/stats", "/api/health",
                   "/assets/theme.css", "/assets/exam_tasks.js"):
         resp = client.get(route)
         assert resp.status_code == 200, f"GET {route} -> {resp.status_code}"
@@ -308,6 +308,19 @@ def check_api(wav_path: str) -> None:
     names = zipfile.ZipFile(io.BytesIO(archive.data)).namelist()
     for name in ("recording.wav", "calibration.wav", "results.json", "tasks/01_mpt_1.wav", "tasks/02_vowel_1.wav"):
         assert name in names, names
+
+    # Визуализация: графики прорежены, полная запись (каждый отсчет) в ответ не попадает
+    viz = client.get(f"/api/visualization/{result['_index']}")
+    assert viz.status_code == 200, viz.status_code
+    viz = viz.get_json()
+    assert 0 < len(viz["waveform"]["amplitude"]) <= 5000, len(viz["waveform"]["amplitude"])
+    spec = viz["spectrogram"]
+    assert len(spec["times"]) <= 600 and len(spec["frequencies"]) <= 160, (len(spec["times"]), len(spec["frequencies"]))
+    assert len(spec["magnitude"]) == len(spec["frequencies"]) and len(spec["magnitude"][0]) == len(spec["times"])
+    with open("results.json", encoding="utf-8") as f:
+        assert not any("visuals" in r for r in json.load(f)), "картинки base64 попали в results.json"
+    saved = result["raw_data"]["files"]["waveform_data"]
+    assert os.path.getsize(saved) < 1_000_000, f"waveform_data.json {os.path.getsize(saved)} байт"
     print("api: ok")
 
 

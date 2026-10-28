@@ -15,10 +15,14 @@ services:
       - DEBUG=${DEBUG:-False}
       - HOST=0.0.0.0
     restart: unless-stopped
+    # Потолок памяти: обычно сервис держит 300-450 МБ, пик анализа длинной записи
+    # около 0,6 ГБ. Если что-то пойдет не так, контейнер перезапустится,
+    # а соседние сервисы на сервере не пострадают.
+    mem_limit: 1g
     networks:
       - parkinson_network
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:5000/api/stats"]
+      test: ["CMD", "curl", "-f", "http://localhost:5000/api/health"]
       interval: 30s
       timeout: 10s
       retries: 3

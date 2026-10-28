@@ -171,6 +171,7 @@ audio_park/
 - `POST /api/results` - Сохранить результат анализа
 - `GET /api/results/<index>` - Получить конкретный результат
 - `POST /api/recalculate-all` - Пересчитать все результаты с обновленными алгоритмами
+- `GET /api/health` - Проверка, что сервер жив (для healthcheck)
 - `GET /api/stats` - Получить статистику
 - `GET /api/visualization/<index>` - Получить данные для визуализации
 - `GET /api/audio/<index>` - Получить аудиофайл
