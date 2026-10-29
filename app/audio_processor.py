@@ -3,7 +3,24 @@
 """
 import librosa
 import numpy as np
-from typing import Tuple, List, Optional, Dict
+from typing import Tuple, List, Dict
+
+# Сколько точек отдавать на графики: страница визуализации рисует
+# не больше 5000 точек волны и сетку спектрограммы 300 x 80 (отдаем ее с запасом вдвое)
+WAVEFORM_POINTS = 5000
+SPECTROGRAM_TIMES = 600
+SPECTROGRAM_FREQS = 160
+# Картинка спектрограммы в отчете шириной 1000 пикселей
+REPORT_SPECTROGRAM_FRAMES = 2000
+
+
+def thin_spectrogram(freqs: np.ndarray, times: np.ndarray, spectrogram: np.ndarray,
+                     max_freqs: int = SPECTROGRAM_FREQS,
+                     max_times: int = SPECTROGRAM_TIMES) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
+    """Прореживание спектрограммы до сетки, которую реально рисует график"""
+    f_step = max(1, int(np.ceil(len(freqs) / max_freqs)))
+    t_step = max(1, int(np.ceil(len(times) / max_times)))
+    return freqs[::f_step], times[::t_step], spectrogram[::f_step, ::t_step]
 
 
 class AudioProcessor:
@@ -141,143 +158,65 @@ class AudioProcessor:
         info['normalized'] = True
         return normalized.astype(audio.dtype, copy=False), info
     
-    def noise_reduction(self, audio: np.ndarray) -> np.ndarray:
+    def get_waveform(self, audio: np.ndarray, max_points: int = WAVEFORM_POINTS) -> dict:
         """
-        Простая редукция шума
-        
+        Получение данных волновой формы для графика
+
+        Каждый отсчет не нужен: график рисует не больше нескольких тысяч точек,
+        а полная запись в 7 минут - это 6,7 млн чисел (сотни МБ в JSON и в памяти).
+        Поэтому берем пик (по модулю, со знаком) в каждом из max_points отрезков.
+
         Args:
             audio: Аудиомассив
-        
-        Returns:
-            Очищенный аудиомассив
-        
-        Примечание: Используется мягкая фильтрация, чтобы не искажать речевой сигнал.
-        Для анализа голоса важно сохранить естественные характеристики сигнала.
-        """
-        try:
-            from scipy import signal
-            
-            # Мягкая фильтрация очень низкочастотного шума (ниже 50 Гц)
-            # Это удаляет гул и низкочастотные артефакты, не затрагивая речевой сигнал
-            # Речь обычно находится в диапазоне 80-8000 Гц
-            nyquist = self.target_sr / 2
-            low_cutoff = 50.0 / nyquist  # 50 Гц high-pass фильтр
-            
-            # Используем более мягкий фильтр (2-й порядок вместо 3-го)
-            # и более низкую частоту среза, чтобы не искажать речь
-            b, a = signal.butter(2, low_cutoff, 'high')
-            filtered_audio = signal.filtfilt(b, a, audio)
-            
-            # Нормализация для сохранения динамического диапазона
-            # Не перенормализуем слишком сильно, чтобы сохранить естественную громкость
-            max_val = np.max(np.abs(filtered_audio))
-            if max_val > 0:
-                # Мягкая нормализация: масштабируем только если сигнал слишком тихий
-                if max_val < 0.1:
-                    filtered_audio = filtered_audio * (0.5 / max_val)
-                else:
-                    # Если сигнал уже достаточно громкий, только слегка нормализуем
-                    filtered_audio = filtered_audio * min(1.0, 0.95 / max_val)
-            
-            return filtered_audio
-        except Exception as e:
-            # Если фильтрация не удалась, возвращаем исходный сигнал
-            print(f"Предупреждение: ошибка фильтрации шума: {str(e)}")
-            return audio
-    
-    def segment_utterances(self, audio: np.ndarray, sr: int, 
-                          min_duration: float = 0.5,
-                          silence_threshold: float = 0.02) -> List[np.ndarray]:
-        """
-        Сегментация на высказывания по паузам
-        
-        Args:
-            audio: Аудиомассив
-            sr: Частота дискретизации
-            min_duration: Минимальная длительность сегмента (сек)
-            silence_threshold: Порог тишины для обнаружения пауз
-        
-        Returns:
-            Список сегментов аудио
-        """
-        # Обнаружение пауз
-        frame_length = int(0.025 * sr)  # 25ms кадры
-        hop_length = int(0.010 * sr)    # 10ms шаг
-        
-        rms = librosa.feature.rms(y=audio, frame_length=frame_length, 
-                                 hop_length=hop_length)[0]
-        
-        # Пороговое значение для тишины
-        silence_frames = rms < silence_threshold
-        
-        # Поиск границ сегментов
-        segments = []
-        start_idx = 0
-        
-        for i in range(1, len(silence_frames)):
-            # Начало нового сегмента
-            if silence_frames[i-1] and not silence_frames[i]:
-                if start_idx > 0:
-                    end_idx = (i - 1) * hop_length
-                    segment = audio[start_idx:end_idx]
-                    if len(segment) / sr >= min_duration:
-                        segments.append(segment)
-                start_idx = i * hop_length
-            # Конец сегмента
-            elif not silence_frames[i-1] and silence_frames[i]:
-                pass  # Продолжаем
-        
-        # Добавляем последний сегмент
-        if start_idx < len(audio):
-            segment = audio[start_idx:]
-            if len(segment) / sr >= min_duration:
-                segments.append(segment)
-        
-        # Если не найдено сегментов, возвращаем весь файл
-        if not segments:
-            segments = [audio]
-        
-        return segments
-    
-    def get_waveform(self, audio: np.ndarray) -> dict:
-        """
-        Получение данных волновой формы
-        
-        Args:
-            audio: Аудиомассив
-        
+            max_points: Сколько точек оставить
+
         Returns:
             Словарь с данными волновой формы
         """
         duration = len(audio) / self.target_sr
-        time_axis = np.linspace(0, duration, len(audio))
+        step = max(1, int(np.ceil(len(audio) / max_points)))
+        n = len(audio) // step * step
+        if step > 1 and n:
+            blocks = audio[:n].reshape(-1, step)
+            amplitude = blocks[np.arange(len(blocks)), np.argmax(np.abs(blocks), axis=1)]
+        else:
+            amplitude = np.asarray(audio)
+        time_axis = np.arange(len(amplitude)) * step / self.target_sr
         return {
-            "amplitude": audio,
-            "time": time_axis,
+            "amplitude": np.round(amplitude.astype(float), 5),
+            "time": np.round(time_axis, 4),
             "duration": duration
         }
-    
-    def get_spectrogram(self, audio: np.ndarray, sr: int) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
+
+    def get_spectrogram(self, audio: np.ndarray, sr: int,
+                        max_frames: int = None) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
         """
         Получение спектрограммы
         
         Args:
             audio: Аудиомассив
             sr: Частота дискретизации
+            max_frames: Не больше стольких кадров по времени (для графиков):
+                у длинной записи шаг кадров растет, и спектрограмма не занимает
+                сотни МБ
         
         Returns:
             Tuple[частоты, времена, амплитуды]
         """
+        hop_length = 512
+        if max_frames:
+            hop_length = max(hop_length, int(np.ceil(len(audio) / max_frames)))
         # Извлечение спектрограммы
-        stft = librosa.stft(audio, hop_length=512, win_length=2048)
+        stft = librosa.stft(audio, hop_length=hop_length, win_length=2048)
         magnitude = np.abs(stft)
+        del stft
         
         # Логарифмическая шкала для визуализации
         spectrogram = librosa.amplitude_to_db(magnitude, ref=np.max)
         
         # Временные и частотные оси
         times = librosa.frames_to_time(np.arange(magnitude.shape[1]), 
-                                      sr=sr, hop_length=512)
+                                      sr=sr, hop_length=hop_length)
         frequencies = librosa.fft_frequencies(sr=sr, n_fft=2048)
         
         return frequencies, times, spectrogram

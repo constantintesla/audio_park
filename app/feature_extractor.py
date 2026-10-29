@@ -30,6 +30,81 @@ PRAAT_DB_AT_FULL_SCALE = 20.0 * math.log10(1.0 / 2e-5)
 DEFAULT_SPL_OFFSET_DB = 120.0
 
 
+def frame_db(audio: np.ndarray, sr: int) -> np.ndarray:
+    """Уровень кадров 25 мс с шагом 10 мс, дБ"""
+    frame = int(0.025 * sr)
+    if len(audio) < frame:
+        return np.array([])
+    frames = np.lib.stride_tricks.sliding_window_view(audio, frame)[::int(0.01 * sr)]
+    return 10 * np.log10(np.mean(frames ** 2, axis=1) + 1e-12)
+
+
+def silence_threshold_db(db: np.ndarray, floor_db: Optional[float] = None) -> float:
+    """
+    Граница тишины: на 25 дБ тише громкой части, но не ниже шума + 6 дБ.
+    floor_db - уровень шума; если не задан, берется по самым тихим кадрам (5%),
+    в куске с паузами или с запасом тишины по краям это шум комнаты.
+    """
+    if floor_db is None:
+        floor_db = float(np.percentile(db, 5))
+    return max(float(np.percentile(db, 99)) - 25.0, floor_db + 6.0)
+
+
+def syllable_nuclei(audio: np.ndarray, sr: int):
+    """
+    Ядра слогов и паузы (по мотивам de Jong & Wempe 2009).
+
+    Ядро слога - пик громкости в полосе гласных 300-2500 Гц с провалом вокруг
+    хотя бы 3 дБ, в котором есть тон. Без полосы и проверки тона шипящие и
+    свистящие (ш, с) сами давали пик, и «ша-ша-ша» считалось за 6 слогов.
+    Пауза - тишина от 0.25 с между началом и концом речи; тишина - на 25 дБ
+    тише громкой части записи, поэтому не зависит от усиления микрофона.
+    В шумной записи (шум ближе 25 дБ к голосу) порог поднимается над шумом
+    (silence_threshold_db), иначе шум между фразами считался речью и паузы пропадали.
+
+    Returns:
+        (времена ядер в секундах, длительность звучания без пауз в секундах, доля пауз)
+    """
+    from scipy.signal import butter, find_peaks, sosfiltfilt
+
+    hop = int(0.01 * sr)
+    frame = int(0.025 * sr)
+    if len(audio) < frame + 10 * hop:
+        return np.array([]), 0.0, 0.0
+    kernel = np.hanning(7)
+    kernel /= kernel.sum()
+
+    def smooth_db(x):
+        return np.convolve(frame_db(x, sr), kernel, mode='same')  # сглаживание ~50 мс
+
+    db = smooth_db(audio)
+    speech = db > silence_threshold_db(db)
+    idx = np.flatnonzero(speech)
+    if len(idx) == 0:
+        return np.array([]), 0.0, 0.0
+    first, last = idx[0], idx[-1] + 1
+    pause = run = 0
+    for is_speech in speech[first:last]:
+        if is_speech:
+            if run >= 25:
+                pause += run
+            run = 0
+        else:
+            run += 1
+    span = last - first
+
+    band_db = smooth_db(sosfiltfilt(butter(4, [300 / (sr / 2), 2500 / (sr / 2)], 'band', output='sos'), audio))
+    # Не чаще чем раз в 80 мс (больше 12 слогов в секунду не бывает)
+    peaks, _ = find_peaks(band_db, height=silence_threshold_db(band_db), prominence=3.0, distance=8)
+    times = peaks * 0.01 + frame / (2 * sr)  # центр кадра
+    if HAS_PARSELMOUTH and len(times):
+        sound = parselmouth.Sound(audio / (np.max(np.abs(audio)) + 1e-10), sampling_frequency=sr)
+        pitch = sound.to_pitch_ac(time_step=0.01, pitch_floor=60.0, pitch_ceiling=600.0)
+        f0 = np.array([pitch.get_value_at_time(t) for t in times])
+        times = times[np.isfinite(f0) & (f0 > 0)]
+    return times, (span - pause) * 0.01, pause / span if span else 0.0
+
+
 class FeatureExtractor:
     """Класс для извлечения акустических признаков"""
     
@@ -97,8 +172,9 @@ class FeatureExtractor:
         try:
             # Извлечение F0 (fundamental frequency)
             pitch = sound.to_pitch_ac(time_step=0.01)
-            f0_values = pitch.selected_array['frequency']
-            f0_values = f0_values[f0_values > 0]  # Убираем незаполненные значения
+            f0_track = pitch.selected_array['frequency']
+            features.update(self._voicing_features(f0_track, 0.01))
+            f0_values = f0_track[f0_track > 0]  # Убираем незаполненные значения
             
             if len(f0_values) > 0:
                 f0_mean = np.mean(f0_values)
@@ -106,101 +182,31 @@ class FeatureExtractor:
                 features['f0_mean_hz'] = float(f0_mean)
                 features['f0_sd_hz'] = float(f0_std)
                 
-                # Jitter (вариация периода) - используем встроенный метод parselmouth/Praat
-                # Это более точный расчет, соответствующий стандартам
+                # Jitter и shimmer - стандартные измерения Praat по меткам периодов
+                # (PointProcess): от них отсчитаны нормы (MDVP, Little 2004) и коэффициенты DSI.
+                # Аргументы: время от/до (0, 0 = вся запись), самый короткий и самый длинный
+                # период, во сколько раз соседние периоды (и амплитуды для shimmer) могут
+                # различаться, чтобы пара еще учитывалась.
                 try:
-                    # Используем Praat функцию для расчета jitter (local)
-                    # Jitter (local) = mean absolute difference between consecutive periods / mean period * 100
-                    # Это стандартная формула, используемая в исследованиях
-                    from parselmouth.praat import call
-                    
-                    # Создаем PointProcess для расчета jitter через Praat
-                    # Параметры: minimum pitch (Hz), maximum pitch (Hz)
                     point_process = call(sound, "To PointProcess (periodic, cc)", 50, 500)
-                    
-                    # Диапазон периодов: от 1/500 Гц до 1/50 Гц (50-500 Гц для F0)
-                    min_period = 1.0 / 500.0  # 0.002 сек (500 Гц)
-                    max_period = 1.0 / 50.0   # 0.02 сек (50 Гц)
-                    
-                    # Jitter (local) с правильными параметрами:
-                    # minimum period, maximum period, maximum period factor, maximum amplitude factor
-                    # Параметры для фильтрации выбросов:
-                    # - maximum period factor: 1.3 (допускает вариацию до 30%)
-                    # - maximum amplitude factor: 1.6 (допускает вариацию амплитуды до 60%)
-                    jitter_local = call(point_process, "Get jitter (local)", 
-                                       min_period, max_period, 0.0001, 0.02, 1.3)
-                    # Praat возвращает значение как долю (0.01 = 1%), конвертируем в проценты
-                    jitter_percent = jitter_local * 100
-                    
-                    # Проверяем результат Praat на валидность
-                    if jitter_percent is None or math.isnan(jitter_percent) or math.isinf(jitter_percent):
-                        # Если Praat вернул недопустимое значение, используем наш метод
-                        jitter_percent = self._calculate_jitter(f0_values)
-                    elif jitter_percent <= 0 or jitter_percent > 10.0:
-                        # Если значение подозрительное (0 или слишком большое), используем наш метод
-                        jitter_fallback = self._calculate_jitter(f0_values)
-                        # Используем наш метод, если он дает разумное значение
-                        if jitter_fallback > 0 and jitter_fallback <= 5.0:
-                            jitter_percent = jitter_fallback
-                        elif jitter_percent > 10.0:
-                            # Если Praat дал подозрительно большое значение, используем fallback
-                            # но не ограничиваем - возможно это реальное значение
-                            pass
-                    else:
-                        # Если значение разумное, но слишком высокое для здорового голоса,
-                        # дополнительно проверяем нашим методом
-                        if jitter_percent > 1.5:  # Если превышает порог для здоровых
-                            jitter_fallback = self._calculate_jitter(f0_values)
-                            # Используем более консервативный подход: минимум из двух методов
-                            if jitter_fallback > 0 and jitter_fallback < jitter_percent:
-                                jitter_percent = jitter_fallback
-                            # Дополнительная проверка: если оба метода дают >1.5%, но fallback ниже,
-                            # используем среднее значение для более точной оценки
-                            elif jitter_fallback > 0 and jitter_fallback <= 1.5 and jitter_percent > 2.0:
-                                # Если fallback в норме, а Praat завышает - используем среднее
-                                jitter_percent = (jitter_percent + jitter_fallback) / 2
-                    
-                    # Проверяем только на валидность (положительное и конечное значение)
-                    # Не ограничиваем значения - используем настоящие результаты расчета
-                    if jitter_percent > 0 and np.isfinite(jitter_percent):
-                        features['jitter_percent'] = float(jitter_percent)
-                    else:
-                        # Только если значение невалидное, используем минимальное
-                        features['jitter_percent'] = 0.01
+                    jitter_args = (0, 0, 0.0001, 0.02, 1.3)
+                    shimmer_args = jitter_args + (1.6,)
+                    perturbation = {
+                        'jitter_percent': call(point_process, "Get jitter (local)", *jitter_args),
+                        'jitter_rap': call(point_process, "Get jitter (rap)", *jitter_args),
+                        'jitter_ppq5': call(point_process, "Get jitter (ppq5)", *jitter_args),
+                        'shimmer_percent': call([sound, point_process], "Get shimmer (local)", *shimmer_args),
+                        'shimmer_apq': call([sound, point_process], "Get shimmer (apq3)", *shimmer_args),
+                    }
+                    for key, value in perturbation.items():
+                        if value is not None and np.isfinite(value) and value > 0:
+                            features[key] = float(value * 100)  # Praat возвращает долю
                 except Exception as e:
-                    print(f"Предупреждение: не удалось рассчитать jitter через Praat: {str(e)}")
-                    # Fallback на наш улучшенный метод
+                    print(f"Предупреждение: не удалось рассчитать jitter/shimmer через Praat: {str(e)}")
+                # Если Praat не нашел пар периодов, jitter оцениваем по треку F0
+                if 'jitter_percent' not in features:
                     features['jitter_percent'] = self._calculate_jitter(f0_values)
-                
-                # Shimmer (вариация амплитуды)
-                # Примечание: В Praat команда "Get shimmer (local)" требует одновременного выделения
-                # Sound и PointProcess, что сложно реализовать через parselmouth.
-                # Используем наш надежный fallback метод, который работает напрямую со Sound и pitch.
-                # Этот метод соответствует стандартной формуле shimmer (local) и дает точные результаты.
-                try:
-                    features['shimmer_percent'] = self._calculate_shimmer(sound, f0_values, pitch)
-                except Exception as e:
-                    print(f"Предупреждение: не удалось рассчитать shimmer: {str(e)}")
-                    features['shimmer_percent'] = 0.0
-                
-                # RAP (Relative Average Perturbation)
-                if len(f0_values) > 2:
-                    periods = 1.0 / f0_values
-                    rap = np.mean(np.abs(np.diff(periods))) / np.mean(periods) * 100
-                    features['jitter_rap'] = float(rap)
-                    
-                    # PPQ5 (5-point Period Perturbation Quotient)
-                    if len(periods) >= 5:
-                        ppq5_values = []
-                        for i in range(2, len(periods) - 2):
-                            local_mean = np.mean(periods[i-2:i+3])
-                            ppq5_values.append(abs(periods[i] - local_mean) / local_mean)
-                        features['jitter_ppq5'] = float(np.mean(ppq5_values) * 100)
-                
-                # APQ (Amplitude Perturbation Quotient) для shimmer
-                if len(f0_values) > 2:
-                    apq = self._calculate_apq(sound, f0_values, pitch)
-                    features['shimmer_apq'] = float(apq)
+                features.setdefault('shimmer_percent', 0.0)
             else:
                 # Нет вокализации
                 features['f0_mean_hz'] = 0.0
@@ -217,6 +223,44 @@ class FeatureExtractor:
         
         return features
     
+    @staticmethod
+    def _voicing_features(f0_track: np.ndarray, time_step: float) -> Dict[str, float]:
+        """
+        Признаки озвончения по треку F0 (0 = кадр без тона):
+        - f0_sd_semitones: разброс высоты тона в полутонах. В отличие от SD в Гц
+          не зависит от пола и среднего тона (у мужчин SD в Гц вдвое меньше);
+        - voiced_sec: суммарная длительность озвонченных кадров;
+        - longest_voiced_sec: самый длинный непрерывный озвонченный участок.
+          В обычной речи тон прерывается на глухих согласных и паузах, поэтому
+          длинный непрерывный участок, занимающий большую часть записи, означает
+          протяжную гласную.
+        """
+        f0_track = np.nan_to_num(np.asarray(f0_track, dtype=float))
+        voiced = f0_track > 0
+        features = {'f0_sd_semitones': 0.0, 'voiced_sec': 0.0, 'longest_voiced_sec': 0.0}
+        if not np.any(voiced):
+            return features
+        
+        f0_voiced = f0_track[voiced]
+        semitones = 12.0 * np.log2(f0_voiced / np.median(f0_voiced))
+        features['f0_sd_semitones'] = float(np.std(semitones))
+        features['voiced_sec'] = float(np.sum(voiced) * time_step)
+        
+        # Короткие провалы трекера (до 50 мс) внутри гласной не считаем разрывом
+        max_gap = int(round(0.05 / time_step))
+        longest = current = gap = 0
+        for is_voiced in voiced:
+            if is_voiced:
+                current += 1 + gap
+                gap = 0
+            elif current > 0 and gap < max_gap:
+                gap += 1
+            else:
+                current = gap = 0
+            longest = max(longest, current)
+        features['longest_voiced_sec'] = float(longest * time_step)
+        return features
+    
     def _filter_f0_for_jitter(self, f0_values: np.ndarray) -> np.ndarray:
         """
         Умеренная фильтрация F0 для точного расчета jitter
@@ -229,7 +273,6 @@ class FeatureExtractor:
         
         # Уровень 1: Базовая фильтрация через IQR (межквартильный размах)
         # Используем более мягкий порог: 2.5 * IQR вместо 1.5 * IQR
-        median_f0 = np.median(f0_values)
         q1 = np.percentile(f0_values, 25)
         q3 = np.percentile(f0_values, 75)
         iqr = q3 - q1
@@ -277,7 +320,6 @@ class FeatureExtractor:
         if len(filtered_f0) < 2:
             # Если фильтрация удалила слишком много, используем исходные значения с мягкой фильтрацией
             if len(f0_values) > 10:
-                median_f0 = np.median(f0_values)
                 q1 = np.percentile(f0_values, 25)
                 q3 = np.percentile(f0_values, 75)
                 iqr = q3 - q1
@@ -312,73 +354,6 @@ class FeatureExtractor:
             return float(jitter)
         
         return 0.01  # Только если расчет невозможен (нет данных)
-    
-    def _calculate_shimmer(self, sound, 
-                          f0_values: np.ndarray,
-                          pitch=None) -> float:
-        """
-        Расчет shimmer как процент вариации амплитуды
-        
-        Shimmer измеряет вариацию амплитуды между соседними периодами F0
-        Норма: 2-4%, патология: >6-12%
-        """
-        if len(f0_values) < 2:
-            return 0.0
-        
-        try:
-            # Если pitch объект не передан, получаем его
-            if pitch is None:
-                pitch = sound.to_pitch_ac(time_step=0.01)
-            
-            # Получаем все F0 значения с временными метками из pitch объекта
-            pitch_times = pitch.xs()  # Временные метки для каждого F0 значения
-            pitch_freqs = pitch.selected_array['frequency']  # Все F0 значения (включая 0)
-            
-            # Получаем интенсивность с тем же временным шагом
-            intensity = sound.to_intensity(time_step=0.01)
-            intensity_times = intensity.xs()
-            intensity_values = intensity.values[0]
-            
-            # Собираем амплитуды только для валидных F0 значений (f0 > 0)
-            amplitudes = []
-            for i, f0_freq in enumerate(pitch_freqs):
-                if f0_freq > 0 and i < len(pitch_times):
-                    time_point = pitch_times[i]
-                    
-                    # Находим ближайший индекс в массиве интенсивности
-                    # Интенсивность и pitch имеют одинаковый time_step (0.01)
-                    if len(intensity_times) > 0:
-                        intensity_idx = int(round((time_point - intensity_times[0]) / 0.01))
-                        
-                        if 0 <= intensity_idx < len(intensity_values):
-                            amp = intensity_values[intensity_idx]
-                            if amp > 0:
-                                amplitudes.append(amp)
-            
-            if len(amplitudes) >= 2:
-                # Shimmer = средняя абсолютная разница амплитуд / средняя амплитуда * 100
-                # Это стандартная формула shimmer (local, shimmer %)
-                amp_diff = np.abs(np.diff(amplitudes))
-                mean_amp = np.mean(amplitudes)
-                
-                if mean_amp > 0:
-                    shimmer = (np.mean(amp_diff) / mean_amp) * 100
-                    # Возвращаем настоящее значение без ограничений
-                    if np.isfinite(shimmer) and shimmer >= 0:
-                        return float(shimmer)
-        except Exception as e:
-            print(f"Ошибка расчета shimmer: {str(e)}")
-            import traceback
-            traceback.print_exc()
-        
-        return 0.0
-    
-    def _calculate_apq(self, sound, 
-                      f0_values: np.ndarray,
-                      pitch=None) -> float:
-        """Расчет APQ (Amplitude Perturbation Quotient)"""
-        # Упрощенная версия - используем тот же метод, что и shimmer
-        return self._calculate_shimmer(sound, f0_values, pitch)
     
     def _extract_amplitude_features(self, audio: np.ndarray) -> Dict[str, float]:
         """Извлечение признаков амплитуды"""
@@ -466,35 +441,19 @@ class FeatureExtractor:
         return features
     
     def _extract_articulation_features(self, audio: np.ndarray) -> Dict[str, float]:
-        """Извлечение признаков артикуляции"""
-        features = {}
-        
-        # Скорость речи (приблизительно через энергию)
-        frame_length = int(0.025 * self.sample_rate)
-        hop_length = int(0.010 * self.sample_rate)
-        rms = librosa.feature.rms(y=audio, frame_length=frame_length,
-                                 hop_length=hop_length)[0]
-        
-        # Порог для обнаружения активной речи
-        threshold = np.percentile(rms, 20)
-        speech_frames = rms > threshold
-        
-        # Подсчет переходов (приблизительная оценка слогов)
-        transitions = np.sum(np.diff(speech_frames.astype(int)) != 0)
-        duration = len(audio) / self.sample_rate
-        
-        # Приблизительная скорость в слогах/сек (грубая оценка)
-        if duration > 0:
-            # Примерно 1 переход на 2 слога
-            syllables_approx = transitions / 2
-            rate_syl_sec = syllables_approx / duration
-            features['rate_syl_sec'] = float(rate_syl_sec)
-        else:
-            features['rate_syl_sec'] = 0.0
-        
-        # Соотношение пауз
-        silence_ratio = np.sum(~speech_frames) / len(speech_frames)
-        features['pause_ratio'] = float(silence_ratio)
+        """
+        Извлечение признаков артикуляции
+
+        - rate_syl_sec: темп артикуляции, слогов в секунду без учета пауз
+          (ядра слогов - syllable_nuclei);
+        - pause_ratio: доля пауз (тишина длиннее 0.25 с) между началом и концом речи.
+        """
+        features = {'rate_syl_sec': 0.0, 'pause_ratio': 0.0}
+        nuclei, phonation_sec, pause_ratio = syllable_nuclei(audio, self.sample_rate)
+        if phonation_sec <= 0:
+            return features
+        features['pause_ratio'] = float(pause_ratio)
+        features['rate_syl_sec'] = float(len(nuclei) / phonation_sec)
         
         # Форманты (упрощенный расчет)
         try:
@@ -634,7 +593,6 @@ class FeatureExtractor:
                         search_region = autocorr[min_lag:max_lag]
                         if len(search_region) > 0:
                             peak_idx = np.argmax(search_region) + min_lag
-                            peak_value = autocorr[peak_idx]
                             
                             # Энергия вокруг пика (гармоническая)
                             peak_width = max(2, int(self.sample_rate / 2000))  # ±0.5ms вокруг пика
@@ -716,8 +674,9 @@ class FeatureExtractor:
         features = {}
         
         # Базовые признаки через librosa
-        f0 = librosa.pyin(audio, fmin=50, fmax=500)
+        f0 = librosa.pyin(audio, fmin=50, fmax=500, sr=self.sample_rate)
         f0_values = f0[0]
+        features.update(self._voicing_features(np.nan_to_num(f0_values), 512 / self.sample_rate))
         f0_values = f0_values[~np.isnan(f0_values)]
         
         if len(f0_values) > 0:

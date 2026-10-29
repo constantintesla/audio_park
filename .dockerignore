@@ -1,13 +1,18 @@
+# В образ попадает только то, что нужно для работы сервера
+.git/
+.github/
+experiments/
+scripts/
+*.md
+Dockerfile
+docker-compose*.yml
+
 # Python
 __pycache__/
 *.py[cod]
-*$py.class
-*.so
-.Python
-env/
 venv/
-ENV/
-.venv
+.venv/
+env/
 
 # Результаты и данные (кроме структуры)
 auth_data/
@@ -15,34 +20,13 @@ auth_data/
 data/
 experiments/
 results/
+# Данные и секреты (монтируются в контейнер или передаются через docker compose)
 results.json
-results/*.ogg
-results/*.wav
-results/*.mp3
-temp_voice_*.ogg
+results/
+data/
 *.wav
 *.mp3
 *.ogg
-
-# IDE
-.vscode/
-.idea/
-*.swp
-*.swo
-
-# OS
-.DS_Store
-Thumbs.db
-
-# Git
-.git/
-.gitignore
-
-# Документация (опционально, можно оставить)
-# README.md
-# SETUP.md
-
-# Переменные окружения (будут переданы через docker-compose)
 .env
 .env.local
 .env.production
@@ -50,3 +34,4 @@ Thumbs.db
 .claude/
 .codex/
 .agents/
+.env.*

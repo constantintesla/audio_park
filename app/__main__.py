@@ -1,5 +1,5 @@
 """
-Скрипт для запуска API сервера
+Запуск веб-сервера: python -m app (из корня репозитория)
 """
 import os
 import sys
@@ -21,9 +21,9 @@ except ImportError:
 
 # Проверка наличия Flask
 try:
-    from api import app
+    from app.api import app
 except ImportError as e:
-    print("Ошибка: Flask не установлен")
+    print(f"Ошибка: не установлена зависимость ({e})")
     print("Установите зависимости: pip install -r requirements.txt")
     sys.exit(1)
 

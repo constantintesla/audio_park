@@ -9,6 +9,7 @@ import tempfile
 
 import numpy as np
 import soundfile as sf
+from scipy.signal import lfilter as scipy_lfilter
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, ROOT)
@@ -25,8 +26,222 @@ def make_vowel(path: str, sr: int = 22050, seconds: float = 3.0) -> None:
     sf.write(path, signal.astype(np.float32), sr)
 
 
+def make_speech(path: str, sr: int = 22050, seconds: float = 4.0) -> None:
+    """Похожая на речь запись: слоги по ~150 мс с меняющимся тоном, глухие шумы и паузы"""
+    rng = np.random.default_rng(1)
+    parts = []
+    t_total = 0.0
+    while t_total < seconds:
+        for _ in range(int(rng.integers(3, 7))):
+            n = int(sr * 0.15)
+            t = np.arange(n) / sr
+            f0 = 120 * 2 ** (rng.uniform(-4, 4) / 12) * (1 + 0.1 * t / 0.15)
+            phase = 2 * np.pi * np.cumsum(f0) / sr
+            syllable = sum(np.sin(k * phase) / k for k in range(1, 8)) * np.hanning(n)
+            parts += [syllable, 0.05 * rng.standard_normal(int(sr * 0.06))]
+        parts.append(np.zeros(int(sr * 0.4)))
+        t_total = sum(len(p) for p in parts) / sr
+    signal = np.concatenate(parts)
+    signal = 0.5 * signal / np.max(np.abs(signal))
+    sf.write(path, signal.astype(np.float32), sr)
+
+
+def check_recording_tasks(tmp: str, results_dir: str) -> None:
+    """DSI и охриплость считаются только там, где их можно измерить"""
+    from app.parkinson_analyzer import ParkinsonAnalyzer
+
+    analyzer = ParkinsonAnalyzer(save_raw_data=False, raw_data_dir=results_dir)
+    vowel_path = os.path.join(tmp, "vowel.wav")
+    speech_path = os.path.join(tmp, "speech.wav")
+    make_vowel(vowel_path, seconds=4.0)
+    make_speech(speech_path)
+
+    vowel = analyzer.analyze_audio_file(vowel_path, save_raw=False)
+    assert vowel["recording_task"] == "vowel", vowel["recording_task"]
+    assert vowel["symptom_scores"]["hoarseness"] is not None, "охриплость не оценена на гласной"
+    assert vowel["symptom_scores"]["monopitch"] is None, "интонация оценена по гласной"
+
+    speech = analyzer.analyze_audio_file(speech_path, save_raw=False)
+    assert speech["recording_task"] == "speech", speech["recording_task"]
+    assert speech["symptom_scores"]["hoarseness"] is None, "охриплость оценена по речи"
+    assert speech["symptom_scores"]["monopitch"] is not None, "интонация не оценена по речи"
+
+    # Обычная запись без заданий DSI и без калибровки: DSI не показываем
+    for result in (vowel, speech):
+        assert result["dsi"]["dsi_score"] is None, f"DSI посчитан по обычной записи: {result['dsi']}"
+        assert result["dsi"]["status"] == "not_applicable"
+    report = " ".join(vowel["report"] + speech["report"] + [vowel["recommendation"], speech["recommendation"]])
+    assert "стади" not in report, "в отчете стадия болезни"
+
+    # Задания DSI с калибровкой микрофона: DSI считается
+    dsi = analyzer.analyze_audio_file(vowel_path, save_raw=False,
+                                      device_info={"task": "dsi", "spl_offset_db": 100.0})
+    assert dsi["dsi"]["dsi_score"] is not None, dsi["dsi"]
+
+    # Тест DSI с границами упражнений: параметры меряются по своим упражнениям
+    segments = [{"task": t, "start_sec": 0.0, "end_sec": 4.0} for t in ("mpt", "glide", "soft", "vowel")]
+    protocol = analyzer.analyze_audio_file(vowel_path, save_raw=False,
+                                           device_info={"task": "dsi", "dsi_segments": segments})
+    assert protocol["dsi"].get("measured"), protocol["dsi"]
+    # Без калибровки I-Low оценивается по обычной громкости (упражнение vowel): DSI - оценка
+    assert protocol["dsi"]["dsi_score"] is not None and protocol["dsi"].get("approximate"), protocol["dsi"]
+    no_reference = analyzer.analyze_audio_file(
+        vowel_path, save_raw=False,
+        device_info={"task": "dsi", "dsi_segments": [s for s in segments if s["task"] != "vowel"]})
+    assert no_reference["dsi"]["dsi_score"] is None, "DSI без калибровки и без обычной «а»"
+    assert protocol["dsi"]["dsi_breakdown"]["mpt_sec"] > 3.0, protocol["dsi"]
+    calibrated = analyzer.analyze_audio_file(vowel_path, save_raw=False,
+                                             device_info={"task": "dsi", "dsi_segments": segments,
+                                                          "spl_offset_db": 100.0})
+    assert calibrated["dsi"]["dsi_score"] is not None, calibrated["dsi"]
+    # Поправка модели по обычной громкости многих людей точнее оценки по себе
+    model = analyzer.analyze_audio_file(vowel_path, save_raw=False,
+                                        device_info={"task": "dsi", "dsi_segments": segments},
+                                        model_offset={"offset_db": 95.0, "n_devices": 5, "sd_db": 3.0})
+    assert model["dsi"]["i_low_method"] == "model_reference", model["dsi"]
+    assert model["dsi"]["uncertainty"] < protocol["dsi"]["uncertainty"], model["dsi"]
+    print("recording tasks: ok")
+
+
+def syllable_train(sr: int, rate: float, count: int, f0: float = 130.0) -> np.ndarray:
+    """Слоги с заданным темпом: озвонченный слог на 60% периода, затем тишина"""
+    period = int(sr / rate)
+    n = int(0.6 * period)
+    t = np.arange(n) / sr
+    phase = 2 * np.pi * f0 * t
+    syllable = sum(np.sin(k * phase) / k for k in range(1, 8)) * np.hanning(n)
+    return np.concatenate([np.concatenate([syllable, np.zeros(period - n)]) for _ in range(count)])
+
+
+def check_speech_protocol(tmp: str, results_dir: str) -> None:
+    """Речевые задания: каждое задание меряется по своему куску записи"""
+    from app.parkinson_analyzer import ParkinsonAnalyzer
+
+    sr = 22050
+    vowel_path = os.path.join(tmp, "vowel6.wav")
+    speech_path = os.path.join(tmp, "speech_r.wav")
+    make_vowel(vowel_path, sr=sr, seconds=6.0)
+    make_speech(speech_path, sr=sr, seconds=5.0)
+    parts, segments, pos = [], [], 0.0
+
+    def add(task, signal):
+        nonlocal pos
+        signal = np.concatenate([signal, np.zeros(int(0.5 * sr))])
+        parts.append(signal)
+        segments.append({"task": task, "start_sec": pos, "end_sec": pos + len(signal) / sr})
+        pos += len(signal) / sr
+
+    add("mpt", sf.read(vowel_path)[0])
+    add("reading", sf.read(speech_path)[0])
+    add("syl_sibilant", syllable_train(sr, 5.0, 12))
+    for rate, task in ((3.0, "phrase_slow"), (4.5, "phrase_normal"), (6.5, "phrase_fast")):
+        add(task, syllable_train(sr, rate, 12))
+    add("intonation", sf.read(speech_path)[0])
+    vowel = sf.read(vowel_path)[0]
+    add("glide", vowel)
+    add("soft", 0.1 * vowel)
+    add("vowel", vowel)
+    path = os.path.join(tmp, "protocol.wav")
+    sf.write(path, (0.5 * np.concatenate(parts)).astype(np.float32), sr)
+
+    analyzer = ParkinsonAnalyzer(save_raw_data=False, raw_data_dir=results_dir)
+    result = analyzer.analyze_audio_file(path, save_raw=False,
+                                         device_info={"task": "speech_protocol", "protocol_segments": segments})
+    protocol = result["speech_protocol"]
+    assert result["recording_task"] == "speech", result["recording_task"]
+    assert protocol["mpt"]["mpt_sec"] > 5.0, protocol["mpt"]
+    assert protocol["reading"]["rate_syl_sec"], protocol["reading"]
+    syllables = protocol["syllables"][0]
+    assert 4.0 <= syllables["rate_syl_sec"] <= 6.0 and syllables["cv_percent"] < 15, syllables
+    assert protocol["phrases"]["fast_to_slow_ratio"] > 1.5, protocol["phrases"]
+    assert protocol["intonation"]["f0_range_st"] is not None, protocol["intonation"]
+    assert any("Речевые задания" in line for line in result["report"]), result["report"]
+    assert any("сонорные" in m for m in protocol["missing"]), protocol["missing"]
+
+    # Обследование: задания DSI и речевые задания в одной записи
+    dsi_segments = [seg for seg in segments if seg["task"] in ("mpt", "glide", "soft", "vowel")]
+    exam = analyzer.analyze_audio_file(path, save_raw=False,
+                                       device_info={"task": "exam", "dsi_segments": dsi_segments,
+                                                    "protocol_segments": segments})
+    assert exam["recording_task"] == "exam", exam["recording_task"]
+    assert exam["dsi"].get("measured") and exam["dsi"]["dsi_score"] is not None, exam["dsi"]
+    assert exam["speech_protocol"]["mpt"]["mpt_sec"] > 5.0, exam["speech_protocol"]
+    scores = exam["symptom_scores"]
+    assert scores["hoarseness"] is not None and scores["monopitch"] is not None, scores
+    print("speech protocol: ok")
+
+
+def check_measurements() -> None:
+    """Измерения сходятся с заданными в синтетическом сигнале"""
+    import parselmouth
+    from parselmouth.praat import call
+    from app.feature_extractor import FeatureExtractor, syllable_nuclei
+
+    sr = 16000
+    rng = np.random.default_rng(2)
+    # Гласная из импульсов с заданным разбросом периода (0.5%) и амплитуды (5%)
+    signal, pos = np.zeros(sr * 3), 0
+    while pos < len(signal) - 200:
+        period = int(round(sr / 120 * (1 + 0.005 * rng.standard_normal())))
+        signal[pos] = 1 + 0.05 * rng.standard_normal()
+        pos += period
+    for f, bw in ((730, 80), (1150, 90), (2500, 120)):
+        r = np.exp(-np.pi * bw / sr)
+        signal = scipy_lfilter([1 - 2 * r * np.cos(2 * np.pi * f / sr) + r * r],
+                               [1, -2 * r * np.cos(2 * np.pi * f / sr), r * r], signal)
+    signal = 0.3 * signal / np.max(np.abs(signal))
+    features = FeatureExtractor(sample_rate=sr).extract_all_features(signal)
+    sound = parselmouth.Sound(signal / np.max(np.abs(signal)), sampling_frequency=sr)
+    pp = call(sound, "To PointProcess (periodic, cc)", 50, 500)
+    jitter = 100 * call(pp, "Get jitter (local)", 0, 0, 0.0001, 0.02, 1.3)
+    shimmer = 100 * call([sound, pp], "Get shimmer (local)", 0, 0, 0.0001, 0.02, 1.3, 1.6)
+    assert abs(features["jitter_percent"] - jitter) < 0.01, (features["jitter_percent"], jitter)
+    assert abs(features["shimmer_percent"] - shimmer) < 0.01 and shimmer > 3.0, (features["shimmer_percent"], shimmer)
+
+    # «ша-ша-ша»: шипящий шум перед каждым слогом - не отдельный слог
+    syllables = syllable_train(sr, 4.0, 12)
+    period = len(syllables) // 12
+    noise = rng.standard_normal(int(0.1 * sr)) * np.hanning(int(0.1 * sr))
+    noise = np.diff(noise, prepend=0.0)  # шум с подъемом к высоким частотам, как «ш»
+    noise *= 0.3 * np.sqrt(np.mean(syllables[:period] ** 2)) / np.sqrt(np.mean(noise ** 2))
+    for k in range(12):
+        start = k * period + int(0.6 * period)
+        syllables[start:start + len(noise)] += noise[:max(0, min(len(noise), len(syllables) - start))]
+    piece = np.concatenate([np.zeros(sr // 2), syllables, np.zeros(sr // 2)])
+    nuclei, _, _ = syllable_nuclei(piece, sr)
+    assert len(nuclei) == 12, f"слогов {len(nuclei)} вместо 12"
+
+    # Паузы в шумной комнате (шум на 25 дБ тише речи) не пропадают
+    phrase = syllable_train(sr, 5.0, 10)
+    speech = np.concatenate([phrase, np.zeros(sr // 2), phrase, np.zeros(sr // 2), phrase])
+    level = np.sqrt(np.mean(phrase ** 2))
+    speech += level * 10 ** (-25 / 20) * rng.standard_normal(len(speech))
+    _, _, pause_ratio = syllable_nuclei(speech, sr)
+    assert 0.1 < pause_ratio < 0.4, f"доля пауз {pause_ratio:.2f} в шумной записи"
+    print("measurements: ok")
+
+
+def check_device_model_stats() -> None:
+    """Обычный уровень тестового звука и поправка громкости по модели устройства"""
+    from app.device_model_stats import loop_gain_check, model_spl_offset
+
+    info = {"device_model": "Pixel 7", "mic_mode": "unprocessed", "device_id": "me"}
+    history = [{"device_info": {"device_model": "Pixel 7", "mic_mode": "unprocessed", "device_id": f"d{i}"},
+                "calibration": {"sweep_level_dbfs": -20.0 + 0.5 * i},
+                "dsi": {"comfortable_dbfs": -30.0 + i}} for i in range(5)]
+    assert loop_gain_check({"sweep_level_dbfs": -19.0}, history, info)["status"] == "ok"
+    deviation = loop_gain_check({"sweep_level_dbfs": -35.0}, history, info)
+    assert deviation["status"] == "deviation" and "громкость" in deviation["message"], deviation
+    assert loop_gain_check({"sweep_level_dbfs": -19.0}, history[:2], info)["status"] == "learning"
+    offset = model_spl_offset(history, info)
+    assert offset and offset["offset_db"] == 98.0 and offset["n_devices"] == 5, offset
+    assert model_spl_offset(history[:4], info) is None, "поправка по 4 устройствам"
+    assert model_spl_offset(history, {**info, "mic_mode": "default"}) is None, "другой режим микрофона"
+    print("device model stats: ok")
+
+
 def check_analyzer(wav_path: str, results_dir: str) -> None:
-    from parkinson_analyzer import ParkinsonAnalyzer
+    from app.parkinson_analyzer import ParkinsonAnalyzer
 
     analyzer = ParkinsonAnalyzer(save_raw_data=False, raw_data_dir=results_dir)
     result = analyzer.analyze_audio_file(wav_path, save_raw=False, result_id="ci_smoke")
@@ -38,8 +253,8 @@ def check_analyzer(wav_path: str, results_dir: str) -> None:
 
 
 def check_api(wav_path: str) -> None:
-    import api
-    from auth import create_user
+    from app import api
+    from app.auth import create_user
 
     with api.app.app_context():
         create_user('ci', 'ci-test-password', role='expert')
@@ -53,6 +268,10 @@ def check_api(wav_path: str) -> None:
     for route in ("/", "/results", "/visualization", "/api/results", "/api/stats"):
         resp = client.get(route)
         assert resp.status_code == 200, f"GET {route} -> {resp.status_code}"
+    # Данные и исходники по прямой ссылке не отдаются
+    for route in ("/results.json", "/api.py", "/.env", "/requirements.txt"):
+        resp = client.get(route)
+        assert resp.status_code == 404, f"GET {route} -> {resp.status_code}, ожидался 404"
     with open(wav_path, "rb") as f:
         data = {"file": (io.BytesIO(f.read()), "ci_smoke.wav"), "patient_id": "ci-patient-1"}
     resp = client.post("/api/analyze", data=data, content_type="multipart/form-data", headers=headers)
@@ -80,6 +299,46 @@ def check_api(wav_path: str) -> None:
     assert result["quality"]["metrics"]["noise_floor_source"] == "app_calibration"
     cal_path = result["raw_data"]["files"].get("calibration_audio")
     assert cal_path and os.path.exists(cal_path), "файл калибровки не сохранен"
+
+    # Обследование: запись каждой попытки отдельно и архив прогона
+    segments = [{"task": "mpt", "start_sec": 0.0, "end_sec": 1.5}, {"task": "vowel", "start_sec": 1.5, "end_sec": 3.0}]
+    data = {"file": (io.BytesIO(audio), "exam.wav"), "patient_id": "ci-patient-3",
+            "device_info": json.dumps({"task": "exam", "dsi_segments": segments,
+                                       "protocol_segments": segments[:1]}),
+            "calibration_file": (io.BytesIO(audio), "calibration.wav")}
+    result = client.post("/api/analyze", data=data, content_type="multipart/form-data", headers=headers).get_json()
+    attempts = result["task_recordings"]
+    assert [a["task"] for a in attempts] == ["mpt", "vowel"], attempts  # долгая «а» в обоих списках - одна попытка
+    clip = client.get(f"/api/audio/{result['_index']}/task/1")
+    assert clip.status_code == 200, clip.status_code
+    piece, sr = sf.read(io.BytesIO(clip.data))
+    assert abs(len(piece) / sr - 1.5) < 0.01, len(piece) / sr
+    listed = client.get("/api/results").get_json()["results"]
+    assert any(r["_index"] == result["_index"] and len(r["task_recordings"]) == 2 for r in listed)
+    archive = client.get(f"/api/archive/{result['_index']}")
+    assert archive.status_code == 200 and "attachment" in archive.headers["Content-Disposition"]
+    import zipfile
+    names = zipfile.ZipFile(io.BytesIO(archive.data)).namelist()
+    for name in ("recording.wav", "calibration.wav", "results.json", "tasks/01_mpt_1.wav", "tasks/02_vowel_1.wav"):
+        assert name in names, names
+
+    # Визуализация: графики прорежены, полная запись (каждый отсчет) в ответ не попадает
+    viz = client.get(f"/api/visualization/{result['_index']}")
+    assert viz.status_code == 200, viz.status_code
+    viz = viz.get_json()
+    assert 0 < len(viz["waveform"]["amplitude"]) <= 5000, len(viz["waveform"]["amplitude"])
+    spec = viz["spectrogram"]
+    assert len(spec["times"]) <= 600 and len(spec["frequencies"]) <= 160, (len(spec["times"]), len(spec["frequencies"]))
+    assert len(spec["magnitude"]) == len(spec["frequencies"]) and len(spec["magnitude"][0]) == len(spec["times"])
+    with open("results.json", encoding="utf-8") as f:
+        assert not any("visuals" in r for r in json.load(f)), "картинки base64 попали в results.json"
+    # Страница грузит каждый график отдельно
+    part = client.get(f"/api/visualization/{result['_index']}?part=spectrogram").get_json()
+    assert set(part) == {"spectrogram", "audio_url"} and part["spectrogram"]["magnitude"], list(part)
+    assert client.get(f"/api/visualization/{result['_index']}?part=nope").status_code == 400
+    assert "visuals" not in client.get(f"/api/results/{result['_index']}").get_json()
+    saved = result["raw_data"]["files"]["waveform_data"]
+    assert os.path.getsize(saved) < 1_000_000, f"waveform_data.json {os.path.getsize(saved)} байт"
     print("api: ok")
 
 
@@ -88,6 +347,10 @@ def main() -> None:
         wav_path = os.path.join(tmp, "ci_smoke.wav")
         make_vowel(wav_path)
         check_analyzer(wav_path, os.path.join(tmp, "results"))
+        check_recording_tasks(tmp, os.path.join(tmp, "results"))
+        check_speech_protocol(tmp, os.path.join(tmp, "results"))
+        check_measurements()
+        check_device_model_stats()
         # api.py пишет results.json и results/ в текущую папку, поэтому запускаем его во временной
         os.chdir(tmp)
         os.environ['AUTH_DATA_DIR'] = os.path.join(tmp, 'auth')

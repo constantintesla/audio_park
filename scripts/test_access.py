@@ -13,8 +13,8 @@ ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
 TEMP = tempfile.TemporaryDirectory()
 os.environ['AUTH_DATA_DIR'] = str(Path(TEMP.name) / 'auth')
-import api
-from auth import create_user, password_matches
+from app import api
+from app.auth import create_user, password_matches
 
 
 class AccessTest(unittest.TestCase):
@@ -61,8 +61,9 @@ class AccessTest(unittest.TestCase):
             data = client.get('/api/results' + query).get_json()
             self.assertTrue(all(r['owner_id'] == self.users['expert']['id'] for r in data['results']))
         for suffix in ['AP-other', '1']:
-            for route in ['results', 'audio', 'visualization']:
+            for route in ['results', 'audio', 'visualization', 'archive']:
                 self.assertEqual(client.get(f'/api/{route}/{suffix}').status_code, 404)
+            self.assertEqual(client.get(f'/api/audio/{suffix}/task/0').status_code, 404)
         self.assertEqual(client.get('/api/results/AP-own').status_code, 200)
         self.assertEqual(client.get('/api/audio/AP-own').status_code, 200)
         self.assertEqual(client.get('/api/stats?scope=all').get_json()['total_analyses'], 1)
@@ -127,7 +128,7 @@ class AccessTest(unittest.TestCase):
             def __init__(self, **kwargs): pass
             def analyze_audio_file(self, *args, **kwargs):
                 return {'features':{}, 'report':[]}
-        with patch('parkinson_analyzer.ParkinsonAnalyzer', FakeAnalyzer):
+        with patch('app.parkinson_analyzer.ParkinsonAnalyzer', FakeAnalyzer):
             response = client.post('/api/recalculate-all', headers=headers)
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.get_json()['recalculated'], 2)
@@ -142,7 +143,7 @@ class AccessTest(unittest.TestCase):
             def __init__(self, **kwargs): pass
             def analyze_audio_file(self, *args, **kwargs):
                 return {'features':{},'report':[]}
-        with patch('parkinson_analyzer.ParkinsonAnalyzer', FakeAnalyzer):
+        with patch('app.parkinson_analyzer.ParkinsonAnalyzer', FakeAnalyzer):
             response = client.post('/api/analyze', data={'file':(io.BytesIO(b'fake'),'test.wav'), 'patient_id':'P-003', 'user_id':str(self.users['admin']['id']), 'username':'admin'}, headers=headers)
         self.assertEqual(response.status_code, 200)
         result = response.get_json()

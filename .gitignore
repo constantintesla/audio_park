@@ -1,50 +1,37 @@
 # Python
 __pycache__/
 *.py[cod]
-*$py.class
-*.so
-.Python
 *.egg-info/
 dist/
 build/
-env/
 venv/
-ENV/
-.venv
+.venv/
+env/
 
 # Результаты и данные
 auth_data/
 .local-backups/
+# Данные анализов (на сервере лежат рядом с кодом, в git не попадают)
 results.json
 results/
 data/
-temp_voice_*.ogg
 *.wav
 *.mp3
 *.ogg
 
-# IDE
+# Переменные окружения
+.env
+.env.*
+
+# IDE и ОС
 .vscode/
 .idea/
 *.swp
-*.swo
-
-# OS
 .DS_Store
 Thumbs.db
 
-# Переменные окружения
-.env
-.env.local
-.docker-compose.env
-.env.production
-.env.prod
-env
-
-# Логи
+# Логи и временные файлы
 *.log
-
-# Временные файлы
 *.tmp
 *.bak
 *~

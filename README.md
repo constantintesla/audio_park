@@ -42,14 +42,16 @@ python scripts/manage_accounts.py /private/path/accounts.txt --admin tesla
 ```bash
 python scripts/test_access.py
 python scripts/ci_smoke.py
+node scripts/test_recorder.cjs
+# Полный эталонный прогон (ZIP с recording.wav, calibration.wav и results.json):
+python scripts/test_exam_archive.py /private/path/reference.zip
 ```
 
 ## Возможности анализа
 
-- **Веб-интерфейс** с загрузкой/записью аудио и тремя страницами:
-  - Главная: сводная таблица результатов с детальным отчетом при клике
-  - Список результатов (`/results`): полный список всех анализов
-  - Визуализация (`/visualization`): графики и аудио для каждого анализа
+- **Веб-интерфейс**: отдельная проверка микрофона и полное обследование из 14 заданий.
+  Перед отправкой доступны прослушивание и перезапись заданий. Загрузки файла в интерфейсе нет.
+  Отчёт включает речевые показатели, DSI, записи попыток и ZIP-архив; доступ ограничен владельцем и ролью.
 - **DSI (Dysphonia Severity Index)** - объективный показатель тяжести дисфонии
 - Обработка аудиофайлов (WAV/MP3/OGG) с автоматическим ресемплированием до 16kHz
 - Извлечение акустических признаков с реальными значениями (без капов):
@@ -64,106 +66,48 @@ python scripts/ci_smoke.py
 - Пересчет всех результатов с обновленными алгоритмами
 - Экспорт результатов (CSV, JSON, HTML)
 
-## Установка
+## Запуск
 
-### Вариант 1: Docker (рекомендуется)
+Рабочий сервер обновляется сам: после слияния в `main` GitHub Actions проверяет код
+и выкладывает его на lab-сервер (https://msr25.ru/audio_park/). Подробнее — в [DEPLOY.md](DEPLOY.md).
 
-**Локальная разработка:**
+### Локально в Docker
+
 ```bash
-# Создайте .env файл
 cp env.example .env
-
-# Запустите
-docker-compose --env-file .env up -d
+docker compose up -d --build
 ```
 
-**Production (хостинг):**
-```bash
-# Используйте production конфигурацию
-docker-compose -f docker-compose.prod.yml --env-file .env up -d --build
-```
+Веб-интерфейс: http://localhost:5000. Логи: `docker compose logs -f`, остановка: `docker compose down`.
 
-**Подробные инструкции:** [DEPLOY.md](DEPLOY.md)
-
-### Вариант 2: Локальная установка
+### Локально без Docker
 
 ```bash
 pip install -r requirements.txt
+python -m app
 ```
 
-## Быстрый старт
+На Windows то же самое делает `scripts\START_LOCAL.bat`, на Linux/Mac — `./scripts/START_LOCAL.sh`.
 
-### 🐳 Запуск в Docker (рекомендуется)
-
-**Самый простой способ:**
+### Проверка
 
 ```bash
-# Linux/Mac
-chmod +x START.sh
-./START.sh
-
-# Windows
-START.bat
-
-# Или вручную
-docker-compose up -d
+python scripts/ci_smoke.py
 ```
 
-**Веб-интерфейс:** http://localhost:5000
+Тот же smoke-тест запускается в CI на каждый pull request: синтетические записи
+проходят через анализатор и веб-API.
 
-### 💻 Локальный запуск (без Docker)
-
-**Быстрый способ:**
+### Из командной строки и из кода
 
 ```bash
-# Windows
-START_LOCAL.bat
-
-# Linux/Mac
-chmod +x START_LOCAL.sh
-./START_LOCAL.sh
+python -m app.parkinson_analyzer audio_file.wav -o report.json
 ```
-
-**Или вручную:**
-
-1. **Установите зависимости:**
-```bash
-pip install -r requirements.txt
-```
-
-2. **Настройте переменные окружения:**
-
-Создайте файл `.env` на основе `env.example`:
-```bash
-cp env.example .env
-```
-
-3. **Запустите API сервер:**
-```bash
-python start_api.py
-```
-
-4. **Откройте веб-интерфейс:** `http://localhost:5000`
-
-### Использование из командной строки:
-
-```bash
-python parkinson_analyzer.py audio_file.wav
-```
-
-Сохранить результат в файл:
-```bash
-python parkinson_analyzer.py audio_file.wav -o report.json
-```
-
-### Программное использование:
 
 ```python
-from parkinson_analyzer import ParkinsonAnalyzer
+from app.parkinson_analyzer import ParkinsonAnalyzer
 
-analyzer = ParkinsonAnalyzer()
-result = analyzer.analyze_audio_file("audio.wav")
-print(result)
+result = ParkinsonAnalyzer().analyze_audio_file("audio.wav")
 ```
 
 ## Веб-интерфейс
@@ -218,41 +162,34 @@ DSI коррелирует с Voice Handicap Index и идеален для мо
 
 **Важно:** Все параметры возвращаются с реальными значениями без искусственных ограничений. При ≥3 признаках, превышающих пороги: **89% точность** (Daoudi 2022).
 
-## Зависимости
-
-- `librosa`: Обработка аудио и спектральный анализ
-- `parselmouth`: Извлечение F0 и анализ pitch через Praat
-- `numpy`: Численные вычисления
-- `scipy`: Фильтрация сигналов
-- `soundfile`: Чтение аудиофайлов
-- `flask`: Веб-сервер и API
-- `flask-cors`: CORS поддержка для API
-- `requests`: HTTP запросы
-
 ## Структура проекта
 
 ```
 audio_park/
-├── api.py                 # API сервер с веб-интерфейсом
-├── parkinson_analyzer.py  # Основной анализатор
-├── feature_extractor.py   # Извлечение признаков
-├── symptom_analyzer.py    # Анализ симптомов
-├── audio_processor.py     # Обработка аудио
-├── recording_quality.py   # Проверка качества записи (SNR, клиппинг, длительность)
-├── robust_features.py     # Признаки, устойчивые к устройству (CPPS)
-├── speaker_baseline.py    # Сравнение с прошлыми записями человека на том же устройстве
-├── start_api.py          # Запуск API
-├── index.html            # Главная страница веб-интерфейса
-├── results.html          # Страница со списком всех результатов
-├── visualization.html    # Страница визуализации параметров
-├── requirements.txt      # Зависимости
-├── results.json          # Хранилище результатов (создается автоматически)
-└── results/              # Директория с сырыми данными каждого анализа
-    └── {result_id}/      # Папка для каждого анализа
-        ├── original.*    # Исходный аудиофайл
-        ├── waveform_data.json
-        └── spectrogram_meta.json
+├── app/                       # Код сервера (Python-пакет)
+│   ├── __main__.py            # Запуск: python -m app (читает .env)
+│   ├── api.py                 # Flask: веб-страницы и API
+│   ├── parkinson_analyzer.py  # Основной анализатор: загрузка → признаки → симптомы → отчет
+│   ├── audio_processor.py     # Загрузка, ресемплинг до 16 кГц, нормализация громкости (LUFS)
+│   ├── feature_extractor.py   # Акустические признаки (jitter, shimmer, HNR, F0, темп, паузы…)
+│   ├── symptom_analyzer.py    # Оценка симптомов 0-3 и риска ПД
+│   ├── recording_quality.py   # Качество записи (SNR, клиппинг, длительность)
+│   ├── robust_features.py     # Признаки, устойчивые к устройству (CPPS)
+│   ├── speaker_baseline.py    # Сравнение с прошлыми записями человека на том же устройстве
+│   ├── dsi_protocol.py        # Задания DSI: MPT, F0-High, I-Low
+│   ├── speech_protocol.py     # Речевые задания (чтение, слоги, фразы, интонация)
+│   ├── task_recordings.py     # Записи отдельных попыток и ZIP-архив прогона
+│   └── device_model_stats.py  # Поправка громкости по модели устройства
+├── web/                       # Веб-интерфейс: index.html, results.html, visualization.html, assets/
+├── scripts/                   # ci_smoke.py (тест для CI), START_LOCAL.sh / .bat (запуск без Docker)
+├── experiments/               # Исследования, в рабочем сервере не используются
+│                              # (выравнивание АЧХ устройств: spectral_equalizer.py, eq_device_sim.py)
+├── .github/workflows/         # CI: smoke-тест и выкладка на сервер
+├── Dockerfile, docker-compose.yml   # Локальный запуск в Docker
+└── docker-compose.prod.yml          # Конфигурация сервера (используется при выкладке)
 ```
+
+Данные (`results.json` и папка `results/`) создаются при работе и в git не хранятся.
 
 ## Хранение результатов
 
@@ -273,9 +210,14 @@ audio_park/
 - `POST /api/results` - Отключён; анализ сохраняется через `/api/analyze`
 - `GET /api/results/<study_id>` - Получить доступное текущей учётке исследование
 - `POST /api/recalculate-all` - Пересчитать все результаты с обновленными алгоритмами
+- `GET /api/health` - Проверка, что сервер жив (для healthcheck)
 - `GET /api/stats` - Получить статистику
 - `GET /api/visualization/<study_id>` - Получить данные для визуализации
 - `GET /api/audio/<study_id>` - Получить аудиофайл
+- `GET /api/visualization/<index>` - Получить данные для визуализации
+- `GET /api/audio/<index>` - Получить аудиофайл
+- `GET /api/audio/<index>/task/<n>` - Запись одной попытки задания обследования (`?download=1` - скачать), список попыток - поле `task_recordings` в `/api/results`
+- `GET /api/archive/<index>` - ZIP всего прогона: вся запись, калибровка, записи заданий (`tasks/`) и `results.json`
 - `GET /api/export/csv` - Экспорт результатов в CSV
 - `GET /api/export/json` - Экспорт результатов в JSON
 - `GET /api/export/html` - Экспорт результатов в HTML отчет
@@ -295,9 +237,58 @@ audio_park/
   "input_format": "wav",
   "sample_rate": 48000,
   "noise_floor_dbfs": -72.5,
-  "spl_offset_db": 94.0
+  "spl_offset_db": 94.0,
+  "task": "speech"
 }
 ```
+
+`task` — что записано:
+- `speech` — обычная речь (фраза, чтение). По ней оцениваются интонация, громкость,
+  темп и паузы. Jitter, shimmer и HNR по речи не оцениваются: их нормы даны для
+  протяжной гласной, а в речи они завышаются, и здоровый голос выглядит «охрипшим».
+- `vowel` — протяжная гласная «а-а-а». По ней оценивается охриплость (jitter, shimmer, HNR);
+  интонация и темп не оцениваются.
+- `dsi` — запись с заданиями DSI: самая долгая гласная «а» на одном выдохе (MPT),
+  скольжение голосом до самой высокой ноты (F0-High) и самый тихий голос (I-Low).
+  Только для такой записи и только при заданном `spl_offset_db` считается DSI.
+  Упражнения идут в одной записи друг за другом, а их границы приложение передает
+  в `dsi_segments`: `[{"task": "mpt" | "glide" | "soft" | "vowel", "start_sec": 1.2, "end_sec": 14.8}, ...]`.
+  MPT берется по лучшей попытке `mpt`, F0-High по самой высокой ноте в `glide`,
+  I-Low по самой тихой попытке `soft`, jitter и охриплость по спокойной гласной `vowel`.
+  Без калибровки (`spl_offset_db`) I-Low оценивается по обычной громкости самого человека:
+  спокойная «а» на 30 см считается равной ~70 дБ SPL, и самый тихий голос пересчитывается
+  относительно нее. Тогда DSI помечается как оценка (`approximate`, `uncertainty` ≈ ±1.3).
+  Когда на одной модели устройства (`device_model` + `mic_mode`) пройдут тест хотя бы
+  5 разных устройств, сервер берет поправку модели по их средней обычной громкости
+  (`device_model_stats.py`): так точнее (≈ ±0.8), и громкий или тихий от природы
+  человек не сдвигает результат.
+
+Калибровочный тестовый звук играет динамик того же устройства, поэтому абсолютную
+чувствительность микрофона из него не получить. Но при максимальной громкости его
+уровень у одной модели почти постоянен: если запись отличается от обычного для
+модели больше чем на 6 дБ (`calibration_check`), в отчете появляется просьба проверить
+громкость и не закрыт ли микрофон.
+- `speech_protocol` — речевые задания (документ «Задания по голосу»), одной записью друг за другом.
+  Границы заданий приложение передает в `protocol_segments` в том же формате, что `dsi_segments`.
+  Задания (`task`): `mpt` — «а» на обычной громкости так долго и ровно, как получится (лучшая попытка);
+  `reading` — чтение текста «Буря на реке»; слоги `syl_sibilant` (са-ша-за-жа), `syl_sonorant`
+  (ла-ра-ра-ла), `syl_voicing` (па-ба-па, та-да-та, ка-га-ка), `syl_palatal` (са-ся, ла-ля, та-тя),
+  `syl_airflow` (ша ша ша, са са са, са-сы-су-се); фразы `phrase_slow`, `phrase_fast`, `phrase_normal`
+  (одна попытка — одна фраза); `intonation` — вопрос с ударением на выделенном слове и ответ.
+  Интонация, громкость и темп в общем отчете оцениваются по чтению текста. Показатели по заданиям
+  лежат в блоке `speech_protocol` ответа (`speech_protocol.py`): MPT, темп и паузы чтения, разброс
+  тона в полутонах, темп и неровность слогов, темп фраз и во сколько раз «быстро» быстрее «медленно»,
+  размах тона в вопросах. DSI по этой записи не считается.
+- `exam` — обследование: задания DSI и речевые задания в одной записи. Приложение передает
+  и `dsi_segments`, и `protocol_segments` (долгая «а» `mpt` входит в оба списка). Считаются DSI
+  и показатели речевых заданий; охриплость (jitter, shimmer, HNR, CPPS) оценивается по спокойной
+  «а» `vowel`, интонация, громкость и темп — по чтению текста. На веб-странице это кнопка «Обследование».
+
+Если `task` не передан, тип определяется сам: протяжная гласная — это один длинный
+непрерывный озвонченный участок, в обычной речи тон прерывается. DSI по обычной
+записи не считается (`dsi.status = "not_applicable"`, причина в `dsi.reason`):
+из нее нельзя измерить MPT, F0-High и I-Low, и формула дает около −11 даже для
+здорового голоса. DSI оценивает качество голоса, а не болезнь Паркинсона.
 
 `noise_floor_dbfs` — уровень шума, измеренный по 1–2 с тишины перед записью.
 Без него шум оценивается по самым тихим кадрам записи.
@@ -313,15 +304,6 @@ audio_park/
   на этом же устройстве (нужно не меньше 3 пригодных записей, до этого
   статус `collecting`). Признаки с `robust_z` по модулю больше 2.5
   попадают в `flagged_features`.
-
-## Безопасность
-
-⚠️ **ВАЖНО:** Никогда не храните токены в коде!
-
-- Используйте переменные окружения через файл `.env`
-- Файл `.env` автоматически исключен из Git
-
-**Подробнее:** [DEPLOY.md](DEPLOY.md#безопасность)
 
 ## Пересчет результатов
 

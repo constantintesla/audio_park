@@ -1,5 +1,3 @@
-version: '3.8'
-
 services:
   api:
     build: .
@@ -21,6 +19,10 @@ services:
       - AUTH_DATA_DIR=/app/auth
       - SESSION_COOKIE_SECURE=${SESSION_COOKIE_SECURE:-true}
     restart: unless-stopped
+    # Потолок памяти: обычно сервис держит 300-450 МБ, пик анализа 7-минутной
+    # записи около 0,9 ГБ. Если что-то пойдет не так, контейнер перезапустится,
+    # а соседние сервисы на сервере не пострадают.
+    mem_limit: 1536m
     networks:
       - parkinson_network
     healthcheck:

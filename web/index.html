@@ -25,8 +25,9 @@
                 <span class="brand-text"><strong>Анализ голоса</strong><small>Скрининг признаков болезни Паркинсона</small></span>
             </a>
             <nav class="app-links" aria-label="Разделы">
-                <a href="./" class="active" aria-current="page">Обследование</a>
-                <a href="./results">Мои исследования</a>
+                <a href="./" class="active" aria-current="page">Обзор</a>
+                <a href="./results">Результаты</a>
+                <a href="./visualization">Визуализация</a>
             </nav>
         </div>
     </header>
@@ -34,13 +35,13 @@
         <div class="page-head">
             <div>
                 <h1>Новое обследование</h1>
-                <p>Укажите ID пациента, затем запишите голос или загрузите аудиофайл</p>
+                <p>Проверка микрофона и пошаговое обследование из 14 заданий</p>
             </div>
         </div>
         
         <div class="card"><div class="card-body study-identity">
-            <div><label class="form-label" for="patient-id">ID пациента</label><input id="patient-id" class="form-control" maxlength="100" required placeholder="Например, P-001"><p class="hint mb-0 mt-2">Для повторных обследований используйте тот же ID пациента.</p></div>
-            <div><span class="form-label">ID исследования</span><p class="text-muted mb-0">Будет присвоен автоматически при сохранении</p></div>
+            <div><label class="form-label" for="patient-id">ID пациента</label><input id="patient-id" class="form-control" maxlength="100" required placeholder="Например, P-001"><p class="hint mb-0 mt-2">Для повторных обследований используйте тот же ID.</p></div>
+            <div><span class="form-label">ID исследования</span><p class="text-muted mb-0">Присваивается после завершения всех заданий и сохранения результата</p></div>
         </div></div>
         <!-- Новый анализ -->
         <div class="card">
@@ -49,18 +50,36 @@
                 <svg class="chevron" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M6 9l6 6 6-6"/></svg>
             </div>
             <div class="card-body" id="local-analysis-section">
-                <div class="capture-grid">
+                <div class="capture-grid" style="grid-template-columns:1fr">
                     <div class="capture-panel">
-                        <h3>Запись с микрофона</h3>
-                        <p class="hint">Держите устройство на расстоянии 20–30 см и произнесите протяжное «а-а-а» или фразу.</p>
-                        <button id="record-btn" class="btn btn-record">Записать с микрофона</button>
+                        <h3>Подготовка и обследование</h3>
+                        <p class="hint">Сначала проверьте микрофон: разрешите доступ и произнесите несколько слов. Затем начните обследование — 14 заданий с инструкциями, повторными попытками и прослушиванием перед отправкой.</p>
+                        <div class="record-actions">
+                            <button id="record-btn" class="btn btn-record">Проверить микрофон</button>
+                            <button id="exam-test-btn" class="btn btn-outline-secondary" disabled title="Пошаговое обследование: 14 заданий, около 10 минут. В конце индекс DSI и речевые показатели">Провести тестирование</button>
+                        </div>
+                        <p id="mic-check-status" class="hint mt-3" role="status">Микрофон ещё не проверен.</p>
                         <div class="form-check mt-3">
                             <input class="form-check-input" type="checkbox" id="calibrate-check" checked>
-                            <label class="form-check-label" for="calibrate-check">Калибровка перед записью (тишина и тестовый звук, около 7 с)</label>
+                            <label class="form-check-label" for="calibrate-check">Калибровка перед записью (тишина и тестовый звук, около 7 с). Поставьте громкость устройства на максимум</label>
                         </div>
                         
                         <div id="live-recorder" style="display: none;">
                             <div id="rec-status" class="rec-status"></div>
+                            <div id="dsi-step" class="dsi-step" style="display: none;">
+                                <div class="dsi-step-head">
+                                    <span id="dsi-step-count"></span>
+                                    <span id="dsi-step-tries"></span>
+                                </div>
+                                <h4 id="dsi-step-title"></h4>
+                                <p id="dsi-step-text"></p>
+                                <p id="dsi-step-say" class="dsi-step-say"></p>
+                                <div class="dsi-step-actions">
+                                    <button id="dsi-try-btn" class="btn btn-primary">Начать попытку</button>
+                                    <button id="dsi-redo-btn" class="btn btn-outline-secondary" style="display: none;">Перезаписать задание</button>
+                                    <button id="dsi-next-btn" class="btn btn-outline-secondary" style="display: none;">Следующее упражнение</button>
+                                </div>
+                            </div>
                             <canvas id="live-wave"></canvas>
                             <div class="level-meter"><div id="level-bar"></div></div>
                             <div class="live-meta">
@@ -72,16 +91,7 @@
                         
                         <div id="calibration-info" class="audio-info" style="display: none;"></div>
                     </div>
-                    <div class="capture-panel">
-                        <h3>Загрузка файла</h3>
-                        <p class="hint">WAV, MP3 или OGG, не длиннее 60 секунд.</p>
-                        <div id="upload-zone">
-                            <input type="file" id="file-input" accept="audio/wav,audio/mp3,audio/mpeg,audio/ogg,audio/oga,audio/*">
-                            <p class="fw-medium">Перетащите аудиофайл сюда</p>
-                            <p class="text-muted small mb-2">или</p>
-                            <span class="btn btn-outline-secondary btn-sm">Выбрать файл</span>
-                        </div>
-                    </div>
+
                 </div>
                 
                 <div id="audio-info" class="audio-info" style="display: none;">
@@ -91,8 +101,24 @@
                 </div>
                 
                 <div class="analyze-bar">
-                    <span class="text-muted small">Исследование сохранится в вашей учётной записи.</span>
-                    <button id="analyze-btn" class="btn btn-primary btn-lg" disabled>Анализировать</button>
+                    <span class="text-muted small">Исследование сохраняется в вашей учётке после проверки записанных заданий.</span>
+                    <button id="analyze-btn" hidden class="btn btn-primary btn-lg" disabled>Анализировать</button>
+                </div>
+
+                <div id="analyze-progress" class="analyze-progress" style="display: none;" aria-live="polite">
+                    <div class="analyze-progress-head">
+                        <span id="analyze-stage">Подготовка записи</span>
+                        <span id="analyze-elapsed" class="text-muted">0 с</span>
+                    </div>
+                    <div class="progress" role="progressbar" aria-valuemin="0" aria-valuemax="100">
+                        <div id="analyze-bar" class="progress-bar" style="width: 0%"></div>
+                    </div>
+                    <ol id="analyze-steps" class="analyze-steps">
+                        <li data-stage="prepare">Подготовка</li>
+                        <li data-stage="upload">Отправка</li>
+                        <li data-stage="analyze">Анализ</li>
+                        <li data-stage="done">Готово</li>
+                    </ol>
                 </div>
             </div>
         </div>
@@ -105,15 +131,41 @@
             </div>
         </div>
         
-        <!-- Progress (for local analysis) -->
-        <div class="progress-container">
-            <div class="progress">
-                <div class="progress-bar progress-bar-striped progress-bar-animated" 
-                     role="progressbar" style="width: 0%"></div>
+<dialog id="exam-disclaimer" class="app-modal" aria-labelledby="exam-disclaimer-title">
+            <div class="app-modal-body">
+                <h3 id="exam-disclaimer-title">Перед обследованием отключите «улучшения» звука</h3>
+                <p>Система и устройство часто сами обрабатывают голос: убирают шум, выравнивают громкость, срезают частоты. Для звонков это удобно, но голос меняется, и измерения получаются неверными. Браузер выключить это не может, поэтому проверьте, пожалуйста, вручную:</p>
+                <ul class="disclaimer-list">
+                    <li><strong>Windows 11:</strong> Параметры → Система → Звук → ваш микрофон → «Улучшение звука» (Audio enhancements): «Выкл.». Если есть, выключите там же «Голосовая четкость» (Voice Clarity) и «Эффекты Windows Studio» (шумоподавление, фокусировка голоса).</li>
+                    <li><strong>Windows 10:</strong> Панель управления → Звук → вкладка «Запись» → микрофон → «Свойства» → вкладка «Улучшения»: отметьте «Отключить все звуковые эффекты».</li>
+                    <li><strong>Программы производителя:</strong> Realtek Audio Console, Dolby Audio / Dolby Atmos, MaxxAudio (Dell), HP Audio Control, Lenovo Vantage («Умное шумоподавление»), ASUS AI Noise Cancelling: выключите шумоподавление, эхоподавление и эффекты для микрофона.</li>
+                    <li><strong>Программы, подменяющие микрофон:</strong> Krisp, NVIDIA Broadcast / RTX Voice. Если браузер спросит, какой микрофон использовать, выберите обычный, а не «Krisp Microphone» или «NVIDIA Broadcast».</li>
+                    <li><strong>iPhone, iPad, Mac:</strong> во время записи откройте Пункт управления → «Режим микрофона» → «Стандартный» (не «Изоляция голоса» и не «Широкий спектр»).</li>
+                    <li><strong>Android:</strong> если в настройках звука или звонков есть «Шумоподавление», «Четкость голоса» или «Фокус на голосе» (Samsung), выключите их.</li>
+                    <li><strong>Гарнитуры:</strong> Bluetooth-наушники (AirPods и другие) сильно сжимают звук. Лучше встроенный или проводной микрофон.</li>
+                </ul>
+                <p class="text-muted small">Еще закройте программы, которые могут занимать микрофон: Zoom, Teams, Telegram, Discord. Тест займет около 10 минут, держите устройство на расстоянии 30 см.</p>
+                <div class="form-check mt-2">
+                    <input class="form-check-input" type="checkbox" id="exam-disclaimer-check">
+                    <label class="form-check-label" for="exam-disclaimer-check">Я проверил(а) и отключил(а) обработку звука</label>
+                </div>
             </div>
-            <p class="text-center mt-2" id="progress-text">Обработка...</p>
-        </div>
-        
+            <div class="app-modal-actions">
+                <button id="exam-disclaimer-cancel" class="btn btn-outline-secondary">Отмена</button>
+                <button id="exam-disclaimer-start" class="btn btn-primary" disabled>Начать обследование</button>
+            </div>
+        </dialog>
+<dialog id="exam-review" class="app-modal app-modal-wide" aria-labelledby="exam-review-title">
+            <div class="app-modal-body">
+                <h3 id="exam-review-title">Обследование записано</h3>
+                <p>Прослушайте задания. Если какое-то не получилось, нажмите «Перезаписать»: запишутся только его попытки, остальные останутся. Микрофон на паузе.</p>
+                <ol id="exam-review-list" class="review-list"></ol>
+            </div>
+            <div class="app-modal-actions">
+                <button id="exam-review-abort" class="btn btn-outline-secondary">Прервать тест</button>
+                <button id="exam-review-submit" class="btn btn-primary">Отправить на анализ</button>
+            </div>
+        </dialog>
         <!-- Footer -->
         <div class="footer">
             <p>Система предназначена для исследовательских целей и не заменяет медицинскую диагностику.</p>
@@ -124,6 +176,8 @@
     <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/wavesurfer.js@6/dist/wavesurfer.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.js"></script>
+    <script src="assets/exam_tasks.js"></script>
+    <script src="assets/speech_protocol.js"></script>
     
     <script>
         // Global variables
@@ -141,10 +195,15 @@
         // Initialize
         document.addEventListener('DOMContentLoaded', () => {
             initAudioContext();
-            initUploadZone();
+
             initRecordButton();
             initAnalyzeButton();
+
+
+
             initLocalAnalysisToggle();
+            // Загружаем статистику сразу при загрузке страницы
+
         });
         
         function initLocalAnalysisToggle() {
@@ -175,82 +234,30 @@
             }
         }
         
-        function initUploadZone() {
-            const uploadZone = document.getElementById('upload-zone');
-            const fileInput = document.getElementById('file-input');
-            
-            uploadZone.addEventListener('click', () => fileInput.click());
-            
-            uploadZone.addEventListener('dragover', (e) => {
-                e.preventDefault();
-                uploadZone.classList.add('dragover');
-            });
-            
-            uploadZone.addEventListener('dragleave', () => {
-                uploadZone.classList.remove('dragover');
-            });
-            
-            uploadZone.addEventListener('drop', (e) => {
-                e.preventDefault();
-                uploadZone.classList.remove('dragover');
-                const files = e.dataTransfer.files;
-                if (files.length > 0) {
-                    handleAudioFile(files[0]);
-                }
-            });
-            
-            fileInput.addEventListener('change', (e) => {
-                if (e.target.files.length > 0) {
-                    handleAudioFile(e.target.files[0]);
-                }
-            });
-        }
-        
         function initRecordButton() {
             const recordBtn = document.getElementById('record-btn');
             
             recordBtn.addEventListener('click', async () => {
                 if (!isRecording) {
-                    await startRecording();
+                    await startRecording({ check: true });
+                } else if (rec && rec.test) {
+                    // Пошаговый тест прерывают целиком: незаконченный тест не анализируем
+                    cleanupRecording();
                 } else {
-                    stopRecording();
+                    cleanupRecording();
                 }
             });
+            document.getElementById('exam-test-btn').addEventListener('click', () => {
+                if (!isRecording) openExamDisclaimer();
+            });
+            document.getElementById('dsi-try-btn').addEventListener('click', onTestTryButton);
+            document.getElementById('dsi-next-btn').addEventListener('click', () => nextTestStep(rec));
+            document.getElementById('dsi-redo-btn').addEventListener('click', () => redoCurrentStep(rec));
+            initExamDialogs();
         }
         
         function initAnalyzeButton() {
             document.getElementById('analyze-btn').addEventListener('click', analyzeAudio);
-        }
-        
-        async function handleAudioFile(file) {
-            if (!file.type.startsWith('audio/')) {
-                alert('Пожалуйста, выберите аудиофайл');
-                return;
-            }
-            
-            try {
-                const arrayBuffer = await file.arrayBuffer();
-                audioBuffer = await audioContext.decodeAudioData(arrayBuffer);
-                
-                // Check duration (max 60 seconds)
-                if (audioBuffer.duration > 60) {
-                    audioBuffer = null;
-                    document.getElementById('analyze-btn').disabled = true;
-                    alert('Аудио должно быть не более 60 секунд. Пожалуйста, обрежьте файл.');
-                    return;
-                }
-                
-                displayAudioInfo(file.name, audioBuffer);
-                initWaveform(audioBuffer);
-                document.getElementById('analyze-btn').disabled = false;
-            } catch (e) {
-                let errorMsg = 'Ошибка загрузки аудио: ' + e.message;
-                if (file.name.toLowerCase().endsWith('.ogg') || file.name.toLowerCase().endsWith('.oga')) {
-                    errorMsg += '\n\nЕсли файл OGG не загружается, попробуйте конвертировать его в WAV или MP3.';
-                }
-                alert(errorMsg);
-                console.error('Ошибка декодирования аудио:', e);
-            }
         }
         
         function displayAudioInfo(name, buffer) {
@@ -325,10 +332,12 @@
         };
         let rec = null;              // состояние текущей записи
         let lastRecording = null;    // { calibration, deviceInfo, calibrationWav } последней записи с микрофона
+        let micReady = false;
+        let startingRecording = false;
 
         function getUserMediaFn() {
             if (window.location.protocol === 'file:') {
-                throw new Error('Страница открыта напрямую из файла. Пожалуйста, запустите сервер (python start_api.py) и откройте страницу через http://localhost:5000');
+                throw new Error('Страница открыта напрямую из файла. Пожалуйста, запустите сервер (python -m app) и откройте страницу через http://localhost:5000');
             }
             if (navigator.mediaDevices && navigator.mediaDevices.getUserMedia) {
                 return navigator.mediaDevices.getUserMedia.bind(navigator.mediaDevices);
@@ -342,8 +351,13 @@
             throw new Error(errorMsg);
         }
 
-        async function startRecording() {
-            if (rec) return;
+        async function startRecording(options = {}) {
+            if (rec || startingRecording) return;
+            startingRecording = true;
+            document.getElementById('record-btn').disabled = true;
+            document.getElementById('exam-test-btn').disabled = true;
+            document.getElementById('mic-check-status').textContent = 'Разрешите доступ к микрофону в браузере…';
+            let acquiredStream = null;
             try {
                 const getUserMedia = getUserMediaFn();
                 if (audioContext.state === 'suspended') {
@@ -352,11 +366,12 @@
                 // Просим «сырой» микрофон: без шумоподавления, эхоподавления и АРУ браузера
                 let stream;
                 try {
-                    stream = await getUserMedia({ audio: RAW_MIC_CONSTRAINTS });
+                    stream = await requestMicrophone(getUserMedia, RAW_MIC_CONSTRAINTS);
                 } catch (e) {
-                    if (e.name === 'NotAllowedError' || e.name === 'SecurityError') throw e;
-                    stream = await getUserMedia({ audio: true });
+                    if (e.name !== 'OverconstrainedError') throw e;
+                    stream = await requestMicrophone(getUserMedia, true);
                 }
+                acquiredStream = stream;
                 const track = stream.getAudioTracks()[0];
                 const settings = track && track.getSettings ? track.getSettings() : {};
 
@@ -375,12 +390,17 @@
                     stream, track, settings, source, analyser, processor, mute,
                     sr: audioContext.sampleRate,
                     chunks: [], nSamples: 0,
-                    calibrate: document.getElementById('calibrate-check').checked,
+                    check: !!options.check,
+                    patientId: options.test ? document.getElementById('patient-id').value.trim() : null,
+                    calibrate: !options.check && document.getElementById('calibrate-check').checked,
                     phase: 'start', speechStart: null, plan: null,
-                    stopped: false, clipUntil: 0, columns: [], raf: null
+                    stopped: false, clipUntil: 0, columns: [], raf: null,
+                    // Пошаговый тест (DSI или речевые задания): номер упражнения, попытки
+                    // и границы попыток (в отсчетах)
+                    test: options.test ? { ...TESTS[options.test], step: 0, tries: 0, tryStart: null, segments: [] } : null
                 };
                 processor.onaudioprocess = (e) => {
-                    if (!rec || rec.stopped) return;
+                    if (!rec || rec.stopped || rec.paused) return;
                     const data = new Float32Array(e.inputBuffer.getChannelData(0));
                     rec.chunks.push(data);
                     rec.nSamples += data.length;
@@ -390,20 +410,63 @@
                 };
 
                 isRecording = true;
+                if (options.test) document.getElementById('mic-check-status').textContent = 'Микрофон подключён. Выполняйте задания по инструкции.';
                 const recordBtn = document.getElementById('record-btn');
                 recordBtn.classList.add('recording');
-                recordBtn.textContent = 'Остановить запись';
+                recordBtn.disabled = false;
+                recordBtn.textContent = options.test ? 'Прервать тест' : 'Отменить проверку';
+                document.getElementById('patient-id').disabled = !!options.test;
+                document.getElementById('exam-test-btn').disabled = true;
                 document.getElementById('analyze-btn').disabled = true;
                 document.getElementById('calibration-info').style.display = 'none';
                 document.getElementById('live-recorder').style.display = 'block';
                 rec.startedAt = performance.now();
                 drawLive();
 
-                await runRecordingPhases(rec);
+                if (options.check) await checkMicrophone(rec);
+                else await runRecordingPhases(rec);
             } catch (e) {
+                acquiredStream?.getTracks().forEach(track => track.stop());
+                micReady = false;
                 cleanupRecording();
+                document.getElementById('mic-check-status').textContent = 'Проверка не завершена: ' + e.message;
                 alert('Ошибка доступа к микрофону: ' + e.message);
+            } finally {
+                startingRecording = false;
+                document.getElementById('record-btn').disabled = false;
+                document.getElementById('exam-test-btn').disabled = isRecording || !micReady;
             }
+        }
+
+        async function requestMicrophone(getUserMedia, audio) {
+            let expired = false, timeout;
+            const pending = getUserMedia({ audio }).then(stream => {
+                if (expired) { stream.getTracks().forEach(track => track.stop()); throw new Error('Время ожидания разрешения истекло'); }
+                return stream;
+            });
+            try {
+                return await Promise.race([pending, new Promise((_, reject) => {
+                    timeout = setTimeout(() => { expired = true; reject(new Error('Разрешите микрофон и повторите проверку')); }, 30000);
+                })]);
+            } finally { clearTimeout(timeout); }
+        }
+
+        async function checkMicrophone(state) {
+            micReady = false;
+            document.getElementById('mic-check-status').textContent = 'Произнесите несколько слов в течение 4 секунд.';
+            setRecPhase('speech', 'Калибровка перед записью');
+            if (!await waitForSample(state, state.sr * 4)) return;
+            let sum = 0, clipped = 0;
+            for (const chunk of state.chunks) for (const value of chunk) {
+                sum += value * value;
+                if (Math.abs(value) >= 0.98) clipped++;
+            }
+            const db = 20 * Math.log10(Math.sqrt(sum / state.nSamples) + 1e-10);
+            micReady = db > -60 && clipped / state.nSamples < 0.01 && state.track.readyState === 'live';
+            cleanupRecording();
+            document.getElementById('mic-check-status').textContent = micReady
+                ? 'Микрофон принимает звук. Можно проводить тестирование.'
+                : 'Сигнал слишком тихий или перегружен. Проверьте микрофон, расстояние и повторите проверку.';
         }
 
         function setRecPhase(phase, text) {
@@ -417,8 +480,15 @@
         // Ждем, пока микрофон наберет нужное число отсчетов; false — запись остановили
         function waitForSample(state, sampleIndex) {
             return new Promise(resolve => {
+                const deadline = performance.now() + Math.max(15000, (sampleIndex - state.nSamples) / state.sr * 1000 + 10000);
                 const check = () => {
                     if (state.stopped) return resolve(false);
+                    if (performance.now() > deadline || state.track.readyState === 'ended') {
+                        micReady = false;
+                        cleanupRecording();
+                        document.getElementById('mic-check-status').textContent = 'Нет сигнала от микрофона. Проверьте подключение и повторите проверку.';
+                        return resolve(false);
+                    }
                     if (state.nSamples >= sampleIndex) return resolve(true);
                     setTimeout(check, 30);
                 };
@@ -429,6 +499,7 @@
         async function runRecordingPhases(state) {
             if (!state.calibrate) {
                 state.speechStart = 0;
+                if (state.test) return showTestStep(state);
                 setRecPhase('speech', 'Идет запись. Говорите. Нажмите «Остановить», когда закончите');
                 return;
             }
@@ -444,7 +515,252 @@
             // С запасом на задержку динамик → микрофон (Bluetooth бывает до ~0.3 с)
             if (!await waitForSample(state, beep.end + Math.round(0.5 * state.sr))) return;
             state.speechStart = state.nSamples;
+            if (state.test) return showTestStep(state);
             setRecPhase('speech', 'Идет запись. Говорите. Нажмите «Остановить», когда закончите');
+        }
+
+        // DSI_STEPS и SPEECH_STEPS - в assets/exam_tasks.js (нужны и странице результатов)
+
+        // Обследование: долгая «а» из речевых заданий (она же MPT для DSI), затем остальные
+        // упражнения DSI и речевые задания. Каждая попытка уходит в границы того набора,
+        // к которому относится ее задание (долгая «а» - в оба)
+        const TESTS = {
+            exam: {
+                steps: [SPEECH_STEPS[0], ...DSI_STEPS, ...SPEECH_STEPS.slice(1)],
+                task: 'exam',
+                segmentSets: {
+                    dsi_segments: new Set(['mpt', ...DSI_STEPS.map(s => s.task)]),
+                    protocol_segments: new Set(SPEECH_STEPS.map(s => s.task))
+                },
+                stepName: 'Задание'
+            }
+        };
+
+        const stepTries = (step) => step.items ? step.items.length : step.tries;
+
+        // Уйти с задания можно после хотя бы одной попытки или если его старые попытки
+        // еще не заменены (нажали «Перезаписать», но ничего не записали)
+        const canLeaveStep = (test) => test.tries > 0 || test.pendingReplace === test.steps[test.step].task;
+
+        function showTestStep(state) {
+            const test = state.test;
+            const step = test.steps[test.step];
+            setRecPhase('dsi-wait', 'Микрофон включен. Держите устройство на 30 см (длина линейки) весь тест. Прочитайте задание и нажмите «Начать попытку»');
+            document.getElementById('dsi-step').style.display = 'block';
+            document.getElementById('dsi-step-count').textContent =
+                `${test.redo ? 'Перезапись: ' : ''}${test.stepName} ${test.step + 1} из ${test.steps.length}`;
+            document.getElementById('dsi-step-tries').textContent = step.items
+                ? `фраза ${test.tries + 1} из ${step.items.length}`
+                : `попытка ${test.tries + 1} из ${step.tries}`;
+            document.getElementById('dsi-step-title').textContent = step.title;
+            document.getElementById('dsi-step-text').textContent = step.text;
+            const say = step.items ? step.items[test.tries] : step.say;
+            document.getElementById('dsi-step-say').innerHTML =
+                (step.items || step.task === 'reading' ? '' : 'Что сказать: ') + escapeStepText(say);
+            const tryBtn = document.getElementById('dsi-try-btn');
+            tryBtn.textContent = 'Начать попытку';
+            tryBtn.disabled = false;
+            const nextBtn = document.getElementById('dsi-next-btn');
+            nextBtn.textContent = test.redo ? 'Вернуться к списку' : 'Следующее упражнение';
+            nextBtn.style.display =
+                canLeaveStep(test) && (test.redo || test.step < test.steps.length - 1) ? 'inline-block' : 'none';
+            document.getElementById('dsi-redo-btn').style.display = test.tries > 0 ? 'inline-block' : 'none';
+        }
+
+        // Перезапись задания: старые попытки заменяются, как только записана первая новая
+        function redoCurrentStep(state) {
+            if (!state || !state.test || state.test.tryStart !== null) return;
+            const test = state.test;
+            test.pendingReplace = test.steps[test.step].task;
+            test.tries = 0;
+            showTestStep(state);
+        }
+
+        function onTestTryButton() {
+            const state = rec;
+            if (!state || !state.test || state.speechStart === null) return;
+            const test = state.test;
+            const step = test.steps[test.step];
+            if (test.tryStart === null) {
+                test.tryStart = state.nSamples;
+                setRecPhase('speech', `Идет попытка: ${step.title.toLowerCase()}. Нажмите «Готово», когда закончите`);
+                document.getElementById('dsi-try-btn').textContent = 'Готово';
+                document.getElementById('dsi-next-btn').style.display = 'none';
+                document.getElementById('dsi-redo-btn').style.display = 'none';
+                return;
+            }
+            // Небольшой запас по краям: нажатие кнопки чуть запаздывает за голосом
+            const margin = Math.round(0.3 * state.sr);
+            if (test.pendingReplace === step.task) {
+                test.segments = test.segments.filter(seg => seg.task !== step.task);
+                test.pendingReplace = null;
+            }
+            test.segments.push({
+                task: step.task,
+                // После паузы не захватываем звук до нее
+                start: Math.max(state.speechStart, test.resumedAt || 0, test.tryStart - margin),
+                end: state.nSamples + margin
+            });
+            test.tryStart = null;
+            test.tries += 1;
+            if (test.tries >= stepTries(step)) {
+                nextTestStep(state);
+            } else {
+                showTestStep(state);
+            }
+        }
+
+        async function nextTestStep(state) {
+            if (!state || !state.test || state.test.tryStart !== null) return;
+            const test = state.test;
+            test.pendingReplace = null;
+            if (!test.redo) {
+                test.step += 1;
+                test.tries = 0;
+                if (test.step < test.steps.length) {
+                    showTestStep(state);
+                    return;
+                }
+            }
+            // Все упражнения сделаны (или перезаписано одно): дописываем запас после
+            // последней попытки, ставим микрофон на паузу и показываем список заданий
+            document.getElementById('dsi-try-btn').disabled = true;
+            document.getElementById('dsi-next-btn').style.display = 'none';
+            document.getElementById('dsi-redo-btn').style.display = 'none';
+            setRecPhase('dsi-wait', 'Тест записан. Прослушайте задания и отправьте на анализ');
+            const lastEnd = Math.max(0, ...test.segments.map(seg => seg.end));
+            if (!await waitForSample(state, lastEnd) || rec !== state) return;
+            state.paused = true;
+            test.redo = false;
+            openExamReview(state);
+        }
+
+        // ===== Окна обследования: предупреждение перед стартом и список заданий в конце =====
+        let reviewPlayer = null;     // { audio, url, button } - что сейчас играет в списке заданий
+
+        function initExamDialogs() {
+            const disclaimer = document.getElementById('exam-disclaimer');
+            const check = document.getElementById('exam-disclaimer-check');
+            const startBtn = document.getElementById('exam-disclaimer-start');
+            check.addEventListener('change', () => { startBtn.disabled = !check.checked; });
+            document.getElementById('exam-disclaimer-cancel').addEventListener('click', () => disclaimer.close());
+            startBtn.addEventListener('click', async () => {
+                disclaimer.close();
+                if (!isRecording) await startRecording({ test: 'exam' });
+            });
+
+            const review = document.getElementById('exam-review');
+            // Esc не закрывает список: тест можно только отправить или прервать
+            review.addEventListener('cancel', (e) => e.preventDefault());
+            document.getElementById('exam-review-submit').addEventListener('click', async () => {
+                closeExamReview();
+                if (stopRecording()) await analyzeAudio();
+            });
+            document.getElementById('exam-review-abort').addEventListener('click', () => {
+                if (!confirm('Прервать тест? Все записанные задания будут удалены.')) return;
+                closeExamReview();
+                cleanupRecording();
+            });
+        }
+
+        function openExamDisclaimer() {
+            if (!micReady) return;
+            if (!document.getElementById('patient-id').value.trim()) {
+                alert('Укажите ID пациента'); document.getElementById('patient-id').focus(); return;
+            }
+            document.getElementById('exam-disclaimer-check').checked = false;
+            document.getElementById('exam-disclaimer-start').disabled = true;
+            document.getElementById('exam-disclaimer').showModal();
+        }
+
+        function openExamReview(state) {
+            // Склеиваем куски один раз: дальше попытки вырезаются из одного массива
+            if (state.chunks.length !== 1) {
+                const flat = new Float32Array(state.nSamples);
+                let pos = 0;
+                for (const chunk of state.chunks) { flat.set(chunk, pos); pos += chunk.length; }
+                state.chunks = [flat];
+            }
+            const test = state.test;
+            const list = document.getElementById('exam-review-list');
+            list.innerHTML = '';
+            test.steps.forEach((step, i) => {
+                const segs = test.segments.filter(seg => seg.task === step.task);
+                const row = document.createElement('li');
+                row.className = 'review-row';
+                const title = document.createElement('div');
+                title.className = 'review-title';
+                title.textContent = step.title;
+                const meta = document.createElement('small');
+                meta.textContent = segs.length ? `попыток: ${segs.length}` : 'нет записи';
+                title.appendChild(meta);
+                const actions = document.createElement('div');
+                actions.className = 'review-actions';
+                segs.forEach((seg, k) => {
+                    const btn = document.createElement('button');
+                    btn.className = 'btn btn-outline-secondary btn-sm review-play';
+                    btn.dataset.label = segs.length > 1 ? `▶ ${k + 1}` : '▶ Слушать';
+                    btn.textContent = btn.dataset.label;
+                    btn.title = `Прослушать попытку ${k + 1}`;
+                    btn.addEventListener('click', () => toggleReviewPlayback(state, seg, btn));
+                    actions.appendChild(btn);
+                });
+                const redo = document.createElement('button');
+                redo.className = 'btn btn-outline-secondary btn-sm';
+                redo.textContent = 'Перезаписать';
+                redo.addEventListener('click', () => redoExamStep(state, i));
+                actions.appendChild(redo);
+                row.append(title, actions);
+                list.appendChild(row);
+            });
+            const dialog = document.getElementById('exam-review');
+            if (!dialog.open) dialog.showModal();
+        }
+
+        function stopReviewPlayback() {
+            if (!reviewPlayer) return;
+            reviewPlayer.audio.pause();
+            URL.revokeObjectURL(reviewPlayer.url);
+            reviewPlayer.button.textContent = reviewPlayer.button.dataset.label;
+            reviewPlayer = null;
+        }
+
+        function toggleReviewPlayback(state, seg, button) {
+            const same = reviewPlayer && reviewPlayer.button === button;
+            stopReviewPlayback();
+            if (same) return;
+            const samples = state.chunks[0].subarray(seg.start, Math.min(seg.end, state.nSamples));
+            const buffer = audioContext.createBuffer(1, samples.length, state.sr);
+            buffer.getChannelData(0).set(samples);
+            const url = URL.createObjectURL(audioBufferToWav(buffer, state.sr));
+            const audio = new Audio(url);
+            reviewPlayer = { audio, url, button };
+            button.textContent = '■ Стоп';
+            audio.addEventListener('ended', () => { if (reviewPlayer && reviewPlayer.audio === audio) stopReviewPlayback(); });
+            audio.play().catch(() => stopReviewPlayback());
+        }
+
+        function closeExamReview() {
+            stopReviewPlayback();
+            const dialog = document.getElementById('exam-review');
+            if (dialog.open) dialog.close();
+        }
+
+        // Перезапись одного задания из списка: микрофон снова пишет, после него - назад к списку
+        function redoExamStep(state, index) {
+            if (rec !== state) return;
+            closeExamReview();
+            const test = state.test;
+            test.step = index;
+            test.tries = 0;
+            test.tryStart = null;
+            test.redo = true;
+            test.pendingReplace = test.steps[index].task;
+            test.resumedAt = state.nSamples;
+            state.paused = false;
+            document.getElementById('dsi-try-btn').disabled = false;
+            showTestStep(state);
+            document.getElementById('dsi-step').scrollIntoView({ behavior: 'smooth', block: 'center' });
         }
 
         // Время AudioContext -> номер отсчета в записи (с точностью до буфера; задержку уточняем по записи)
@@ -552,7 +868,7 @@
             ctx.moveTo(0, mid);
             ctx.lineTo(width, mid);
             ctx.stroke();
-            const colors = { speech: '#0e5a78', silence: '#a3aebb', signal: '#d39a12', start: '#a3aebb' };
+            const colors = { speech: '#0e5a78', silence: '#a3aebb', signal: '#d39a12', start: '#a3aebb', 'dsi-wait': '#a3aebb' };
             const offset = width - rec.columns.length * 2;
             rec.columns.forEach((c, i) => {
                 // Масштаб с запасом, чтобы тихая речь тоже была видна
@@ -571,13 +887,19 @@
             document.getElementById('clip-indicator').style.visibility =
                 performance.now() < rec.clipUntil ? 'visible' : 'hidden';
             const seconds = rec.speechStart !== null ? (rec.nSamples - rec.speechStart) / rec.sr : 0;
-            document.getElementById('rec-timer').textContent =
-                rec.phase === 'speech' ? `запись ${Math.max(0, seconds).toFixed(1)} с` : 'калибровка';
+            let timerText = rec.phase === 'speech' ? `запись ${Math.max(0, seconds).toFixed(1)} с` : 'калибровка';
+            if (rec.test) {
+                timerText = rec.test.tryStart !== null
+                    ? `попытка ${((rec.nSamples - rec.test.tryStart) / rec.sr).toFixed(1)} с`
+                    : (rec.speechStart !== null ? 'ожидание' : 'калибровка');
+            }
+            document.getElementById('rec-timer').textContent = timerText;
 
             rec.raf = requestAnimationFrame(drawLive);
         }
 
         function cleanupRecording() {
+            const wasCheck = rec?.check;
             if (rec) {
                 rec.stopped = true;
                 if (rec.raf) cancelAnimationFrame(rec.raf);
@@ -588,14 +910,21 @@
             }
             rec = null;
             isRecording = false;
+            closeExamReview();
             const recordBtn = document.getElementById('record-btn');
             recordBtn.classList.remove('recording');
-            recordBtn.textContent = 'Записать с микрофона';
+            recordBtn.textContent = 'Проверить микрофон';
+            document.getElementById('patient-id').disabled = false;
             document.getElementById('live-recorder').style.display = 'none';
+            document.getElementById('dsi-step').style.display = 'none';
+            document.getElementById('exam-test-btn').disabled = !micReady;
+            document.getElementById('mic-check-status').textContent = micReady
+                ? 'Микрофон проверен. Можно проводить тестирование.'
+                : (wasCheck ? 'Проверка остановлена. Повторите проверку микрофона.' : 'Проверьте микрофон перед тестированием.');
         }
 
         function stopRecording() {
-            if (!rec) return;
+            if (!rec) return false;
             const state = rec;
             state.stopped = true;
             cleanupRecording();
@@ -608,12 +937,12 @@
             }
             if (state.speechStart === null) {
                 alert('Запись остановлена во время калибровки. Нажмите «Записать» еще раз и дождитесь сигнала «говорите».');
-                return;
+                return false;
             }
             const speech = all.subarray(state.speechStart);
             if (speech.length < state.sr * 0.5) {
                 alert('Запись слишком короткая. Попробуйте еще раз.');
-                return;
+                return false;
             }
 
             audioBuffer = audioContext.createBuffer(1, speech.length, state.sr);
@@ -628,10 +957,23 @@
                 calBuffer.getChannelData(0).set(calSamples);
                 calibrationWav = audioBufferToWav(calBuffer, state.sr);
             }
+            const deviceInfo = buildDeviceInfo(state, calibration);
+            if (state.test) {
+                // Границы упражнений в секундах от начала отправляемой записи
+                deviceInfo.task = state.test.task;
+                for (const [key, tasks] of Object.entries(state.test.segmentSets)) {
+                    deviceInfo[key] = state.test.segments.filter(seg => tasks.has(seg.task)).map(seg => ({
+                        task: seg.task,
+                        start_sec: round3((seg.start - state.speechStart) / state.sr),
+                        end_sec: round3((Math.min(seg.end, state.nSamples) - state.speechStart) / state.sr)
+                    }));
+                }
+            }
             lastRecording = {
+                patientId: state.patientId,
                 calibration,
                 calibrationWav,
-                deviceInfo: buildDeviceInfo(state, calibration),
+                deviceInfo,
                 buffer: audioBuffer
             };
 
@@ -639,6 +981,7 @@
             displayCalibration(calibration);
             initWaveform(audioBuffer);
             document.getElementById('analyze-btn').disabled = false;
+            return true;
         }
 
         // Уровни кадров в dBFS (25 мс, шаг 10 мс — как в recording_quality.py)
@@ -661,6 +1004,10 @@
             const sorted = [...values].sort((a, b) => a - b);
             const idx = Math.min(sorted.length - 1, Math.max(0, Math.round(p / 100 * (sorted.length - 1))));
             return sorted[idx];
+        }
+
+        function round3(x) {
+            return Math.round(x * 1000) / 1000;
         }
 
         function round1(x) {
@@ -903,32 +1250,91 @@
             box.style.display = 'block';
         }
 
+        // ===== Прогресс анализа =====
+        // Отправка файла идет с настоящим процентом загрузки. Сервер не сообщает,
+        // на каком он этапе, поэтому во время анализа полоса движется по времени
+        // (медленнее к концу) и рядом идет счетчик секунд.
+        const ANALYZE_STAGES = ['prepare', 'upload', 'analyze', 'done'];
+        let analyzeProgress = null;
+
+        function showAnalyzeProgress() {
+            const box = document.getElementById('analyze-progress');
+            box.style.display = 'block';
+            box.classList.remove('is-error');
+            box.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+            analyzeProgress = { startedAt: performance.now(), timer: null, percent: 0 };
+            analyzeProgress.timer = setInterval(() => {
+                const seconds = (performance.now() - analyzeProgress.startedAt) / 1000;
+                document.getElementById('analyze-elapsed').textContent = `${seconds.toFixed(0)} с`;
+                if (analyzeProgress.stage === 'analyze') {
+                    // Плавно от 30% к 95%: чем дольше идет анализ, тем медленнее растет полоса
+                    const t = (performance.now() - analyzeProgress.analyzeFrom) / 1000;
+                    setAnalyzePercent(30 + 65 * (1 - Math.exp(-t / analyzeProgress.tau)));
+                }
+            }, 200);
+        }
+
+        function setAnalyzePercent(percent) {
+            analyzeProgress.percent = Math.max(analyzeProgress.percent, percent);
+            const bar = document.getElementById('analyze-bar');
+            bar.style.width = `${analyzeProgress.percent.toFixed(1)}%`;
+            bar.setAttribute('aria-valuenow', analyzeProgress.percent.toFixed(0));
+        }
+
+        function setAnalyzeStage(stage, text) {
+            analyzeProgress.stage = stage;
+            document.getElementById('analyze-stage').textContent = text;
+            const current = ANALYZE_STAGES.indexOf(stage);
+            document.querySelectorAll('#analyze-steps li').forEach(li => {
+                const i = ANALYZE_STAGES.indexOf(li.dataset.stage);
+                li.classList.toggle('done', i < current || stage === 'done');
+                li.classList.toggle('active', i === current && stage !== 'done');
+            });
+        }
+
+        function finishAnalyzeProgress(error) {
+            if (!analyzeProgress) return;
+            clearInterval(analyzeProgress.timer);
+            const box = document.getElementById('analyze-progress');
+            if (error) {
+                box.classList.add('is-error');
+                document.getElementById('analyze-stage').textContent = 'Ошибка: ' + error;
+            } else {
+                setAnalyzePercent(100);
+                setAnalyzeStage('done', 'Готово, результат ниже и в списке анализов');
+                setTimeout(() => { box.style.display = 'none'; }, 4000);
+            }
+            analyzeProgress = null;
+        }
+
         async function analyzeAudio() {
-            const patient = document.getElementById('patient-id');
-            if (!patient.value.trim()) { patient.reportValidity(); patient.focus(); return; }
-            if (!audioBuffer) { alert('Загрузите или запишите аудио'); return; }
-            const progress = document.querySelector('.progress-container');
-            const bar = document.querySelector('.progress-bar');
-            const button = document.getElementById('analyze-btn');
-            const text = document.getElementById('progress-text');
-            progress.style.display = 'block'; bar.style.width = '30%'; button.disabled = true;
-            text.textContent = 'Выполняется анализ и сохранение исследования…';
+            if (!audioBuffer || !lastRecording || lastRecording.deviceInfo.task !== 'exam') return;
+            const patient = lastRecording.patientId;
+            if (!patient) { alert('Укажите ID пациента'); return; }
+            const buttons = ['record-btn','exam-test-btn','analyze-btn'].map(id=>document.getElementById(id));
+            buttons.forEach(button=>button.disabled=true);
+            showAnalyzeProgress();
             try {
                 const form = new FormData();
-                form.append('file', audioBufferToWav(audioBuffer, audioBuffer.sampleRate), 'audio.wav');
-                form.append('patient_id', patient.value.trim());
-                if (lastRecording && lastRecording.buffer === audioBuffer) {
-                    form.append('device_info', JSON.stringify(lastRecording.deviceInfo));
-                    form.append('calibration', JSON.stringify(lastRecording.calibration));
-                    if (lastRecording.calibrationWav) form.append('calibration_file', lastRecording.calibrationWav, 'calibration.wav');
-                }
-                const response = await fetch(`${API_URL}/api/analyze`, {method:'POST', body:form});
+                form.append('file',audioBufferToWav(audioBuffer,audioBuffer.sampleRate),'examination.wav');
+                form.append('patient_id',patient);
+                form.append('device_info',JSON.stringify(lastRecording.deviceInfo));
+                if (lastRecording.calibration) form.append('calibration',JSON.stringify(lastRecording.calibration));
+                if (lastRecording.calibrationWav) form.append('calibration_file',lastRecording.calibrationWav,'calibration.wav');
+                setAnalyzeStage('analyze', 'Отправка и анализ обследования. Дождитесь результата…');
+                analyzeProgress.analyzeFrom = performance.now();
+                analyzeProgress.tau = Math.max(30, audioBuffer.duration / 2);
+                const response = await fetch(`${API_URL}/api/analyze`,{method:'POST',body:form});
                 const result = await response.json();
-                if (!response.ok) throw new Error(result.error || 'Не удалось выполнить анализ');
-                bar.style.width = '100%';
+                if (!response.ok) throw new Error(result.error || 'Ошибка анализа');
+                finishAnalyzeProgress();
                 location.assign(`${API_URL}/visualization?study=${encodeURIComponent(result.study_id)}`);
-            } catch (error) { alert('Ошибка анализа: ' + error.message); }
-            finally { progress.style.display = 'none'; button.disabled = false; }
+            } catch(error) {
+                finishAnalyzeProgress(error.message);
+                const retry = document.getElementById('analyze-btn');
+                retry.hidden = false; retry.style.display = ''; retry.textContent = 'Повторить отправку обследования';
+            }
+            finally { buttons.forEach(button=>button.disabled=false); document.getElementById('exam-test-btn').disabled = !micReady; }
         }
 
         // Helper: Convert AudioBuffer to WAV for wavesurfer

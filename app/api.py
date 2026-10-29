@@ -3,7 +3,6 @@ API сервер для сохранения и получения резуль�
 """
 import os
 import json
-import csv
 import math
 from html import escape as html_escape
 from datetime import datetime
@@ -13,9 +12,14 @@ import logging
 import numpy as np
 from threading import RLock
 from functools import wraps
+from app.auth import init_auth, is_manager, owns_result, visible_results
+from app.dsi_protocol import parse_segments
+from app.speech_protocol import parse_protocol_segments
+from app.device_model_stats import loop_gain_check, model_spl_offset
 
-from speaker_baseline import compare_to_baseline
-from auth import init_auth, is_manager, owns_result, visible_results
+from app.speaker_baseline import compare_to_baseline
+from app.visualization import PARTS as VIZ_PARTS, chart_data, saved_waveform
+from app.task_recordings import task_attempts, source_audio, clip_wav, clip_filename, build_archive
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -32,12 +36,34 @@ def locked_results(func):
             return func(*args, **kwargs)
     return wrapped
 
-# Путь к файлу для хранения результатов
+# Страницы веб-интерфейса и assets/
+WEB_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 'web')
+
+# Данные хранятся в текущей папке (в контейнере это /app, туда смонтированы тома)
 RESULTS_FILE = "results.json"
 RESULTS_DIR = "results"
 
 # Создание директории для результатов, если её нет
 os.makedirs(RESULTS_DIR, exist_ok=True)
+
+# После анализа и визуализации освобожденная память остается у процесса
+# (так работает malloc в glibc), и контейнер долго держит пиковый объем.
+# malloc_trim возвращает свободные страницы системе.
+try:
+    import ctypes
+    _malloc_trim = ctypes.CDLL('libc.so.6').malloc_trim
+except (OSError, AttributeError):
+    _malloc_trim = None
+
+HEAVY_ENDPOINTS = {'analyze_audio', 'recalculate_all', 'get_visualization_data'}
+
+
+@app.teardown_request
+def release_memory(exc=None):
+    if _malloc_trim is not None and request.endpoint in HEAVY_ENDPOINTS:
+        import gc
+        gc.collect()
+        _malloc_trim(0)
 
 
 @locked_results
@@ -120,6 +146,15 @@ def authorize_result():
     g.result_index = index
 
 
+def without_visuals(result: Dict) -> Dict:
+    """
+    Результат без картинок (base64 PNG): они нужны только в ответе на анализ.
+    В results.json они занимали почти весь объем (~0,5 МБ на запись), а файл
+    читается целиком при каждом запросе списка и статистики.
+    """
+    return {k: v for k, v in result.items() if k != 'visuals'}
+
+
 @locked_results
 def save_results(results: List[Dict]):
     """Сохранение результатов в файл"""
@@ -156,6 +191,9 @@ DEVICE_INFO_FIELDS = {
     'sample_rate': int,        # частота дискретизации записи
     'noise_floor_dbfs': float, # уровень шума по калибровочной тишине перед записью
     'spl_offset_db': float,    # поправка dBFS -> dB SPL из калибровки устройства
+    'task': str,               # что записано: 'speech' / 'vowel' / 'dsi' / 'speech_protocol' / 'exam' (см. README)
+    'dsi_segments': parse_segments,  # границы упражнений теста DSI (см. dsi_protocol.py)
+    'protocol_segments': parse_protocol_segments,  # границы речевых заданий (см. speech_protocol.py)
 }
 
 
@@ -182,6 +220,16 @@ def parse_device_info(raw: Optional[str]) -> Dict:
             continue
         info[key] = value[:200] if isinstance(value, str) else value
     return info
+
+
+def add_loop_gain_check(result: Dict, calibration: Dict, history: List[Dict], device_info: Dict) -> None:
+    """Сверка уровня тестового звука с обычным для модели; при отклонении - строка в отчете"""
+    check = loop_gain_check(calibration, history, device_info)
+    if not check:
+        return
+    result['calibration_check'] = check
+    if check['status'] == 'deviation' and isinstance(result.get('report'), list):
+        result['report'].insert(0, f"⚠️ {check['message']}")
 
 
 MAX_CALIBRATION_JSON = 20000  # байт; результаты калибровки — небольшой словарь
@@ -219,8 +267,7 @@ def save_calibration_audio(file, result: Dict) -> None:
 def analyze_audio():
     """Анализ аудиофайла с сохранением сырых данных"""
     try:
-        from parkinson_analyzer import ParkinsonAnalyzer
-        from datetime import datetime
+        from app.parkinson_analyzer import ParkinsonAnalyzer
         
         # Проверка наличия файла
         if 'file' not in request.files:
@@ -251,9 +298,11 @@ def analyze_audio():
             results_dir_abs = os.path.abspath(RESULTS_DIR)
             logger.info(f"📁 Сохранение сырых данных в: {results_dir_abs}")
             device_info = parse_device_info(request.form.get('device_info'))
+            history = load_results()
             analyzer = ParkinsonAnalyzer(save_raw_data=True, raw_data_dir=results_dir_abs)
             result = analyzer.analyze_audio_file(temp_file, save_raw=True, result_id=result_id,
-                                                 device_info=device_info)
+                                                 device_info=device_info,
+                                                 model_offset=model_spl_offset(history, device_info))
             if 'error' in result:
                 return jsonify(result), 422
             result['study_id'] = result_id
@@ -262,6 +311,7 @@ def analyze_audio():
             calibration = parse_calibration(request.form.get('calibration'))
             if calibration:
                 result['calibration'] = calibration
+                add_loop_gain_check(result, calibration, history, device_info)
             save_calibration_audio(request.files.get('calibration_file'), result)
             
             # Добавление информации о пользователе
@@ -282,9 +332,12 @@ def analyze_audio():
                     result.get('features', {}), history,
                     result['user_info']['tg_user_id'], device_info,
                     result.get('quality', {}).get('unreliable_features'))
-                cleaned_result = clean_json_values(result)
+                cleaned_result = clean_json_values(without_visuals(result))
                 results.append(cleaned_result)
                 save_results(results)
+                # В ответ (не в файл): индекс для ссылок на записи заданий и сами попытки
+                result['_index'] = len(results) - 1
+                result['task_recordings'] = task_attempts(cleaned_result)
             
             # Проверяем наличие сырых данных в результате
             if 'raw_data' in result:
@@ -334,8 +387,9 @@ def get_results():
                 if result.get('user_info', {}).get('tg_user_id') != user_id:
                     continue
             # Не мутируем исходный объект, чтобы не портить данные на диске
-            result_with_index = dict(result)
+            result_with_index = without_visuals(result)
             result_with_index['_index'] = original_index
+            result_with_index['task_recordings'] = task_attempts(result)
             indexed_results.append(result_with_index)
         
         # Сортировка по дате (новые первыми), но индекс остаётся исходным
@@ -361,8 +415,7 @@ def get_results():
 def recalculate_all():
     """Пересчет всех результатов с обновленными параметрами (без капов и фолбеков)"""
     try:
-        from parkinson_analyzer import ParkinsonAnalyzer
-        from datetime import datetime
+        from app.parkinson_analyzer import ParkinsonAnalyzer
         
         logger.info("🔄 Начало пересчета всех результатов...")
         results = load_results()
@@ -395,8 +448,13 @@ def recalculate_all():
                 # Пересчитываем анализ
                 logger.info(f"🔄 Пересчет результата {idx + 1}/{len(results)}: {audio_path}")
                 # device_info сохраняем, иначе при пересчете теряются калибровки устройства
+                device_info = result.get('device_info') or {}
+                others = results[:idx] + results[idx + 1:]
                 new_result = analyzer.analyze_audio_file(audio_path, save_raw=False, result_id=result_id,
-                                                         device_info=result.get('device_info') or {})
+                                                         device_info=device_info,
+                                                         model_offset=model_spl_offset(others, device_info))
+                if isinstance(result.get('calibration'), dict):
+                    add_loop_gain_check(new_result, result['calibration'], others, device_info)
                 
                 # Сохраняем оригинальную информацию о пользователе
                 original_user_info = result.get('user_info', {})
@@ -412,7 +470,7 @@ def recalculate_all():
                     new_result['calibration'] = result['calibration']
                 
                 # Обновляем результат в списке
-                results[idx] = clean_json_values(new_result)
+                results[idx] = clean_json_values(without_visuals(new_result))
                 recalculated += 1
                 logger.info(f"✅ Результат {idx + 1} пересчитан успешно")
                 
@@ -451,7 +509,10 @@ def get_result(result_key: str):
         if index < 0 or index >= len(results):
             return jsonify({"error": "Индекс вне диапазона"}), 404
         
-        return jsonify(results[index]), 200
+        result = without_visuals(results[index])
+        result['_index'] = index
+        result['task_recordings'] = task_attempts(result)
+        return jsonify(result), 200
         
     except Exception as e:
         logger.error(f"Ошибка получения результата: {e}")
@@ -478,18 +539,6 @@ def get_visualization_data(result_key: str):
         data_directory = raw_data.get('data_directory')
         if not data_directory or not os.path.exists(data_directory):
             return jsonify({"error": "Директория с сырыми данными не найдена"}), 404
-        
-        # Загрузка waveform данных
-        waveform_data = None
-        waveform_file = raw_data.get('files', {}).get('waveform_data')
-        if waveform_file and os.path.exists(waveform_file):
-            try:
-                with open(waveform_file, 'r', encoding='utf-8') as f:
-                    waveform_data = json.load(f)
-                # Очистка от NaN
-                waveform_data = clean_json_values(waveform_data) if waveform_data else None
-            except Exception as e:
-                logger.warning(f"Ошибка загрузки waveform данных: {e}")
         
         # Загрузка данных сегментов
         segments_data = []
@@ -525,152 +574,39 @@ def get_visualization_data(result_key: str):
             if original_audio and os.path.exists(original_audio):
                 audio_url = f"/api/audio/{result.get('study_id') or index}"
         
-        # Вычисление F0 данных из аудио (если доступно)
-        f0_data = None
-        intensity_data = None
-        spectrogram_data = None
+        # Какие графики нужны: страница просит каждый отдельно (part=...),
+        # без part считаются все сразу
+        part = request.args.get('part')
+        if part is not None and part not in VIZ_PARTS:
+            return jsonify({"error": f"Неизвестный график: {part}"}), 400
+        parts = (part,) if part else VIZ_PARTS
         
         # Используем обработанное аудио, если доступно, иначе исходное
-        audio_file_for_f0 = None
+        audio_file = None
         if processed_audio and os.path.exists(processed_audio):
-            audio_file_for_f0 = processed_audio
+            audio_file = processed_audio
         else:
             original_audio = raw_data.get('files', {}).get('original_audio')
             if original_audio and os.path.exists(original_audio):
-                audio_file_for_f0 = original_audio
+                audio_file = original_audio
         
-        if audio_file_for_f0:
+        charts = {p: {} for p in parts}
+        if audio_file:
             try:
-                from audio_processor import AudioProcessor
-                from feature_extractor import FeatureExtractor
-                import librosa
-                import numpy as np
-                
-                audio_processor = AudioProcessor(target_sr=16000)
-                feature_extractor = FeatureExtractor(sample_rate=16000)
-                
-                # Загрузка аудио
-                audio, sr = audio_processor.load_audio(audio_file_for_f0)
-                
-                # Извлечение F0
-                try:
-                    import parselmouth
-                    audio_normalized = audio / (np.max(np.abs(audio)) + 1e-10)
-                    sound = parselmouth.Sound(audio_normalized, sampling_frequency=sr)
-                    pitch = sound.to_pitch_ac(time_step=0.01)
-                    
-                    f0_times = pitch.xs()
-                    f0_values = pitch.selected_array['frequency']
-                    
-                    # Фильтруем валидные значения (исключаем NaN и inf)
-                    valid_indices = (f0_values > 0) & np.isfinite(f0_values)
-                    if np.any(valid_indices):
-                        f0_times_valid = f0_times[valid_indices]
-                        f0_values_valid = f0_values[valid_indices]
-                        f0_mean = float(np.mean(f0_values_valid))
-                        # Проверяем на NaN и inf
-                        if not (math.isnan(f0_mean) or math.isinf(f0_mean)):
-                            f0_data = {
-                                'time': [float(t) for t in f0_times_valid if np.isfinite(t)],
-                                'values': [float(v) for v in f0_values_valid if np.isfinite(v)],
-                                'mean': f0_mean
-                            }
-                        else:
-                            f0_data = None
-                    else:
-                        f0_data = None
-                except Exception as e:
-                    logger.warning(f"Ошибка извлечения F0 через parselmouth: {e}")
-                    # Fallback на librosa
-                    f0 = librosa.pyin(audio, fmin=50, fmax=500)
-                    f0_times = librosa.frames_to_time(np.arange(len(f0[0])), sr=sr)
-                    valid_indices = ~np.isnan(f0[0]) & np.isfinite(f0[0])
-                    if np.any(valid_indices):
-                        f0_values_valid = f0[0][valid_indices]
-                        f0_times_valid = f0_times[valid_indices]
-                        f0_mean = float(np.mean(f0_values_valid))
-                        # Проверяем на NaN и inf
-                        if not (math.isnan(f0_mean) or math.isinf(f0_mean)):
-                            f0_data = {
-                                'time': [float(t) for t in f0_times_valid if np.isfinite(t)],
-                                'values': [float(v) for v in f0_values_valid if np.isfinite(v)],
-                                'mean': f0_mean
-                            }
-                        else:
-                            f0_data = None
-                    else:
-                        f0_data = None
-                
-                # Извлечение интенсивности
-                try:
-                    import parselmouth
-                    audio_normalized = audio / (np.max(np.abs(audio)) + 1e-10)
-                    sound = parselmouth.Sound(audio_normalized, sampling_frequency=sr)
-                    intensity = sound.to_intensity(time_step=0.01)
-                    intensity_times = intensity.xs()
-                    intensity_values = intensity.values[0]
-                    
-                    # Фильтруем NaN и inf значения
-                    valid_indices = np.isfinite(intensity_values)
-                    if np.any(valid_indices):
-                        intensity_data = {
-                            'time': [float(t) for t in intensity_times if np.isfinite(t)],
-                            'values': [float(v) for v in intensity_values[valid_indices] if np.isfinite(v)]
-                        }
-                    else:
-                        intensity_data = None
-                except Exception as e:
-                    logger.warning(f"Ошибка извлечения интенсивности: {e}")
-                    # Fallback через RMS
-                    frame_length = int(0.025 * sr)
-                    hop_length = int(0.010 * sr)
-                    rms = librosa.feature.rms(y=audio, frame_length=frame_length, hop_length=hop_length)[0]
-                    rms_times = librosa.frames_to_time(np.arange(len(rms)), sr=sr, hop_length=hop_length)
-                    # Конвертация в dB
-                    rms_db = 20 * np.log10(rms + 1e-10)
-                    # Фильтруем NaN и inf значения
-                    valid_indices = np.isfinite(rms_db)
-                    if np.any(valid_indices):
-                        intensity_data = {
-                            'time': [float(t) for t in rms_times if np.isfinite(t)],
-                            'values': [float(v) for v in rms_db[valid_indices] if np.isfinite(v)]
-                        }
-                    else:
-                        intensity_data = None
-                
-                # Извлечение спектрограммы
-                freqs, times, spectrogram = audio_processor.get_spectrogram(audio, sr)
-                # Ограничиваем частоты до 5kHz для визуализации
-                freq_mask = freqs <= 5000
-                freqs_filtered = freqs[freq_mask]
-                spectrogram_filtered = spectrogram[freq_mask, :]
-                
-                # Очистка от NaN и inf
-                # Фильтруем частоты
-                freq_valid = [float(f) for f in freqs_filtered if np.isfinite(f)]
-                # Фильтруем времена
-                times_valid = [float(t) for t in times if np.isfinite(t)]
-                # Фильтруем magnitude (заменяем NaN и inf на -80 dB)
-                magnitude_cleaned = []
-                for row in spectrogram_filtered:
-                    cleaned_row = []
-                    for val in row:
-                        if np.isfinite(val):
-                            cleaned_row.append(float(val))
-                        else:
-                            cleaned_row.append(-80.0)  # Минимальное значение для визуализации
-                    magnitude_cleaned.append(cleaned_row)
-                
-                spectrogram_data = {
-                    'frequencies': freq_valid,
-                    'times': times_valid,
-                    'magnitude': magnitude_cleaned
-                }
-                
+                charts = chart_data(audio_file, parts)
             except Exception as e:
-                logger.error(f"Ошибка обработки аудио для визуализации: {e}")
-                import traceback
-                traceback.print_exc()
+                logger.error(f"Ошибка обработки аудио для визуализации: {e}", exc_info=True)
+
+        # Без аудио волну берем из сохраненного файла
+        waveform_file = raw_data.get('files', {}).get('waveform_data')
+        if 'waveform' in parts and not charts['waveform'] and waveform_file and os.path.exists(waveform_file):
+            try:
+                charts['waveform'] = saved_waveform(waveform_file)
+            except Exception as e:
+                logger.warning(f"Ошибка загрузки waveform данных: {e}")
+
+        if part:
+            return jsonify(clean_json_values({**charts, 'audio_url': audio_url})), 200
         
         # Подготовка данных сегментов с временными метками
         segments_with_time = []
@@ -693,10 +629,7 @@ def get_visualization_data(result_key: str):
         
         # Формирование ответа
         visualization_data = {
-            'waveform': waveform_data or {},
-            'f0_data': f0_data or {},
-            'intensity': intensity_data or {},
-            'spectrogram': spectrogram_data or {},
+            **charts,
             'segments': segments_with_time,
             'audio_url': audio_url,
             'spectrogram_meta': spectrogram_meta or {}
@@ -731,7 +664,7 @@ def get_audio_file(result_key: str):
         # Пробуем обработанный аудио
         processed_audio = raw_data.get('files', {}).get('processed_audio')
         if processed_audio and os.path.exists(processed_audio):
-            return send_from_directory(os.path.dirname(processed_audio), 
+            return send_from_directory(os.path.abspath(os.path.dirname(processed_audio)),
                                      os.path.basename(processed_audio),
                                      mimetype='audio/wav')
         
@@ -745,7 +678,7 @@ def get_audio_file(result_key: str):
                 '.mp3': 'audio/mpeg'
             }
             mimetype = mimetype_map.get(ext, 'audio/wav')
-            return send_from_directory(os.path.dirname(original_audio),
+            return send_from_directory(os.path.abspath(os.path.dirname(original_audio)),
                                      os.path.basename(original_audio),
                                      mimetype=mimetype)
         
@@ -754,6 +687,62 @@ def get_audio_file(result_key: str):
     except Exception as e:
         logger.error(f"Ошибка получения аудиофайла: {e}")
         return jsonify({"error": str(e)}), 500
+
+
+def _download_name(result: Dict, index: int) -> str:
+    """Имя архива: пользователь и время записи (латиница и цифры, чтобы не ломать заголовок)"""
+    info = result.get('user_info') or {}
+    stamp = ''.join(ch for ch in str(info.get('timestamp', ''))[:16] if ch.isdigit())
+    user = ''.join(ch for ch in str(info.get('tg_username', '')) if ch.isascii() and (ch.isalnum() or ch in '-_'))
+    return '_'.join(part for part in ('audio_park', user, stamp or str(index)) if part)
+
+
+@app.route('/api/audio/<result_key>/task/<int:n>', methods=['GET'])
+def get_task_audio(result_key: str, n: int):
+    index = g.result_index
+    """Запись одной попытки задания; ?download=1 - скачать файлом"""
+    try:
+        results = load_results()
+        if index < 0 or index >= len(results):
+            return jsonify({"error": "Индекс вне диапазона"}), 404
+        result = results[index]
+        attempts = task_attempts(result)
+        source = source_audio(result)
+        if n < 0 or n >= len(attempts) or not source:
+            return jsonify({"error": "Запись задания не найдена"}), 404
+        item = attempts[n]
+        headers = {}
+        if request.args.get('download'):
+            name = f"{_download_name(result, index)}_{clip_filename(item)}"
+            headers['Content-Disposition'] = f'attachment; filename="{name}"'
+        return Response(clip_wav(source, item['start_sec'], item['end_sec']),
+                        mimetype='audio/wav', headers=headers)
+    except Exception as e:
+        logger.error(f"Ошибка получения записи задания: {e}", exc_info=True)
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route('/api/archive/<result_key>', methods=['GET'])
+def get_archive(result_key: str):
+    index = g.result_index
+    """ZIP всего прогона: запись целиком, записи заданий и results.json"""
+    try:
+        results = load_results()
+        if index < 0 or index >= len(results):
+            return jsonify({"error": "Индекс вне диапазона"}), 404
+        result = results[index]
+        name = _download_name(result, index) + '.zip'
+        return Response(build_archive(result), mimetype='application/zip',
+                        headers={'Content-Disposition': f'attachment; filename="{name}"'})
+    except Exception as e:
+        logger.error(f"Ошибка сборки архива: {e}", exc_info=True)
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route('/api/health', methods=['GET'])
+def api_health():
+    """Проверка, что сервер жив (для healthcheck): results.json не читает"""
+    return jsonify({"status": "ok"}), 200
 
 
 @app.route('/api/stats', methods=['GET'])
@@ -792,19 +781,19 @@ def is_recent(result: Dict, days: int = 7) -> bool:
 @app.route('/')
 def index():
     """Главная страница - отдача index.html"""
-    return send_from_directory(app.root_path, 'index.html')
+    return send_from_directory(WEB_DIR, 'index.html')
 
 
 @app.route('/results')
 def results_page():
     """Страница со списком всех результатов"""
-    return send_from_directory(app.root_path, 'results.html')
+    return send_from_directory(WEB_DIR, 'results.html')
 
 
 @app.route('/visualization')
 def visualization():
     """Страница визуализации параметров"""
-    return send_from_directory(app.root_path, 'visualization.html')
+    return send_from_directory(WEB_DIR, 'visualization.html')
 
 
 @app.route('/api/export/csv', methods=['GET'])
@@ -1095,7 +1084,9 @@ def generate_html_report(results: List[Dict]) -> str:
         except:
             pass
         
-        dsi_score = dsi.get('dsi_score', 'N/A')
+        dsi_score = dsi.get('dsi_score')
+        if dsi_score is None:
+            dsi_score = 'N/A'
         pd_risk = symptom_scores.get('pd_risk', 'N/A')
         
         risk_class = 'badge-low'
@@ -1147,8 +1138,8 @@ def generate_html_report(results: List[Dict]) -> str:
         </div>
         
         <h4>DSI (Dysphonia Severity Index)</h4>
-        <p><strong>Score:</strong> {dsi.get('dsi_score', 'N/A')}</p>
-        <p><strong>Range:</strong> {dsi.get('dsi_range', 'N/A')}</p>
+        <p><strong>Score:</strong> {dsi.get('dsi_score') if dsi.get('dsi_score') is not None else 'N/A'}</p>
+        <p><strong>Range:</strong> {dsi.get('reason') or dsi.get('dsi_range', 'N/A')}</p>
         
         <h4>Акустические признаки</h4>
         <ul>
@@ -1161,11 +1152,11 @@ def generate_html_report(results: List[Dict]) -> str:
         
         <h4>Оценка симптомов</h4>
         <ul>
-            <li>Гипофония: {symptom_scores.get('hypophonia', 'N/A')}</li>
-            <li>Monopitch: {symptom_scores.get('monopitch', 'N/A')}</li>
-            <li>Monoloudness: {symptom_scores.get('monoloudness', 'N/A')}</li>
-            <li>Охриплость: {symptom_scores.get('hoarseness', 'N/A')}</li>
-            <li>Артикуляция: {symptom_scores.get('imprecise_articulation', 'N/A')}</li>
+            <li>Гипофония: {symptom_scores.get('hypophonia') if symptom_scores.get('hypophonia') is not None else 'не оценивался'}</li>
+            <li>Monopitch: {symptom_scores.get('monopitch') if symptom_scores.get('monopitch') is not None else 'не оценивался'}</li>
+            <li>Monoloudness: {symptom_scores.get('monoloudness') if symptom_scores.get('monoloudness') is not None else 'не оценивался'}</li>
+            <li>Охриплость: {symptom_scores.get('hoarseness') if symptom_scores.get('hoarseness') is not None else 'не оценивался'}</li>
+            <li>Артикуляция: {symptom_scores.get('imprecise_articulation') if symptom_scores.get('imprecise_articulation') is not None else 'не оценивался'}</li>
         </ul>
         
         <p><strong>Риск ПД:</strong> {symptom_scores.get('pd_risk', 'N/A')}</p>
@@ -1182,22 +1173,22 @@ def generate_html_report(results: List[Dict]) -> str:
 
 @app.get('/login')
 def login_page():
-    return send_from_directory(app.root_path, 'login.html')
+    return send_from_directory(WEB_DIR, 'login.html')
 
 
 @app.get('/all-results')
 def all_results_page():
-    return send_from_directory(app.root_path, 'results.html')
+    return send_from_directory(WEB_DIR, 'results.html')
 
 
 @app.get('/users')
 def users_page():
-    return send_from_directory(app.root_path, 'users.html')
+    return send_from_directory(WEB_DIR, 'users.html')
 
 
 @app.get('/assets/<path:path>')
 def serve_assets(path):
-    return send_from_directory(os.path.join(app.root_path, 'assets'), path)
+    return send_from_directory(os.path.join(WEB_DIR, 'assets'), path)
 
 
 if __name__ == '__main__':

@@ -8,7 +8,7 @@ import sys
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 from flask import Flask
-from auth import connection, create_user, init_auth
+from app.auth import connection, create_user, init_auth
 
 
 def import_accounts(path):

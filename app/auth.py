@@ -145,7 +145,7 @@ def init_auth(app):
                                  (user_id, hashlib.sha256(token.encode()).hexdigest(), time.time())).fetchone()
             if row:
                 g.user = public_user(row)
-        if request.path == "/healthz" or request.path.startswith("/assets/"):
+        if request.path in {"/healthz", "/api/health"} or request.path.startswith("/assets/"):
             return None
         if request.path not in {"/login", "/api/auth/login", "/api/auth/csrf"} and not g.user:
             if request.path.startswith("/api/"):

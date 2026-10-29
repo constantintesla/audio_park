@@ -12,6 +12,9 @@ if %ERRORLEVEL% NEQ 0 (
     exit /b 1
 )
 
+REM Работаем из корня репозитория
+cd /d "%~dp0.."
+
 REM Проверка наличия .env файла
 if not exist .env (
     echo 📝 Создание .env файла из примера...
@@ -32,6 +35,6 @@ echo ✅ Запуск веб-интерфейса на http://localhost:5000
 echo ⚠️  Для остановки нажмите Ctrl+C
 echo.
 
-python start_api.py
+python -m app
 
 pause
