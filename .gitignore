@@ -13,6 +13,8 @@ ENV/
 .venv
 
 # Результаты и данные
+auth_data/
+.local-backups/
 results.json
 results/
 data/

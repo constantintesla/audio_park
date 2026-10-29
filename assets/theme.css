@@ -3,6 +3,13 @@
  * Сдержанный клинический стиль: светлый фон, белые карточки с тонкой рамкой,
  * один акцентный цвет, мягкие цветовые метки статусов.
  */
+.account-menu { display: flex; align-items: center; gap: 12px; font-size: 12px; margin-left: auto; }
+.auth-container { max-width: 460px; margin: 70px auto; }
+.study-identity { display: grid; grid-template-columns: 1fr 1fr; gap: 24px; align-items: center; }
+.study-id { font-family: monospace; overflow-wrap: anywhere; font-size: 12px; }
+.study-filter { max-width: 350px; }
+@media (max-width: 900px) { .app-nav-inner { flex-wrap: wrap; } .account-menu { margin-left: 0; } }
+@media (max-width: 600px) { .study-identity { grid-template-columns: 1fr; } .auth-container { margin: 30px auto; } }
 :root {
     --bg: #f3f5f8;
     --surface: #ffffff;

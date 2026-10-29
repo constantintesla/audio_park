@@ -9,12 +9,15 @@ services:
     volumes:
       - ./results.json:/app/results.json
       - ./results:/app/results
+      - ./auth_data:/app/auth
     env_file:
       - .env
     environment:
       - PORT=5000
       - FLASK_ENV=${FLASK_ENV:-development}
       - DEBUG=${DEBUG:-True}
+      - AUTH_DATA_DIR=/app/auth
+      - SESSION_COOKIE_SECURE=${SESSION_COOKIE_SECURE:-false}
     restart: unless-stopped
     networks:
       - parkinson_network

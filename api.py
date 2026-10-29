@@ -5,21 +5,32 @@ import os
 import json
 import csv
 import math
+from html import escape as html_escape
 from datetime import datetime
 from typing import List, Dict, Any, Optional
-from flask import Flask, request, jsonify, send_from_directory, Response
-from flask_cors import CORS
+from flask import Flask, request, jsonify, send_from_directory, Response, g
 import logging
 import numpy as np
+from threading import RLock
+from functools import wraps
 
 from speaker_baseline import compare_to_baseline
+from auth import init_auth, is_manager, owns_result, visible_results
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-app = Flask(__name__)
-# Разрешить CORS для веб-интерфейса со всех источников для всех маршрутов
-CORS(app, resources={r"/*": {"origins": "*"}})
+app = Flask(__name__, static_folder=None)
+init_auth(app)
+RESULTS_LOCK = RLock()
+
+
+def locked_results(func):
+    @wraps(func)
+    def wrapped(*args, **kwargs):
+        with RESULTS_LOCK:
+            return func(*args, **kwargs)
+    return wrapped
 
 # Путь к файлу для хранения результатов
 RESULTS_FILE = "results.json"
@@ -29,6 +40,7 @@ RESULTS_DIR = "results"
 os.makedirs(RESULTS_DIR, exist_ok=True)
 
 
+@locked_results
 def load_results() -> List[Dict]:
     """Загрузка результатов из файла"""
     if os.path.exists(RESULTS_FILE):
@@ -43,12 +55,10 @@ def load_results() -> List[Dict]:
                     return []
         except json.JSONDecodeError as e:
             logger.error(f"Ошибка парсинга JSON: {e}")
-            # Создаем новый файл с пустым списком
-            save_results([])
-            return []
+            raise RuntimeError("Хранилище результатов повреждено") from e
         except Exception as e:
             logger.error(f"Ошибка загрузки результатов: {e}")
-            return []
+            raise
     else:
         # Файл не существует, создаем пустой список
         logger.info(f"Файл {RESULTS_FILE} не найден, создаем новый")
@@ -94,6 +104,23 @@ def clean_json_values(obj: Any) -> Any:
         return obj
 
 
+@app.before_request
+def authorize_result():
+    """One ownership check for details, visualizations and audio."""
+    key = (request.view_args or {}).get('result_key')
+    if key is None or not g.user:
+        return None
+    with RESULTS_LOCK:
+        results = load_results()
+    index = next((i for i, result in enumerate(results) if result.get('study_id') == key), None)
+    if index is None and key.isdigit() and int(key) < len(results):
+        index = int(key)
+    if index is None or not (is_manager() or owns_result(results[index])):
+        return jsonify(error="Исследование не найдено"), 404
+    g.result_index = index
+
+
+@locked_results
 def save_results(results: List[Dict]):
     """Сохранение результатов в файл"""
     try:
@@ -115,6 +142,7 @@ def save_results(results: List[Dict]):
             logger.error(f"Файл не был создан: {file_path}")
     except Exception as e:
         logger.error(f"Ошибка сохранения результатов: {e}", exc_info=True)
+        raise
 
 
 # Поля метаданных устройства, которые принимаются от приложения
@@ -205,10 +233,16 @@ def analyze_audio():
         # Сохранение временного файла
         import tempfile
         import uuid
-        result_id = f"web_{datetime.now().strftime('%Y%m%d_%H%M%S_%f')[:-3]}_{uuid.uuid4().hex[:8]}"
+        patient_id = request.form.get('patient_id', '').strip()
+        if not patient_id or len(patient_id) > 100 or any(ord(c) < 32 for c in patient_id):
+            return jsonify(error="Укажите ID пациента (до 100 символов)"), 400
+        result_id = f"AP-{datetime.now().strftime('%Y%m%d')}-{uuid.uuid4().hex}"
         
         temp_dir = tempfile.gettempdir()
-        temp_file = os.path.join(temp_dir, f"temp_{result_id}_{file.filename}")
+        suffix = os.path.splitext(file.filename)[1].lower()
+        if suffix not in {'.wav', '.mp3', '.ogg', '.oga', '.webm', '.m4a', '.flac', '.aac'}:
+            return jsonify(error="Неподдерживаемый формат аудио"), 400
+        temp_file = os.path.join(temp_dir, f"temp_{result_id}{suffix}")
         file.save(temp_file)
         
         try:
@@ -220,6 +254,11 @@ def analyze_audio():
             analyzer = ParkinsonAnalyzer(save_raw_data=True, raw_data_dir=results_dir_abs)
             result = analyzer.analyze_audio_file(temp_file, save_raw=True, result_id=result_id,
                                                  device_info=device_info)
+            if 'error' in result:
+                return jsonify(result), 422
+            result['study_id'] = result_id
+            result['patient_id'] = patient_id
+            result['owner_id'] = g.user['id']
             calibration = parse_calibration(request.form.get('calibration'))
             if calibration:
                 result['calibration'] = calibration
@@ -227,8 +266,8 @@ def analyze_audio():
             
             # Добавление информации о пользователе
             result['user_info'] = {
-                'tg_username': request.form.get('username', 'web_user'),
-                'tg_user_id': request.form.get('user_id', 0),
+                'tg_username': g.user['login'],
+                'tg_user_id': g.user['id'],
                 'timestamp': datetime.now().isoformat(),
                 'source': 'web_interface',
                 'filename': file.filename
@@ -236,15 +275,16 @@ def analyze_audio():
             
             # Сохранение результата
             # Результат уже очищен в parkinson_analyzer, но дополнительно проверяем
-            results = load_results()
-            if 'error' not in result:
+            with RESULTS_LOCK:
+                results = load_results()
+                history = [r for r in results if r.get('patient_id') == patient_id and owns_result(r)]
                 result['baseline'] = compare_to_baseline(
-                    result.get('features', {}), results,
+                    result.get('features', {}), history,
                     result['user_info']['tg_user_id'], device_info,
                     result.get('quality', {}).get('unreliable_features'))
-            cleaned_result = clean_json_values(result)
-            results.append(cleaned_result)
-            save_results(results)
+                cleaned_result = clean_json_values(result)
+                results.append(cleaned_result)
+                save_results(results)
             
             # Проверяем наличие сырых данных в результате
             if 'raw_data' in result:
@@ -272,42 +312,7 @@ def analyze_audio():
 
 @app.route('/api/results', methods=['POST'])
 def save_result():
-    """Сохранение результата анализа"""
-    try:
-        data = request.json
-        
-        if not data:
-            logger.warning("Попытка сохранить результат без данных")
-            return jsonify({"error": "Нет данных"}), 400
-        
-        logger.info(f"Получен запрос на сохранение результата от пользователя {data.get('user_info', {}).get('tg_username', 'unknown')}")
-        
-        # Загрузка существующих результатов
-        results = load_results()
-        logger.info(f"Загружено существующих результатов: {len(results)}")
-        
-        # Очистка данных от недопустимых значений перед добавлением
-        cleaned_data = clean_json_values(data)
-        
-        # Добавление нового результата
-        results.append(cleaned_data)
-        logger.info(f"Добавлен новый результат. Всего результатов: {len(results)}")
-        
-        # Сохранение
-        save_results(results)
-        
-        # Проверяем, что результат действительно сохранен
-        saved_results = load_results()
-        if len(saved_results) != len(results):
-            logger.error(f"ОШИБКА: Количество результатов не совпадает! Ожидалось: {len(results)}, сохранено: {len(saved_results)}")
-        else:
-            logger.info(f"Результат успешно сохранен. Всего в файле: {len(saved_results)}")
-        
-        return jsonify({"status": "success", "message": "Результат сохранен", "total": len(saved_results)}), 200
-        
-    except Exception as e:
-        logger.error(f"Ошибка сохранения результата: {e}", exc_info=True)
-        return jsonify({"error": str(e)}), 500
+    return jsonify(error="Результат сохраняется автоматически через /api/analyze"), 405
 
 
 @app.route('/api/results', methods=['GET'])
@@ -319,8 +324,12 @@ def get_results():
         # Фильтрация по user_id, если указан,
         # при этом сохраняем исходный индекс записи в файле results.json
         user_id = request.args.get('user_id', type=int)
+        visible = visible_results(all_results)
+        allowed_ids = {id(result) for result in visible}
         indexed_results = []
         for original_index, result in enumerate(all_results):
+            if id(result) not in allowed_ids:
+                continue
             if user_id is not None:
                 if result.get('user_info', {}).get('tg_user_id') != user_id:
                     continue
@@ -348,6 +357,7 @@ def get_results():
 
 
 @app.route('/api/recalculate-all', methods=['POST'])
+@locked_results
 def recalculate_all():
     """Пересчет всех результатов с обновленными параметрами (без капов и фолбеков)"""
     try:
@@ -391,6 +401,9 @@ def recalculate_all():
                 # Сохраняем оригинальную информацию о пользователе
                 original_user_info = result.get('user_info', {})
                 new_result['user_info'] = original_user_info
+                for key in ('study_id', 'patient_id', 'owner_id'):
+                    if key in result:
+                        new_result[key] = result[key]
                 
                 # Сохраняем оригинальные raw_data (пути к файлам)
                 if raw_data:
@@ -428,9 +441,10 @@ def recalculate_all():
         return jsonify({"error": str(e)}), 500
 
 
-@app.route('/api/results/<int:index>', methods=['GET'])
-def get_result(index: int):
-    """Получение конкретного результата по индексу"""
+@app.route('/api/results/<result_key>', methods=['GET'])
+def get_result(result_key: str):
+    """Получение доступного исследования по ID (старые индексы тоже поддержаны)."""
+    index = g.result_index
     try:
         results = load_results()
         
@@ -444,9 +458,10 @@ def get_result(index: int):
         return jsonify({"error": str(e)}), 500
 
 
-@app.route('/api/visualization/<int:index>', methods=['GET'])
-def get_visualization_data(index: int):
+@app.route('/api/visualization/<result_key>', methods=['GET'])
+def get_visualization_data(result_key: str):
     """Получение данных для визуализации параметров"""
+    index = g.result_index
     try:
         results = load_results()
         
@@ -503,12 +518,12 @@ def get_visualization_data(index: int):
         processed_audio = raw_data.get('files', {}).get('processed_audio')
         if processed_audio and os.path.exists(processed_audio):
             # Возвращаем относительный путь для доступа через статический сервер
-            audio_url = f"/api/audio/{index}"
+            audio_url = f"/api/audio/{result.get('study_id') or index}"
         else:
             # Пробуем исходный файл
             original_audio = raw_data.get('files', {}).get('original_audio')
             if original_audio and os.path.exists(original_audio):
-                audio_url = f"/api/audio/{index}"
+                audio_url = f"/api/audio/{result.get('study_id') or index}"
         
         # Вычисление F0 данных из аудио (если доступно)
         f0_data = None
@@ -697,9 +712,10 @@ def get_visualization_data(index: int):
         return jsonify({"error": str(e)}), 500
 
 
-@app.route('/api/audio/<int:index>', methods=['GET'])
-def get_audio_file(index: int):
+@app.route('/api/audio/<result_key>', methods=['GET'])
+def get_audio_file(result_key: str):
     """Получение аудиофайла для воспроизведения"""
+    index = g.result_index
     try:
         results = load_results()
         
@@ -744,7 +760,7 @@ def get_audio_file(index: int):
 def get_stats():
     """Получение статистики"""
     try:
-        results = load_results()
+        results = visible_results(load_results())
         
         stats = {
             "total_analyses": len(results),
@@ -776,26 +792,26 @@ def is_recent(result: Dict, days: int = 7) -> bool:
 @app.route('/')
 def index():
     """Главная страница - отдача index.html"""
-    return send_from_directory('.', 'index.html')
+    return send_from_directory(app.root_path, 'index.html')
 
 
 @app.route('/results')
 def results_page():
     """Страница со списком всех результатов"""
-    return send_from_directory('.', 'results.html')
+    return send_from_directory(app.root_path, 'results.html')
 
 
 @app.route('/visualization')
 def visualization():
     """Страница визуализации параметров"""
-    return send_from_directory('.', 'visualization.html')
+    return send_from_directory(app.root_path, 'visualization.html')
 
 
 @app.route('/api/export/csv', methods=['GET'])
 def export_csv():
     """Экспорт результатов в CSV"""
     try:
-        results = load_results()
+        results = visible_results(load_results())
         
         if not results:
             return jsonify({"error": "Нет результатов для экспорта"}), 404
@@ -803,7 +819,7 @@ def export_csv():
         # Создание CSV в памяти
         output = []
         output.append([
-            'Дата/Время', 'Username', 'User ID',
+            'ID исследования', 'ID пациента', 'Дата/Время', 'Специалист', 'Account ID',
             'DSI Score', 'DSI Range', 'Риск ПД',
             'Jitter (%)', 'Shimmer (%)', 'HNR (dB)',
             'F0 Mean (Hz)', 'F0 SD (Hz)', 'Скорость речи (сл/сек)',
@@ -822,6 +838,8 @@ def export_csv():
             dsi_breakdown = dsi.get('dsi_breakdown', {})
             
             row = [
+                result.get('study_id', ''),
+                result.get('patient_id', ''),
                 user_info.get('timestamp', ''),
                 user_info.get('tg_username', ''),
                 user_info.get('tg_user_id', ''),
@@ -856,7 +874,7 @@ def export_csv():
             writer = csv_module.writer(output_io, delimiter=',', quotechar='"', quoting=csv_module.QUOTE_MINIMAL)
             
             for row in output:
-                writer.writerow(row)
+                writer.writerow(["'" + value if isinstance(value, str) and value.startswith(('=', '+', '-', '@', '\t', '\r')) else value for value in row])
             
             output_io.seek(0)
             return output_io.getvalue()
@@ -883,7 +901,7 @@ def export_csv():
 def export_json():
     """Экспорт результатов в JSON"""
     try:
-        results = load_results()
+        results = visible_results(load_results())
         
         if not results:
             return jsonify({"error": "Нет результатов для экспорта"}), 404
@@ -916,7 +934,7 @@ def export_json():
 def export_html():
     """Экспорт результатов в HTML отчет"""
     try:
-        results = load_results()
+        results = visible_results(load_results())
         
         if not results:
             return jsonify({"error": "Нет результатов для экспорта"}), 404
@@ -1049,6 +1067,8 @@ def generate_html_report(results: List[Dict]) -> str:
     <table>
         <thead>
             <tr>
+                <th>ID исследования</th>
+                <th>ID пациента</th>
                 <th>Дата/Время</th>
                 <th>Username</th>
                 <th>DSI Score</th>
@@ -1086,6 +1106,8 @@ def generate_html_report(results: List[Dict]) -> str:
         
         html += f"""
             <tr>
+                <td>{html_escape(str(result.get('study_id', '')))}</td>
+                <td>{html_escape(str(result.get('patient_id', '')))}</td>
                 <td>{timestamp}</td>
                 <td>{user_info.get('tg_username', 'N/A')}</td>
                 <td>{dsi_score if dsi_score != 'N/A' else 'N/A'}</td>
@@ -1158,21 +1180,24 @@ def generate_html_report(results: List[Dict]) -> str:
     return html
 
 
-@app.route('/<path:path>')
-def serve_static(path):
-    """Отдача статических файлов"""
-    try:
-        # Игнорируем запросы к API маршрутам
-        if path.startswith('api/'):
-            return jsonify({"error": "Неверный маршрут"}), 404
-        
-        return send_from_directory('.', path)
-    except Exception as e:
-        logger.error(f"Ошибка при отдаче статического файла {path}: {e}")
-        # Для несуществующих файлов возвращаем 404, а не 500
-        if hasattr(e, 'code') and e.code == 404:
-            return jsonify({"error": "Файл не найден"}), 404
-        return jsonify({"error": "Ошибка сервера"}), 500
+@app.get('/login')
+def login_page():
+    return send_from_directory(app.root_path, 'login.html')
+
+
+@app.get('/all-results')
+def all_results_page():
+    return send_from_directory(app.root_path, 'results.html')
+
+
+@app.get('/users')
+def users_page():
+    return send_from_directory(app.root_path, 'users.html')
+
+
+@app.get('/assets/<path:path>')
+def serve_assets(path):
+    return send_from_directory(os.path.join(app.root_path, 'assets'), path)
 
 
 if __name__ == '__main__':

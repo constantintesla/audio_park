@@ -17,6 +17,7 @@
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="assets/theme.css">
+    <script src="assets/auth.js"></script>
 </head>
 <body>
     <header class="app-nav">
@@ -35,7 +36,8 @@
     <div class="container">
         <div class="page-head">
             <div>
-                <h1>Визуализация</h1>
+                <h1>Результат исследования</h1>
+                <p id="study-identity" class="study-id"></p>
                 <p>Параметры голоса и графики, привязанные к аудиозаписи</p>
             </div>
         </div>
@@ -55,6 +57,7 @@
         </div>
         
         <div id="content" style="display: none;">
+            <div class="card"><div class="card-header">Отчёт исследования</div><div class="card-body"><p id="study-summary"></p><p id="study-quality"></p><ul id="study-report"></ul></div></div>
             <!-- Параметры -->
             <div class="card">
                 <div class="card-header">Извлеченные параметры</div>
@@ -187,12 +190,12 @@
         }
         
         // Префикс пути, чтобы страница работала и в корне, и за прокси (например /audio_park)
-        const API_URL = window.location.pathname.replace(/\/(index\.html|results|visualization)?\/?$/, '');
+        const API_URL = AudioPark.base;
 
         // Загрузка списка результатов
         async function loadResults(preselectIndex = null) {
             try {
-                const response = await fetch(`${API_URL}/api/results`);
+                const response = await fetch(`${API_URL}/api/results${['admin','moderator'].includes(AudioPark.user.role) ? '?scope=all' : ''}`);
                 const data = await response.json();
                 
                 const select = document.getElementById('result-select');
@@ -246,6 +249,7 @@
                 // Загрузка результата
                 const resultResponse = await fetch(`${API_URL}/api/results/${index}`);
                 const result = await resultResponse.json();
+                if (!resultResponse.ok) throw new Error(result.error || "Исследование не найдено");
                 currentData = result;
                 
                 // Загрузка данных визуализации
@@ -270,6 +274,12 @@
         // Отображение визуализации
         function displayVisualization(result, vizData) {
             document.getElementById('content').style.display = 'block';
+            document.getElementById('study-identity').textContent = `${result.study_id || ''} · Пациент: ${result.patient_id || '—'} · Специалист: ${result.user_info?.tg_username || '—'}`;
+            document.getElementById('study-summary').textContent = `DSI: ${result.dsi?.dsi_score?.toFixed(2) ?? '—'} · ${result.symptom_scores?.pd_risk || ''}`;
+            const verdicts = {ok:'Пригодна',warning:'Есть замечания',reject:'Требуется перезапись'};
+            document.getElementById('study-quality').textContent = 'Качество записи: ' + (verdicts[result.quality?.verdict] || result.quality?.verdict || '—');
+            const report = document.getElementById('study-report'); report.replaceChildren();
+            for (const message of result.report || []) { const li = document.createElement('li'); li.textContent = message; report.append(li); }
             
             // Отображение параметров
             displayParameters(result);
@@ -948,12 +958,19 @@
         // Показать ошибку
         function showError(message) {
             const container = document.getElementById('error-container');
-            container.innerHTML = `<div class="error">${message}</div>`;
+            container.replaceChildren(); const error = document.createElement('div'); error.className = 'error'; error.textContent = message; container.append(error);
         }
         
         // Инициализация при загрузке
         window.addEventListener('DOMContentLoaded', async () => {
+            await AudioPark.ready;
             const params = new URLSearchParams(window.location.search);
+            if (params.has('study')) {
+                const select = document.getElementById('result-select');
+                const option = document.createElement('option'); option.value = params.get('study'); option.textContent = params.get('study'); select.replaceChildren(option);
+                document.querySelector('.controls').style.display = 'none';
+                await loadVisualization(); return;
+            }
             const indexParam = params.get('index');
             const preselectIndex = indexParam !== null && Number.isFinite(Number(indexParam)) ? Number(indexParam) : null;
             

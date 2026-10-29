@@ -39,26 +39,40 @@ def check_analyzer(wav_path: str, results_dir: str) -> None:
 
 def check_api(wav_path: str) -> None:
     import api
+    from auth import create_user
+
+    with api.app.app_context():
+        create_user('ci', 'ci-test-password', role='expert')
 
     client = api.app.test_client()
+    token = client.get('/api/auth/csrf').get_json()['csrf_token']
+    login = client.post('/api/auth/login', json={'login':'ci', 'password':'ci-test-password'},
+                        headers={'X-CSRF-Token': token})
+    assert login.status_code == 200
+    headers = {'X-CSRF-Token': login.get_json()['csrf_token']}
     for route in ("/", "/results", "/visualization", "/api/results", "/api/stats"):
         resp = client.get(route)
         assert resp.status_code == 200, f"GET {route} -> {resp.status_code}"
     with open(wav_path, "rb") as f:
-        data = {"file": (io.BytesIO(f.read()), "ci_smoke.wav"), "username": "ci"}
-    resp = client.post("/api/analyze", data=data, content_type="multipart/form-data")
+        data = {"file": (io.BytesIO(f.read()), "ci_smoke.wav"), "patient_id": "ci-patient-1"}
+    resp = client.post("/api/analyze", data=data, content_type="multipart/form-data", headers=headers)
     assert resp.status_code == 200, f"POST /api/analyze -> {resp.status_code}: {resp.get_data(as_text=True)[:500]}"
+    first = resp.get_json()
+    assert first['study_id'].startswith('AP-')
+    assert first['patient_id'] == 'ci-patient-1'
+    assert len(api.load_results()) == 1, 'duplicate analysis'
+    assert client.get('/api/results/' + first['study_id']).status_code == 200
 
     # Запись из веб-рекордера: данные устройства, результаты калибровки и сама калибровка
     with open(wav_path, "rb") as f:
         audio = f.read()
     calibration = {"version": 1, "noise_floor_dbfs": -62.5, "sweep_detected": True,
                    "bandwidth_high_hz": 7800, "agc_suspected": False, "warnings": []}
-    data = {"file": (io.BytesIO(audio), "audio.wav"), "username": "ci",
+    data = {"file": (io.BytesIO(audio), "audio.wav"), "patient_id": "ci-patient-2",
             "device_info": json.dumps({"device_id": "web-ci:mic", "noise_floor_dbfs": -62.5}),
             "calibration": json.dumps(calibration),
             "calibration_file": (io.BytesIO(audio), "calibration.wav")}
-    resp = client.post("/api/analyze", data=data, content_type="multipart/form-data")
+    resp = client.post("/api/analyze", data=data, content_type="multipart/form-data", headers=headers)
     assert resp.status_code == 200, f"POST /api/analyze (калибровка) -> {resp.status_code}"
     result = resp.get_json()
     assert result.get("calibration", {}).get("bandwidth_high_hz") == 7800, "калибровка не сохранена в результат"
@@ -76,6 +90,7 @@ def main() -> None:
         check_analyzer(wav_path, os.path.join(tmp, "results"))
         # api.py пишет results.json и results/ в текущую папку, поэтому запускаем его во временной
         os.chdir(tmp)
+        os.environ['AUTH_DATA_DIR'] = os.path.join(tmp, 'auth')
         try:
             check_api(wav_path)
         finally:
