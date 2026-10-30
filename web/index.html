@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Обзор · Анализ голоса</title>
+    <title>Обследование · Анализ голоса</title>
     
     <!-- Bootstrap 5 CSS -->
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
@@ -15,6 +15,7 @@
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="assets/theme.css">
+    <script src="assets/auth.js"></script>
 </head>
 <body>
     <header class="app-nav">
@@ -33,27 +34,15 @@
     <div class="container">
         <div class="page-head">
             <div>
-                <h1>Обзор</h1>
-                <p>Новая запись голоса и сводка всех анализов</p>
+                <h1>Новое обследование</h1>
+                <p>Проверка микрофона и пошаговое обследование из 14 заданий</p>
             </div>
         </div>
         
-        <!-- Stats Section -->
-        <div class="stat-grid">
-            <div class="stat">
-                <p class="stat-label">Всего анализов</p>
-                <p class="stat-value" id="total-analyses">–</p>
-            </div>
-            <div class="stat">
-                <p class="stat-label">Пользователей</p>
-                <p class="stat-value" id="users-count">–</p>
-            </div>
-            <div class="stat">
-                <p class="stat-label">За последние 7 дней</p>
-                <p class="stat-value" id="recent-analyses">–</p>
-            </div>
-        </div>
-        
+        <div class="card"><div class="card-body study-identity">
+            <div><label class="form-label" for="patient-id">ID пациента</label><input id="patient-id" class="form-control" maxlength="100" required placeholder="Например, P-001"><p class="hint mb-0 mt-2">Для повторных обследований используйте тот же ID.</p></div>
+            <div><span class="form-label">ID исследования</span><p class="text-muted mb-0">Присваивается после завершения всех заданий и сохранения результата</p></div>
+        </div></div>
         <!-- Новый анализ -->
         <div class="card">
             <div class="card-header collapsible-header" id="local-analysis-header">
@@ -61,14 +50,15 @@
                 <svg class="chevron" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M6 9l6 6 6-6"/></svg>
             </div>
             <div class="card-body" id="local-analysis-section">
-                <div class="capture-grid">
+                <div class="capture-grid" style="grid-template-columns:1fr">
                     <div class="capture-panel">
-                        <h3>Запись с микрофона</h3>
-                        <p class="hint">Держите устройство на расстоянии 20–30 см и произнесите протяжное «а-а-а» или фразу. «Обследование» проведет по всем заданиям по шагам: долгая «а», высокая нота, тихий и спокойный голос (для индекса DSI), чтение текста, слоги, фразы в разном темпе и интонация.</p>
+                        <h3>Подготовка и обследование</h3>
+                        <p class="hint">Сначала проверьте микрофон: разрешите доступ и произнесите несколько слов. Затем начните обследование — 14 заданий с инструкциями, повторными попытками и прослушиванием перед отправкой.</p>
                         <div class="record-actions">
-                            <button id="record-btn" class="btn btn-record">Записать с микрофона</button>
-                            <button id="exam-test-btn" class="btn btn-outline-secondary" title="Пошаговое обследование: 14 заданий, около 10 минут. В конце индекс DSI и речевые показатели">Обследование</button>
+                            <button id="record-btn" class="btn btn-record">Проверить микрофон</button>
+                            <button id="exam-test-btn" class="btn btn-outline-secondary" disabled title="Пошаговое обследование: 14 заданий, около 10 минут. В конце индекс DSI и речевые показатели">Провести тестирование</button>
                         </div>
+                        <p id="mic-check-status" class="hint mt-3" role="status">Микрофон ещё не проверен.</p>
                         <div class="form-check mt-3">
                             <input class="form-check-input" type="checkbox" id="calibrate-check" checked>
                             <label class="form-check-label" for="calibrate-check">Калибровка перед записью (тишина и тестовый звук, около 7 с). Поставьте громкость устройства на максимум</label>
@@ -101,16 +91,7 @@
                         
                         <div id="calibration-info" class="audio-info" style="display: none;"></div>
                     </div>
-                    <div class="capture-panel">
-                        <h3>Загрузка файла</h3>
-                        <p class="hint">WAV, MP3 или OGG, не длиннее 60 секунд.</p>
-                        <div id="upload-zone">
-                            <input type="file" id="file-input" accept="audio/wav,audio/mp3,audio/mpeg,audio/ogg,audio/oga,audio/*">
-                            <p class="fw-medium">Перетащите аудиофайл сюда</p>
-                            <p class="text-muted small mb-2">или</p>
-                            <span class="btn btn-outline-secondary btn-sm">Выбрать файл</span>
-                        </div>
-                    </div>
+
                 </div>
                 
                 <div id="audio-info" class="audio-info" style="display: none;">
@@ -120,10 +101,10 @@
                 </div>
                 
                 <div class="analyze-bar">
-                    <span class="text-muted small">Запись отправляется на сервер и сохраняется в общем списке анализов.</span>
-                    <button id="analyze-btn" class="btn btn-primary btn-lg" disabled>Анализировать</button>
+                    <span class="text-muted small">Исследование сохраняется в вашей учётке после проверки записанных заданий.</span>
+                    <button id="analyze-btn" hidden class="btn btn-primary btn-lg" disabled>Анализировать</button>
                 </div>
-                
+
                 <div id="analyze-progress" class="analyze-progress" style="display: none;" aria-live="polite">
                     <div class="analyze-progress-head">
                         <span id="analyze-stage">Подготовка записи</span>
@@ -142,72 +123,6 @@
             </div>
         </div>
         
-        <!-- Сводная таблица результатов -->
-        <div class="card">
-            <div class="card-header d-flex justify-content-between align-items-center">
-                <h4 class="mb-0">Все анализы</h4>
-                <small class="text-muted fw-normal" id="results-count">Загрузка...</small>
-            </div>
-            <div class="card-body">
-                <div class="toolbar mb-3">
-                    <input type="text" id="table-search" class="form-control" placeholder="Поиск по пользователю, риску, DSI">
-                    <span class="spacer"></span>
-                    <button id="refresh-btn" class="btn btn-outline-secondary">Обновить</button>
-                    <button id="export-csv-btn" class="btn btn-outline-secondary">CSV</button>
-                    <button id="export-json-btn" class="btn btn-outline-secondary">JSON</button>
-                    <button id="export-html-btn" class="btn btn-outline-secondary">HTML</button>
-                    <button id="recalculate-all-btn" class="btn btn-ghost" title="Пересчитать все сохраненные результаты текущими алгоритмами">Пересчитать все</button>
-                </div>
-                <div id="recalculate-status" class="alert alert-info" style="display: none; margin-top: 15px;">
-                    <div class="d-flex align-items-center">
-                        <div class="spinner-border spinner-border-sm me-2" role="status"></div>
-                        <span id="recalculate-status-text">Пересчет результатов...</span>
-                    </div>
-                    <div class="progress mt-2">
-                        <div id="recalculate-progress" class="progress-bar" role="progressbar" style="width: 0%"></div>
-                    </div>
-                </div>
-                
-                <!-- Сводная таблица -->
-                <div id="summary-table-container" style="display: none;">
-                    <div class="table-wrap">
-                        <table class="table table-hover" id="summary-table">
-                            <thead>
-                                <tr>
-                                    <th class="sortable" onclick="sortTable(0)">Дата</th>
-                                    <th class="sortable" onclick="sortTable(1)">Пользователь</th>
-                                    <th class="sortable" onclick="sortTable(2)">DSI</th>
-                                    <th class="sortable" onclick="sortTable(3)">Оценка DSI</th>
-                                    <th class="sortable" onclick="sortTable(4)">Риск ПД</th>
-                                    <th class="sortable" onclick="sortTable(5)">Jitter, %</th>
-                                    <th class="sortable" onclick="sortTable(6)">Shimmer, %</th>
-                                    <th class="sortable" onclick="sortTable(7)">HNR, дБ</th>
-                                    <th class="sortable" onclick="sortTable(8)">F0 SD, Гц</th>
-                                    <th></th>
-                                </tr>
-                            </thead>
-                            <tbody id="summary-table-body">
-                            </tbody>
-                        </table>
-                    </div>
-                </div>
-                
-            </div>
-        </div>
-        
-        <!-- Детальный отчет по выбранному результату -->
-        <div id="single-result-container" class="card mb-3" style="display: none;">
-            <div class="card-header d-flex justify-content-between align-items-center">
-                <h4 class="mb-0">Детальный отчет</h4>
-                <button class="btn btn-sm btn-outline-secondary" onclick="closeSingleResult()">
-                    Закрыть
-                </button>
-            </div>
-            <div class="card-body" id="single-result-content">
-                <!-- Содержимое отчета будет добавлено динамически -->
-            </div>
-        </div>
-        
         <!-- Waveform (for local analysis) -->
         <div class="card" id="waveform-card" style="display: none;">
             <div class="card-header">Волновая форма</div>
@@ -216,74 +131,7 @@
             </div>
         </div>
         
-        <!-- Local Results Panel (for local analysis) -->
-        <div id="local-results" class="card" style="display: none;">
-            <div class="card-header">Результаты локального анализа</div>
-            <div class="card-body">
-                <!-- Risk Assessment -->
-                <div class="text-center mb-4">
-                    <h3>Оценка риска</h3>
-                    <div id="risk-badge" class="risk-badge"></div>
-                </div>
-                
-                <!-- Features Table -->
-                <h4>Акустические признаки</h4>
-                <table class="feature-table table">
-                    <thead>
-                        <tr>
-                            <th>Признак</th>
-                            <th>Значение</th>
-                            <th>Порог</th>
-                            <th>Статус</th>
-                        </tr>
-                    </thead>
-                    <tbody id="features-table"></tbody>
-                </table>
-                
-                <!-- DSI Section -->
-                <div id="dsi-card" class="mt-4 mb-4" style="display: none;"></div>
-                
-                <!-- Symptom Scores -->
-                <h4 class="mt-4">Оценка симптомов (0-3)</h4>
-                <div id="symptom-scores" class="mb-4"></div>
-                
-                <!-- Charts -->
-                <div class="row">
-                    <div class="col-md-6">
-                        <div class="chart-container">
-                            <canvas id="features-chart"></canvas>
-                        </div>
-                    </div>
-                    <div class="col-md-6">
-                        <div class="chart-container">
-                            <canvas id="symptoms-chart"></canvas>
-                        </div>
-                    </div>
-                </div>
-                
-                <!-- Report -->
-                <h4 class="mt-4">Отчет</h4>
-                <div class="report-list">
-                    <ul id="report-list"></ul>
-                </div>
-                
-                <!-- Export -->
-                <div class="text-center mt-4">
-                    <button id="export-btn" class="btn btn-primary">Экспорт JSON</button>
-                </div>
-            </div>
-        </div>
-        
-        <!-- Loading indicator -->
-        <div id="loading-indicator" class="text-center" style="display: none;">
-            <div class="spinner-border text-primary" role="status">
-                <span class="visually-hidden">Загрузка...</span>
-            </div>
-            <p class="mt-2">Загрузка результатов...</p>
-        </div>
-        
-        <!-- Перед обследованием: браузер не может выключить обработку звука в системе и устройстве -->
-        <dialog id="exam-disclaimer" class="app-modal" aria-labelledby="exam-disclaimer-title">
+<dialog id="exam-disclaimer" class="app-modal" aria-labelledby="exam-disclaimer-title">
             <div class="app-modal-body">
                 <h3 id="exam-disclaimer-title">Перед обследованием отключите «улучшения» звука</h3>
                 <p>Система и устройство часто сами обрабатывают голос: убирают шум, выравнивают громкость, срезают частоты. Для звонков это удобно, но голос меняется, и измерения получаются неверными. Браузер выключить это не может, поэтому проверьте, пожалуйста, вручную:</p>
@@ -307,9 +155,7 @@
                 <button id="exam-disclaimer-start" class="btn btn-primary" disabled>Начать обследование</button>
             </div>
         </dialog>
-
-        <!-- После обследования: прослушать задания, перезаписать любое и отправить на анализ -->
-        <dialog id="exam-review" class="app-modal app-modal-wide" aria-labelledby="exam-review-title">
+<dialog id="exam-review" class="app-modal app-modal-wide" aria-labelledby="exam-review-title">
             <div class="app-modal-body">
                 <h3 id="exam-review-title">Обследование записано</h3>
                 <p>Прослушайте задания. Если какое-то не получилось, нажмите «Перезаписать»: запишутся только его попытки, остальные останутся. Микрофон на паузе.</p>
@@ -320,7 +166,6 @@
                 <button id="exam-review-submit" class="btn btn-primary">Отправить на анализ</button>
             </div>
         </dialog>
-
         <!-- Footer -->
         <div class="footer">
             <p>Система предназначена для исследовательских целей и не заменяет медицинскую диагностику.</p>
@@ -345,20 +190,20 @@
         
         // API URL
         // Префикс пути, чтобы страница работала и в корне, и за прокси (например /audio_park)
-        const API_URL = window.location.pathname.replace(/\/(index\.html|results|visualization)?\/?$/, '');
+        const API_URL = AudioPark.base;
         
         // Initialize
         document.addEventListener('DOMContentLoaded', () => {
             initAudioContext();
-            initUploadZone();
+
             initRecordButton();
             initAnalyzeButton();
-            initExportButton();
-            initResultsList();
-            initRefreshButton();
+
+
+
             initLocalAnalysisToggle();
             // Загружаем статистику сразу при загрузке страницы
-            loadStats();
+
         });
         
         function initLocalAnalysisToggle() {
@@ -381,763 +226,6 @@
             header.classList.toggle('collapsed', !hidden);
         }
         
-        function initRefreshButton() {
-            document.getElementById('refresh-btn').addEventListener('click', () => {
-                loadResults();
-            });
-            
-            // Обработчик кнопки пересчета всех результатов
-            document.getElementById('recalculate-all-btn').addEventListener('click', async () => {
-                const btn = document.getElementById('recalculate-all-btn');
-                const statusDiv = document.getElementById('recalculate-status');
-                const statusText = document.getElementById('recalculate-status-text');
-                const progressBar = document.getElementById('recalculate-progress');
-                
-                // Подтверждение действия
-                if (!confirm('Внимание! Это действие пересчитает все сохраненные результаты с использованием обновленных алгоритмов (без капов и фолбеков).\n\nЭто может занять несколько минут в зависимости от количества результатов.\n\nПродолжить?')) {
-                    return;
-                }
-                
-                // Блокируем кнопку и показываем прогресс
-                btn.disabled = true;
-                statusDiv.style.display = 'block';
-                statusDiv.className = 'alert alert-info';
-                statusText.textContent = 'Пересчет результатов...';
-                progressBar.style.width = '0%';
-                
-                try {
-                    const response = await fetch(`${API_URL}/api/recalculate-all`, {
-                        method: 'POST',
-                        headers: {
-                            'Content-Type': 'application/json'
-                        }
-                    });
-                    
-                    const data = await response.json();
-                    
-                    if (response.ok) {
-                        statusDiv.className = 'alert alert-success';
-                        statusText.textContent = data.message;
-                        progressBar.style.width = '100%';
-                        
-                        // Обновляем список результатов после пересчета
-                        setTimeout(() => {
-                            loadResults();
-                            statusDiv.style.display = 'none';
-                        }, 2000);
-                    } else {
-                        statusDiv.className = 'alert alert-danger';
-                        statusText.textContent = `Ошибка: ${data.error || 'Неизвестная ошибка'}`;
-                        progressBar.style.width = '100%';
-                        progressBar.className = 'progress-bar bg-danger';
-                    }
-                } catch (error) {
-                    statusDiv.className = 'alert alert-danger';
-                    statusText.textContent = `Ошибка соединения: ${error.message}`;
-                    progressBar.style.width = '100%';
-                    progressBar.className = 'progress-bar bg-danger';
-                } finally {
-                    btn.disabled = false;
-                    setTimeout(() => {
-                        if (statusDiv.style.display !== 'none') {
-                            statusDiv.style.display = 'none';
-                            progressBar.className = 'progress-bar progress-bar-striped progress-bar-animated';
-                            progressBar.style.width = '0%';
-                        }
-                    }, 5000);
-                }
-            });
-        }
-        
-        async function loadStats() {
-            try {
-                const response = await fetch(`${API_URL}/api/stats`);
-                const data = await response.json();
-                
-                document.getElementById('total-analyses').textContent = data.total_analyses || 0;
-                document.getElementById('users-count').textContent = data.users_count || 0;
-                document.getElementById('recent-analyses').textContent = data.recent_analyses || 0;
-            } catch (e) {
-                console.error('Ошибка загрузки статистики:', e);
-            }
-        }
-        
-        async function loadResults() {
-            const loadingIndicator = document.getElementById('loading-indicator');
-            
-            if (loadingIndicator) {
-                loadingIndicator.style.display = 'block';
-            }
-            
-            try {
-                const response = await fetch(`${API_URL}/api/results`);
-                if (!response.ok) {
-                    throw new Error(`HTTP error! status: ${response.status}`);
-                }
-                const data = await response.json();
-                
-                if (data.results && data.results.length > 0) {
-                    // Обновляем счетчик
-                    const resultsCount = document.getElementById('results-count');
-                    if (resultsCount) {
-                        resultsCount.textContent = `Всего: ${data.results.length}`;
-                    }
-                    
-                    // Сортируем по дате (новые первыми)
-                    const sortedResults = [...data.results].sort((a, b) => {
-                        const dateA = new Date(a.user_info?.timestamp || 0);
-                        const dateB = new Date(b.user_info?.timestamp || 0);
-                        return dateB - dateA;
-                    });
-                    
-                    // Сохраняем результаты для таблицы
-                    window.allResults = sortedResults;
-                    
-                    // Отображаем сводную таблицу
-                    displaySummaryTable(sortedResults);
-                } else {
-                    const resultsCount = document.getElementById('results-count');
-                    if (resultsCount) {
-                        resultsCount.textContent = 'Нет результатов';
-                    }
-                    const tableContainer = document.getElementById('summary-table-container');
-                    if (tableContainer) {
-                        tableContainer.style.display = 'none';
-                    }
-                }
-                
-                await loadStats();
-            } catch (e) {
-                console.error('Ошибка загрузки результатов:', e);
-                const tableContainer = document.getElementById('summary-table-container');
-                if (tableContainer) {
-                    tableContainer.innerHTML = `
-                        <div class="alert alert-danger">
-                            <h5>Ошибка загрузки результатов</h5>
-                            <p>${e.message}</p>
-                            <p class="mb-0"><small>Проверьте, что API сервер запущен и доступен по адресу ${API_URL}</small></p>
-                        </div>
-                    `;
-                    tableContainer.style.display = 'block';
-                }
-            } finally {
-                if (loadingIndicator) {
-                    loadingIndicator.style.display = 'none';
-                }
-            }
-        }
-        
-        function createResultCard(result, index) {
-            const card = document.createElement('div');
-            card.className = 'card result-card';
-            
-            const userInfo = result.user_info || {};
-            const username = userInfo.tg_username || 'Неизвестный пользователь';
-            const timestamp = userInfo.timestamp || '';
-            const dsi = result.dsi || {};
-            const dsiScore = dsi.dsi_score;
-            const symptomScores = result.symptom_scores || {};
-            const pdRisk = symptomScores.pd_risk || 'Не определен';
-            
-            // Форматирование даты
-            let dateStr = 'Дата неизвестна';
-            let dateObj = null;
-            if (timestamp) {
-                try {
-                    dateObj = new Date(timestamp);
-                    dateStr = dateObj.toLocaleString('ru-RU', {
-                        year: 'numeric',
-                        month: 'long',
-                        day: 'numeric',
-                        hour: '2-digit',
-                        minute: '2-digit'
-                    });
-                } catch (e) {
-                    dateStr = timestamp;
-                }
-            }
-            
-            // Определение цвета риска
-            let riskClass = 'risk-low';
-            if (pdRisk.includes('Высокий')) {
-                riskClass = 'risk-high';
-            } else if (pdRisk.includes('Умеренный')) {
-                riskClass = 'risk-medium';
-            }
-            
-            // Краткая информация для заголовка
-            const shortInfo = dsiScore !== null && dsiScore !== undefined 
-                ? `DSI ${dsiScore.toFixed(2)}` 
-                : '';
-            
-            card.innerHTML = `
-                <div class="card-header d-flex justify-content-between align-items-center" onclick="toggleResult(${index})">
-                    <div class="flex-grow-1">
-                        <div class="d-flex align-items-center gap-2">
-                            <h5 class="mb-0">${username}</h5>
-                            <span class="table-badge ${riskClass}">${pdRisk.split('(')[0].trim()}</span>
-                        </div>
-                        <div class="mt-1 result-meta">
-                            ${dateStr}${shortInfo ? ` · ${shortInfo}` : ''}
-                        </div>
-                    </div>
-                    <div class="d-flex gap-2 align-items-center">
-                        <button class="btn btn-sm btn-outline-secondary" onclick="event.stopPropagation(); openVisualization(${index})" title="Открыть визуализацию">
-                            Графики
-                        </button>
-                        <button class="btn btn-sm btn-outline-secondary" onclick="event.stopPropagation(); toggleResult(${index})">
-                            <span id="toggle-icon-${index}">▼</span>
-                        </button>
-                    </div>
-                </div>
-                <div class="card-body" id="result-content-${index}" style="display: none;">
-                    ${createResultContent(result)}
-                </div>
-            `;
-            
-            // Сохраняем индекс в data-атрибуте для правильной работы toggle
-            card.setAttribute('data-index', index);
-            
-            return card;
-        }
-        
-        function createResultContent(result) {
-            const dsi = result.dsi || {};
-            const dsiScore = dsi.dsi_score;
-            const symptomScores = result.symptom_scores || {};
-            const pdRisk = symptomScores.pd_risk || 'Не определен';
-            const features = result.features || {};
-            const jitterRaw = features.jitter_percent ?? 0;
-            const jitterCapped = (features.jitter_percent_capped !== undefined && features.jitter_percent_capped !== null)
-                ? features.jitter_percent_capped
-                : Math.min(jitterRaw, 5.0);
-            
-            let html = '';
-            
-            // DSI и речевые задания (в старых записях речевых заданий DSI не измерялся)
-            html += renderTestCards(result);
-            
-            // Jitter, shimmer и HNR по обычной речи не оцениваются (нормы - для протяжной гласной)
-            const voiceQualityFromSpeech = result.recording_task === 'speech';
-            const speechNote = '<small class="text-muted">по речи не оценивается, нужна протяжная гласная</small>';
-            
-            function formatWithReference(value, paramName, muted = false) {
-                if (muted) return `${value.toFixed(2)} ${speechNote}`;
-                const refRanges = getReferenceRanges();
-                if (!refRanges[paramName]) return value.toFixed(2);
-                
-                const ref = refRanges[paramName];
-                const [normalMin, normalMax] = ref.normal;
-                const unit = ref.unit;
-                
-                let statusIcon = '';
-                let statusClass = '';
-                if (normalMin <= value && value <= normalMax) {
-                    statusIcon = '<span class="dot dot-ok"></span>';
-                    statusClass = 'text-success';
-                } else if (value < normalMin) {
-                    statusIcon = '<span class="dot dot-risk"></span>';
-                    statusClass = 'text-danger';
-                } else {
-                    statusIcon = '<span class="dot dot-risk"></span>';
-                    statusClass = 'text-danger';
-                }
-                
-                return `<span class="${statusClass}">${value.toFixed(2)} ${unit} ${statusIcon}</span> <small class="text-muted">(норма: ${normalMin.toFixed(1)}-${normalMax.toFixed(1)} ${unit})</small>`;
-            }
-            
-            // Features Table
-            html += `
-                <h5>Акустические признаки</h5>
-                <table class="feature-table table table-sm table-bordered">
-                    <thead class="table-light">
-                        <tr>
-                            <th>Признак</th>
-                            <th>Значение</th>
-                        </tr>
-                    </thead>
-                    <tbody>
-                        <tr>
-                            <td><strong>Jitter</strong></td>
-                            <td>${formatWithReference(features.jitter_percent || 0, 'jitter_percent', voiceQualityFromSpeech)}</td>
-                        </tr>
-                        <tr>
-                            <td><strong>Jitter (cap 5%)</strong></td>
-                            <td>${formatWithReference(jitterCapped, 'jitter_percent', voiceQualityFromSpeech)}</td>
-                        </tr>
-                        <tr>
-                            <td><strong>Shimmer</strong></td>
-                            <td>${formatWithReference(features.shimmer_percent || 0, 'shimmer_percent', voiceQualityFromSpeech)}</td>
-                        </tr>
-                        <tr>
-                            <td><strong>HNR</strong></td>
-                            <td>${formatWithReference(features.hnr_db || 0, 'hnr_db', voiceQualityFromSpeech)}</td>
-                        </tr>
-                        <tr>
-                            <td><strong>F0 Mean</strong></td>
-                            <td>${formatWithReference(features.f0_mean_hz || 0, 'f0_mean_hz')}</td>
-                        </tr>
-                        <tr>
-                            <td><strong>F0 SD</strong></td>
-                            <td>${formatWithReference(features.f0_sd_hz || 0, 'f0_sd_hz')}</td>
-                        </tr>
-                        <tr>
-                            <td><strong>Темп (слогов/сек без пауз)</strong></td>
-                            <td>${formatWithReference(features.rate_syl_sec || 0, 'rate_syl_sec')}</td>
-                        </tr>
-                    </tbody>
-                </table>
-            `;
-            
-            // Symptom Scores
-            html += `
-                <h5 class="mt-4">Оценка симптомов (0-3)</h5>
-                <div class="mb-3">
-            `;
-            
-            const symptomNames = {
-                hypophonia: 'Гипофония',
-                monopitch: 'Monopitch',
-                monoloudness: 'Monoloudness',
-                hoarseness: 'Охриплость',
-                imprecise_articulation: 'Неточная артикуляция'
-            };
-            
-            for (const [key, name] of Object.entries(symptomNames)) {
-                html += `<div class="mb-2"><strong>${name}:</strong> ${renderSymptomScore(symptomScores[key])}</div>`;
-            }
-            
-            html += '</div>';
-            
-            // Report
-            if (result.report && result.report.length > 0) {
-                html += `
-                    <h5 class="mt-4">Отчет</h5>
-                    <div class="report-list">
-                        <ul>
-                `;
-                result.report.forEach(item => {
-                    html += `<li>${item}</li>`;
-                });
-                html += `
-                        </ul>
-                    </div>
-                `;
-            }
-            
-            return html;
-        }
-        
-        function toggleResult(index) {
-            const content = document.getElementById(`result-content-${index}`);
-            const icon = document.getElementById(`toggle-icon-${index}`);
-            
-            if (!content || !icon) return;
-            
-            if (content.style.display === 'none' || content.style.display === '') {
-                content.style.display = 'block';
-                icon.textContent = '▼';
-            } else {
-                content.style.display = 'none';
-                icon.textContent = '▶';
-            }
-        }
-        
-        // Переменные для сортировки таблицы
-        let currentSortColumn = -1;
-        let sortDirection = 1; // 1 = по возрастанию, -1 = по убыванию
-        
-        // Оценка симптома 0-3; null - симптом не оценивался по этому типу записи
-        function renderSymptomScore(score) {
-            if (score === null || score === undefined) {
-                return '<small class="text-muted">не оценивался по этой записи</small>';
-            }
-            return `<span class="symptom-score score-${score}">${score}</span>
-                <small class="text-muted">(${['Нет', 'Легкий', 'Умеренный', 'Тяжелый'][score] || 'N/A'})</small>`;
-        }
-        
-        // Карточка DSI. DSI считается только по специальным заданиям с калибровкой
-        // микрофона, иначе показываем, почему его нет.
-        function renderDsiCard(dsi) {
-            const dsiScore = dsi ? dsi.dsi_score : null;
-            const hasScore = dsiScore !== null && dsiScore !== undefined;
-            if (!hasScore && !(dsi && dsi.measured)) {
-                const reason = dsi && (dsi.reason || dsi.error);
-                if (!reason) return '';
-                return `
-                    <div class="alert alert-secondary mt-3 mb-3">
-                        <strong>DSI не рассчитан.</strong> ${reason}
-                    </div>
-                `;
-            }
-            const breakdown = dsi.dsi_breakdown || {};
-            const interpretation = dsi.interpretation || {};
-            const dot = dsiScore >= 1.6 ? 'dot-ok' : dsiScore >= 0.0 ? 'dot-warn' : dsiScore >= -2.0 ? 'dot-mid' : 'dot-risk';
-            // Тест DSI без калибровки: показываем измеренные упражнения и почему нет итога
-            const scoreText = dsi.approximate
-                ? `≈ ${dsiScore.toFixed(1)} <small class="text-muted">± ${(dsi.uncertainty || 0).toFixed(1)}</small>`
-                : dsiScore.toFixed(2);
-            const scoreBlock = hasScore ? `
-                            <h2 class="display-4">${scoreText}</h2>
-                            <p class="lead"><span class="dot ${dot}"></span> ${dsi.dsi_range || ''}</p>
-                            <p class="text-muted"><small>Здоровый голос: около +1.6 и выше (шкала от -5 до +5)</small></p>
-                            ${dsi.approximate ? `<p class="text-muted mb-0"><small>${dsi.estimate_note || ''}</small></p>` : ''}` : `
-                            <p class="lead mb-1">Итог DSI не рассчитан</p>
-                            <p class="text-muted mb-0"><small>${dsi.reason || ''}</small></p>`;
-            const iLowText = (breakdown.i_low_db || 0) > 0
-                ? (breakdown.i_low_db).toFixed(1) + (dsi.approximate ? ' (оценка)' : '')
-                : (dsi.i_low_dbfs ? `${dsi.i_low_dbfs.toFixed(1)} dBFS (без калибровки)` : '—');
-            const row = (name, value, status) => `
-                <tr><td><strong>${name}</strong></td><td>${value}</td><td><small>${status || 'N/A'}</small></td></tr>`;
-            return `
-                <div class="card mt-3 mb-3">
-                    <div class="card-header bg-primary text-white">
-                        <h5 class="mb-0">DSI (Dysphonia Severity Index)</h5>
-                    </div>
-                    <div class="card-body">
-                        <div class="text-center mb-3">${scoreBlock}
-                        </div>
-                        <table class="table table-sm table-bordered">
-                            <thead class="table-light"><tr><th>Параметр</th><th>Значение</th><th>Оценка</th></tr></thead>
-                            <tbody>
-                                ${row('MPT, сек (норма 15-30)', (breakdown.mpt_sec || 0).toFixed(2), interpretation.mpt_status)}
-                                ${row('F0-High, Гц (норма 400-600)', (breakdown.f0_high_hz || 0).toFixed(1), interpretation.f0_high_status)}
-                                ${row('I-Low, дБ SPL (норма до 45)', iLowText, interpretation.i_low_status)}
-                                ${row('Jitter, % (норма до 1.0)', (breakdown.jitter_percent || 0).toFixed(2), interpretation.jitter_status)}
-                            </tbody>
-                        </table>
-                        <div class="alert alert-info mb-0" role="alert">
-                            <small>
-                                <strong>Формула:</strong> ${dsi.formula || 'DSI = 0.13 × MPT + 0.0053 × F0-High - 0.26 × I-Low - 1.18 × Jitter(%) + 12.4'}<br>
-                                ${interpretation.note || 'DSI оценивает качество голоса, а не болезнь Паркинсона, и не является диагнозом.'}
-                            </small>
-                        </div>
-                    </div>
-                </div>
-            `;
-        }
-        
-        // Reference ranges function (глобальная)
-        function getReferenceRanges() {
-            return {
-                'jitter_percent': {normal: [0.0, 1.0], unit: '%'},
-                'shimmer_percent': {normal: [0.0, 4.0], unit: '%'},
-                'hnr_db': {normal: [20.0, 40.0], unit: 'дБ'},
-                'f0_mean_hz': {normal: [100.0, 300.0], unit: 'Гц'},
-                'f0_sd_hz': {normal: [10.0, 50.0], unit: 'Гц'},
-                'rate_syl_sec': {normal: [4.5, 7.0], unit: 'сл/сек'},
-                'mpt_sec': {normal: [15.0, 30.0], unit: 'сек'},
-                'f0_high_hz': {normal: [400.0, 600.0], unit: 'Гц'},
-                'i_low_db': {normal: [25.0, 45.0], unit: 'дБ'},
-                'dsi_score': {normal: [1.6, 5.0], unit: ''}
-            };
-        }
-        
-        // Функция форматирования значения с референсом для таблицы
-        function formatTableValueWithRef(value, paramName) {
-            if (value === 'N/A' || value === undefined || value === null) return 'N/A';
-            const refRanges = getReferenceRanges();
-            if (!refRanges[paramName]) {
-                return typeof value === 'number' ? value.toFixed(2) : value;
-            }
-            
-            const ref = refRanges[paramName];
-            const [normalMin, normalMax] = ref.normal;
-            const unit = ref.unit;
-            
-            let statusIcon = '';
-            let statusClass = '';
-            if (normalMin <= value && value <= normalMax) {
-                statusIcon = '<span class="dot dot-ok"></span>';
-                statusClass = 'text-success';
-            } else {
-                statusIcon = '<span class="dot dot-risk"></span>';
-                statusClass = 'text-danger';
-            }
-            
-            const numDecimals = paramName.includes('percent') ? 2 : (paramName.includes('db') || paramName.includes('hz')) ? 1 : 2;
-            const valueStr = typeof value === 'number' ? value.toFixed(numDecimals) : value;
-            
-            return `<div class="cell-value"><strong class="${statusClass}">${valueStr}</strong>${statusIcon}<span class="ref">норма ${normalMin.toFixed(numDecimals)}–${normalMax.toFixed(numDecimals)}</span></div>`;
-        }
-        
-        function displaySummaryTable(results) {
-            const tableContainer = document.getElementById('summary-table-container');
-            const tableBody = document.getElementById('summary-table-body');
-            
-            if (!results || results.length === 0) {
-                if (tableContainer) {
-                    tableContainer.style.display = 'none';
-                }
-                return;
-            }
-            
-            if (tableContainer) {
-                tableContainer.style.display = 'block';
-            }
-            if (tableBody) {
-                tableBody.innerHTML = '';
-            } else {
-                console.error('Элемент summary-table-body не найден');
-                return;
-            }
-            
-            results.forEach((result, position) => {
-                // Номер записи в results.json: список приходит отсортированным, позиция не годится
-                const index = result._index ?? position;
-                const userInfo = result.user_info || {};
-                const dsi = result.dsi || {};
-                const features = result.features || {};
-                const symptomScores = result.symptom_scores || {};
-                
-                const username = userInfo.tg_username || 'Неизвестный';
-                const timestamp = userInfo.timestamp || '';
-                
-                // Форматирование даты
-                let dateStr = 'N/A';
-                if (timestamp) {
-                    try {
-                        const date = new Date(timestamp);
-                        dateStr = date.toLocaleString('ru-RU', {
-                            year: 'numeric',
-                            month: '2-digit',
-                            day: '2-digit',
-                            hour: '2-digit',
-                            minute: '2-digit'
-                        });
-                    } catch (e) {
-                        dateStr = timestamp;
-                    }
-                }
-                
-                // DSI
-                const dsiScore = dsi.dsi_score !== null && dsi.dsi_score !== undefined 
-                    ? dsi.dsi_score.toFixed(2) 
-                    : 'N/A';
-                const dsiRange = dsi.dsi_range || 'N/A';
-                
-                // Риск ПД
-                const pdRisk = symptomScores.pd_risk || 'Не определен';
-                let riskClass = 'table-badge-minimal';
-                let riskText = pdRisk.split('(')[0].trim();
-                if (pdRisk.includes('Высокий')) {
-                    riskClass = 'table-badge-high';
-                } else if (pdRisk.includes('Умеренный')) {
-                    riskClass = 'table-badge-medium';
-                } else if (pdRisk.includes('Низкий')) {
-                    riskClass = 'table-badge-low';
-                }
-                
-                // Признаки с референсами
-                const jitter = features.jitter_percent !== undefined 
-                    ? formatTableValueWithRef(features.jitter_percent, 'jitter_percent')
-                    : 'N/A';
-                const shimmer = features.shimmer_percent !== undefined 
-                    ? formatTableValueWithRef(features.shimmer_percent, 'shimmer_percent')
-                    : 'N/A';
-                const hnr = features.hnr_db !== undefined 
-                    ? formatTableValueWithRef(features.hnr_db, 'hnr_db')
-                    : 'N/A';
-                const f0sd = features.f0_sd_hz !== undefined 
-                    ? formatTableValueWithRef(features.f0_sd_hz, 'f0_sd_hz')
-                    : 'N/A';
-                
-                const row = document.createElement('tr');
-                row.setAttribute('data-index', index);
-                row.style.cursor = 'pointer';
-                row.onclick = (e) => {
-                    // Игнорируем клик если он по кнопке
-                    if (e.target.tagName === 'BUTTON') {
-                        return;
-                    }
-                    // Показываем результат внизу страницы
-                    showSingleResult(index);
-                };
-                
-                row.innerHTML = `
-                    <td>${dateStr}</td>
-                    <td><strong>${username}</strong></td>
-                    <td>${dsiScore}</td>
-                    <td class="dsi-range">${dsiRange}</td>
-                    <td><span class="table-badge ${riskClass}">${riskText}</span></td>
-                    <td>${jitter}</td>
-                    <td>${shimmer}</td>
-                    <td>${hnr}</td>
-                    <td>${f0sd}</td>
-                    <td>
-                        <div class="d-flex align-items-center justify-content-end gap-2">
-                            <button class="btn btn-sm btn-outline-primary" onclick="event.stopPropagation(); showSingleResult(${index})">
-                                Отчет
-                            </button>
-                            <button class="btn btn-sm btn-outline-secondary" onclick="event.stopPropagation(); openVisualization(${index})">
-                                Графики
-                            </button>
-                        </div>
-                    </td>
-                `;
-                
-                tableBody.appendChild(row);
-            });
-            
-            // Инициализация поиска
-            initTableSearch();
-        }
-        
-        // Показать один результат внизу страницы
-        async function showSingleResult(index) {
-            try {
-                const response = await fetch(`${API_URL}/api/results/${index}`);
-                if (!response.ok) {
-                    throw new Error(`HTTP error! status: ${response.status}`);
-                }
-                const result = await response.json();
-                
-                // Отображаем результат
-                const container = document.getElementById('single-result-container');
-                const content = document.getElementById('single-result-content');
-                
-                // Используем функцию createResultContent для генерации содержимого
-                content.innerHTML = createResultContent(result);
-                
-                // Показываем контейнер
-                container.style.display = 'block';
-                
-                // Прокручиваем к отчету с плавной анимацией
-                setTimeout(() => {
-                    container.scrollIntoView({ behavior: 'smooth', block: 'start' });
-                    // Подсвечиваем контейнер
-                    container.style.transition = 'box-shadow 0.3s';
-                    container.style.boxShadow = '0 0 20px rgba(44, 95, 141, 0.5)';
-                    setTimeout(() => {
-                        container.style.boxShadow = '';
-                    }, 2000);
-                }, 100);
-                
-            } catch (error) {
-                console.error('Ошибка загрузки результата:', error);
-                alert('Ошибка загрузки результата: ' + error.message);
-            }
-        }
-        
-        // Закрыть отчет
-        function closeSingleResult() {
-            const container = document.getElementById('single-result-container');
-            container.style.display = 'none';
-        }
-
-        function openVisualization(index) {
-            window.location.href = `${API_URL}/visualization?index=${index}`;
-        }
-        
-        function initTableSearch() {
-            const searchInput = document.getElementById('table-search');
-            if (!searchInput) return;
-            
-            // Удаляем старый обработчик, если есть
-            const newSearchInput = searchInput.cloneNode(true);
-            searchInput.parentNode.replaceChild(newSearchInput, searchInput);
-            
-            newSearchInput.addEventListener('input', (e) => {
-                const searchTerm = e.target.value.toLowerCase();
-                const rows = document.querySelectorAll('#summary-table-body tr');
-                
-                rows.forEach(row => {
-                    const text = row.textContent.toLowerCase();
-                    if (text.includes(searchTerm)) {
-                        row.style.display = '';
-                    } else {
-                        row.style.display = 'none';
-                    }
-                });
-            });
-        }
-        
-        function sortTable(columnIndex) {
-            if (!window.allResults || window.allResults.length === 0) return;
-            
-            // Меняем направление сортировки, если кликнули по той же колонке
-            if (currentSortColumn === columnIndex) {
-                sortDirection *= -1;
-            } else {
-                currentSortColumn = columnIndex;
-                sortDirection = 1;
-            }
-            
-            const sorted = [...window.allResults].sort((a, b) => {
-                let valueA, valueB;
-                
-                switch(columnIndex) {
-                    case 0: // Дата
-                        valueA = new Date(a.user_info?.timestamp || 0).getTime();
-                        valueB = new Date(b.user_info?.timestamp || 0).getTime();
-                        break;
-                    case 1: // Пользователь
-                        valueA = (a.user_info?.tg_username || '').toLowerCase();
-                        valueB = (b.user_info?.tg_username || '').toLowerCase();
-                        break;
-                    case 2: // DSI Score
-                        valueA = a.dsi?.dsi_score ?? -Infinity;
-                        valueB = b.dsi?.dsi_score ?? -Infinity;
-                        break;
-                    case 3: // DSI Range
-                        valueA = (a.dsi?.dsi_range || '').toLowerCase();
-                        valueB = (b.dsi?.dsi_range || '').toLowerCase();
-                        break;
-                    case 4: // Риск ПД
-                        valueA = (a.symptom_scores?.pd_risk || '').toLowerCase();
-                        valueB = (b.symptom_scores?.pd_risk || '').toLowerCase();
-                        break;
-                    case 5: // Jitter
-                        valueA = a.features?.jitter_percent ?? -Infinity;
-                        valueB = b.features?.jitter_percent ?? -Infinity;
-                        break;
-                    case 6: // Shimmer
-                        valueA = a.features?.shimmer_percent ?? -Infinity;
-                        valueB = b.features?.shimmer_percent ?? -Infinity;
-                        break;
-                    case 7: // HNR
-                        valueA = a.features?.hnr_db ?? -Infinity;
-                        valueB = b.features?.hnr_db ?? -Infinity;
-                        break;
-                    case 8: // F0 SD
-                        valueA = a.features?.f0_sd_hz ?? -Infinity;
-                        valueB = b.features?.f0_sd_hz ?? -Infinity;
-                        break;
-                    default:
-                        return 0;
-                }
-                
-                if (typeof valueA === 'string') {
-                    return sortDirection * valueA.localeCompare(valueB);
-                } else {
-                    return sortDirection * (valueA - valueB);
-                }
-            });
-            
-            window.allResults = sorted;
-            displaySummaryTable(sorted);
-            // Список результатов больше не отображается на главной странице
-        }
-        
-        function initResultsList() {
-            loadResults();
-            // Автообновление каждые 30 секунд
-            setInterval(loadResults, 30000);
-            
-            // Инициализация кнопок экспорта
-            document.getElementById('export-csv-btn').addEventListener('click', () => {
-                window.location.href = `${API_URL}/api/export/csv`;
-            });
-            
-            document.getElementById('export-json-btn').addEventListener('click', () => {
-                window.location.href = `${API_URL}/api/export/json`;
-            });
-            
-            document.getElementById('export-html-btn').addEventListener('click', () => {
-                window.location.href = `${API_URL}/api/export/html`;
-            });
-        }
-        
         function initAudioContext() {
             try {
                 audioContext = new (window.AudioContext || window.webkitAudioContext)();
@@ -1146,48 +234,17 @@
             }
         }
         
-        function initUploadZone() {
-            const uploadZone = document.getElementById('upload-zone');
-            const fileInput = document.getElementById('file-input');
-            
-            uploadZone.addEventListener('click', () => fileInput.click());
-            
-            uploadZone.addEventListener('dragover', (e) => {
-                e.preventDefault();
-                uploadZone.classList.add('dragover');
-            });
-            
-            uploadZone.addEventListener('dragleave', () => {
-                uploadZone.classList.remove('dragover');
-            });
-            
-            uploadZone.addEventListener('drop', (e) => {
-                e.preventDefault();
-                uploadZone.classList.remove('dragover');
-                const files = e.dataTransfer.files;
-                if (files.length > 0) {
-                    handleAudioFile(files[0]);
-                }
-            });
-            
-            fileInput.addEventListener('change', (e) => {
-                if (e.target.files.length > 0) {
-                    handleAudioFile(e.target.files[0]);
-                }
-            });
-        }
-        
         function initRecordButton() {
             const recordBtn = document.getElementById('record-btn');
             
             recordBtn.addEventListener('click', async () => {
                 if (!isRecording) {
-                    await startRecording();
+                    await startRecording({ check: true });
                 } else if (rec && rec.test) {
                     // Пошаговый тест прерывают целиком: незаконченный тест не анализируем
                     cleanupRecording();
                 } else {
-                    stopRecording();
+                    cleanupRecording();
                 }
             });
             document.getElementById('exam-test-btn').addEventListener('click', () => {
@@ -1201,39 +258,6 @@
         
         function initAnalyzeButton() {
             document.getElementById('analyze-btn').addEventListener('click', analyzeAudio);
-        }
-        
-        function initExportButton() {
-            document.getElementById('export-btn').addEventListener('click', exportJSON);
-        }
-        
-        async function handleAudioFile(file) {
-            if (!file.type.startsWith('audio/')) {
-                alert('Пожалуйста, выберите аудиофайл');
-                return;
-            }
-            
-            try {
-                const arrayBuffer = await file.arrayBuffer();
-                audioBuffer = await audioContext.decodeAudioData(arrayBuffer);
-                
-                // Check duration (max 60 seconds)
-                if (audioBuffer.duration > 60) {
-                    alert('Аудио должно быть не более 60 секунд. Пожалуйста, обрежьте файл.');
-                    return;
-                }
-                
-                displayAudioInfo(file.name, audioBuffer);
-                initWaveform(audioBuffer);
-                document.getElementById('analyze-btn').disabled = false;
-            } catch (e) {
-                let errorMsg = 'Ошибка загрузки аудио: ' + e.message;
-                if (file.name.toLowerCase().endsWith('.ogg') || file.name.toLowerCase().endsWith('.oga')) {
-                    errorMsg += '\n\nЕсли файл OGG не загружается, попробуйте конвертировать его в WAV или MP3.';
-                }
-                alert(errorMsg);
-                console.error('Ошибка декодирования аудио:', e);
-            }
         }
         
         function displayAudioInfo(name, buffer) {
@@ -1308,6 +332,8 @@
         };
         let rec = null;              // состояние текущей записи
         let lastRecording = null;    // { calibration, deviceInfo, calibrationWav } последней записи с микрофона
+        let micReady = false;
+        let startingRecording = false;
 
         function getUserMediaFn() {
             if (window.location.protocol === 'file:') {
@@ -1326,7 +352,12 @@
         }
 
         async function startRecording(options = {}) {
-            if (rec) return;
+            if (rec || startingRecording) return;
+            startingRecording = true;
+            document.getElementById('record-btn').disabled = true;
+            document.getElementById('exam-test-btn').disabled = true;
+            document.getElementById('mic-check-status').textContent = 'Разрешите доступ к микрофону в браузере…';
+            let acquiredStream = null;
             try {
                 const getUserMedia = getUserMediaFn();
                 if (audioContext.state === 'suspended') {
@@ -1335,11 +366,12 @@
                 // Просим «сырой» микрофон: без шумоподавления, эхоподавления и АРУ браузера
                 let stream;
                 try {
-                    stream = await getUserMedia({ audio: RAW_MIC_CONSTRAINTS });
+                    stream = await requestMicrophone(getUserMedia, RAW_MIC_CONSTRAINTS);
                 } catch (e) {
-                    if (e.name === 'NotAllowedError' || e.name === 'SecurityError') throw e;
-                    stream = await getUserMedia({ audio: true });
+                    if (e.name !== 'OverconstrainedError') throw e;
+                    stream = await requestMicrophone(getUserMedia, true);
                 }
+                acquiredStream = stream;
                 const track = stream.getAudioTracks()[0];
                 const settings = track && track.getSettings ? track.getSettings() : {};
 
@@ -1358,7 +390,9 @@
                     stream, track, settings, source, analyser, processor, mute,
                     sr: audioContext.sampleRate,
                     chunks: [], nSamples: 0,
-                    calibrate: document.getElementById('calibrate-check').checked,
+                    check: !!options.check,
+                    patientId: options.test ? document.getElementById('patient-id').value.trim() : null,
+                    calibrate: !options.check && document.getElementById('calibrate-check').checked,
                     phase: 'start', speechStart: null, plan: null,
                     stopped: false, clipUntil: 0, columns: [], raf: null,
                     // Пошаговый тест (DSI или речевые задания): номер упражнения, попытки
@@ -1376,9 +410,12 @@
                 };
 
                 isRecording = true;
+                if (options.test) document.getElementById('mic-check-status').textContent = 'Микрофон подключён. Выполняйте задания по инструкции.';
                 const recordBtn = document.getElementById('record-btn');
                 recordBtn.classList.add('recording');
-                recordBtn.textContent = options.test ? 'Прервать тест' : 'Остановить запись';
+                recordBtn.disabled = false;
+                recordBtn.textContent = options.test ? 'Прервать тест' : 'Отменить проверку';
+                document.getElementById('patient-id').disabled = !!options.test;
                 document.getElementById('exam-test-btn').disabled = true;
                 document.getElementById('analyze-btn').disabled = true;
                 document.getElementById('calibration-info').style.display = 'none';
@@ -1386,11 +423,50 @@
                 rec.startedAt = performance.now();
                 drawLive();
 
-                await runRecordingPhases(rec);
+                if (options.check) await checkMicrophone(rec);
+                else await runRecordingPhases(rec);
             } catch (e) {
+                acquiredStream?.getTracks().forEach(track => track.stop());
+                micReady = false;
                 cleanupRecording();
+                document.getElementById('mic-check-status').textContent = 'Проверка не завершена: ' + e.message;
                 alert('Ошибка доступа к микрофону: ' + e.message);
+            } finally {
+                startingRecording = false;
+                document.getElementById('record-btn').disabled = false;
+                document.getElementById('exam-test-btn').disabled = isRecording || !micReady;
             }
+        }
+
+        async function requestMicrophone(getUserMedia, audio) {
+            let expired = false, timeout;
+            const pending = getUserMedia({ audio }).then(stream => {
+                if (expired) { stream.getTracks().forEach(track => track.stop()); throw new Error('Время ожидания разрешения истекло'); }
+                return stream;
+            });
+            try {
+                return await Promise.race([pending, new Promise((_, reject) => {
+                    timeout = setTimeout(() => { expired = true; reject(new Error('Разрешите микрофон и повторите проверку')); }, 30000);
+                })]);
+            } finally { clearTimeout(timeout); }
+        }
+
+        async function checkMicrophone(state) {
+            micReady = false;
+            document.getElementById('mic-check-status').textContent = 'Произнесите несколько слов в течение 4 секунд.';
+            setRecPhase('speech', 'Калибровка перед записью');
+            if (!await waitForSample(state, state.sr * 4)) return;
+            let sum = 0, clipped = 0;
+            for (const chunk of state.chunks) for (const value of chunk) {
+                sum += value * value;
+                if (Math.abs(value) >= 0.98) clipped++;
+            }
+            const db = 20 * Math.log10(Math.sqrt(sum / state.nSamples) + 1e-10);
+            micReady = db > -60 && clipped / state.nSamples < 0.01 && state.track.readyState === 'live';
+            cleanupRecording();
+            document.getElementById('mic-check-status').textContent = micReady
+                ? 'Микрофон принимает звук. Можно проводить тестирование.'
+                : 'Сигнал слишком тихий или перегружен. Проверьте микрофон, расстояние и повторите проверку.';
         }
 
         function setRecPhase(phase, text) {
@@ -1404,8 +480,15 @@
         // Ждем, пока микрофон наберет нужное число отсчетов; false — запись остановили
         function waitForSample(state, sampleIndex) {
             return new Promise(resolve => {
+                const deadline = performance.now() + Math.max(15000, (sampleIndex - state.nSamples) / state.sr * 1000 + 10000);
                 const check = () => {
                     if (state.stopped) return resolve(false);
+                    if (performance.now() > deadline || state.track.readyState === 'ended') {
+                        micReady = false;
+                        cleanupRecording();
+                        document.getElementById('mic-check-status').textContent = 'Нет сигнала от микрофона. Проверьте подключение и повторите проверку.';
+                        return resolve(false);
+                    }
                     if (state.nSamples >= sampleIndex) return resolve(true);
                     setTimeout(check, 30);
                 };
@@ -1581,6 +664,10 @@
         }
 
         function openExamDisclaimer() {
+            if (!micReady) return;
+            if (!document.getElementById('patient-id').value.trim()) {
+                alert('Укажите ID пациента'); document.getElementById('patient-id').focus(); return;
+            }
             document.getElementById('exam-disclaimer-check').checked = false;
             document.getElementById('exam-disclaimer-start').disabled = true;
             document.getElementById('exam-disclaimer').showModal();
@@ -1812,6 +899,7 @@
         }
 
         function cleanupRecording() {
+            const wasCheck = rec?.check;
             if (rec) {
                 rec.stopped = true;
                 if (rec.raf) cancelAnimationFrame(rec.raf);
@@ -1825,10 +913,14 @@
             closeExamReview();
             const recordBtn = document.getElementById('record-btn');
             recordBtn.classList.remove('recording');
-            recordBtn.textContent = 'Записать с микрофона';
+            recordBtn.textContent = 'Проверить микрофон';
+            document.getElementById('patient-id').disabled = false;
             document.getElementById('live-recorder').style.display = 'none';
             document.getElementById('dsi-step').style.display = 'none';
-            document.getElementById('exam-test-btn').disabled = false;
+            document.getElementById('exam-test-btn').disabled = !micReady;
+            document.getElementById('mic-check-status').textContent = micReady
+                ? 'Микрофон проверен. Можно проводить тестирование.'
+                : (wasCheck ? 'Проверка остановлена. Повторите проверку микрофона.' : 'Проверьте микрофон перед тестированием.');
         }
 
         function stopRecording() {
@@ -1878,6 +970,7 @@
                 }
             }
             lastRecording = {
+                patientId: state.patientId,
                 calibration,
                 calibrationWav,
                 deviceInfo,
@@ -2214,914 +1307,36 @@
             analyzeProgress = null;
         }
 
-        // POST с процентом отправки (fetch не умеет сообщать прогресс загрузки)
-        function postWithUploadProgress(url, formData, onUploadProgress, onUploaded) {
-            return new Promise((resolve, reject) => {
-                const xhr = new XMLHttpRequest();
-                xhr.open('POST', url);
-                xhr.upload.onprogress = (e) => {
-                    if (e.lengthComputable) onUploadProgress(e.loaded / e.total);
-                };
-                xhr.upload.onload = () => onUploaded();
-                xhr.onload = () => resolve({ ok: xhr.status >= 200 && xhr.status < 300, status: xhr.status, text: xhr.responseText });
-                xhr.onerror = () => reject(new Error('нет связи с сервером'));
-                xhr.ontimeout = () => reject(new Error('сервер не ответил вовремя'));
-                xhr.send(formData);
-            });
-        }
-
         async function analyzeAudio() {
-            if (!audioBuffer) {
-                alert('Пожалуйста, загрузите или запишите аудио');
-                return;
-            }
-
-            const analyzeBtn = document.getElementById('analyze-btn');
-            analyzeBtn.disabled = true;
-            analyzeBtn.textContent = 'Идет анализ...';
+            if (!audioBuffer || !lastRecording || lastRecording.deviceInfo.task !== 'exam') return;
+            const patient = lastRecording.patientId;
+            if (!patient) { alert('Укажите ID пациента'); return; }
+            const buttons = ['record-btn','exam-test-btn','analyze-btn'].map(id=>document.getElementById(id));
+            buttons.forEach(button=>button.disabled=true);
             showAnalyzeProgress();
-            // Ожидаемое время анализа: секунды анализа на секунду записи,
-            // запоминаем по прошлым анализам в этом браузере (по умолчанию 6)
-            let secondsPerAudioSecond = 6;
             try {
-                const saved = parseFloat(localStorage.getItem('audio_park_analyze_rate'));
-                if (saved > 0 && isFinite(saved)) secondsPerAudioSecond = saved;
-            } catch (e) {}
-            const audioSeconds = audioBuffer.duration;
-            // К ожидаемому моменту полоса дойдет примерно до 85%
-            analyzeProgress.tau = Math.max(3, secondsPerAudioSecond * audioSeconds / 2);
-
-            try {
-                setAnalyzeStage('prepare', 'Подготовка записи');
-                setAnalyzePercent(3);
-                const wavBlob = audioBufferToWav(audioBuffer, audioBuffer.sampleRate);
-
-                const formData = new FormData();
-                formData.append('file', wavBlob, 'audio.wav');
-                formData.append('username', 'Локальный анализ');
-                // Для записи с микрофона добавляем данные устройства и результаты калибровки
-                if (lastRecording && lastRecording.buffer === audioBuffer) {
-                    formData.append('device_info', JSON.stringify(lastRecording.deviceInfo));
-                    if (lastRecording.calibration) {
-                        formData.append('calibration', JSON.stringify(lastRecording.calibration));
-                        formData.append('calibration_file', lastRecording.calibrationWav, 'calibration.wav');
-                    }
-                }
-
-                setAnalyzeStage('upload', 'Отправка на сервер');
-                const startAnalyzeStage = () => {
-                    if (analyzeProgress && analyzeProgress.stage === 'upload') {
-                        setAnalyzePercent(30);
-                        analyzeProgress.analyzeFrom = performance.now();
-                        setAnalyzeStage('analyze', 'Анализ голоса на сервере');
-                    }
-                };
-                const response = await postWithUploadProgress(
-                    `${API_URL}/api/analyze`, formData,
-                    (fraction) => setAnalyzePercent(5 + 25 * fraction),
-                    startAnalyzeStage);
-                startAnalyzeStage();
-
-                if (!response.ok) {
-                    throw new Error(`сервер ответил ${response.status}: ${response.text.slice(0, 200)}`);
-                }
-                // Сервер сам сохраняет результат в общий список, отдельное сохранение не нужно
-                const result = JSON.parse(response.text);
-                const analyzeSeconds = (performance.now() - analyzeProgress.analyzeFrom) / 1000;
-                try {
-                    const rate = analyzeSeconds / Math.max(audioSeconds, 1);
-                    const prev = parseFloat(localStorage.getItem('audio_park_analyze_rate'));
-                    const next = prev > 0 && isFinite(prev) ? 0.5 * prev + 0.5 * rate : rate;
-                    localStorage.setItem('audio_park_analyze_rate', next.toFixed(2));
-                } catch (e) {}
-
-                finishAnalyzeProgress(null);
-                displayResults(result);
-                window.lastAnalysisResult = result;
-                await loadResults();
-                await loadStats();
-            } catch (e) {
-                console.error(e);
-                finishAnalyzeProgress(e.message);
-            } finally {
-                analyzeBtn.disabled = false;
-                analyzeBtn.textContent = 'Анализировать';
+                const form = new FormData();
+                form.append('file',audioBufferToWav(audioBuffer,audioBuffer.sampleRate),'examination.wav');
+                form.append('patient_id',patient);
+                form.append('device_info',JSON.stringify(lastRecording.deviceInfo));
+                if (lastRecording.calibration) form.append('calibration',JSON.stringify(lastRecording.calibration));
+                if (lastRecording.calibrationWav) form.append('calibration_file',lastRecording.calibrationWav,'calibration.wav');
+                setAnalyzeStage('analyze', 'Отправка и анализ обследования. Дождитесь результата…');
+                analyzeProgress.analyzeFrom = performance.now();
+                analyzeProgress.tau = Math.max(30, audioBuffer.duration / 2);
+                const response = await fetch(`${API_URL}/api/analyze`,{method:'POST',body:form});
+                const result = await response.json();
+                if (!response.ok) throw new Error(result.error || 'Ошибка анализа');
+                finishAnalyzeProgress();
+                location.assign(`${API_URL}/visualization?study=${encodeURIComponent(result.study_id)}`);
+            } catch(error) {
+                finishAnalyzeProgress(error.message);
+                const retry = document.getElementById('analyze-btn');
+                retry.hidden = false; retry.style.display = ''; retry.textContent = 'Повторить отправку обследования';
             }
+            finally { buttons.forEach(button=>button.disabled=false); document.getElementById('exam-test-btn').disabled = !micReady; }
         }
 
-        async function resampleAudio(buffer, targetSampleRate) {
-            if (buffer.sampleRate === targetSampleRate) {
-                return buffer;
-            }
-            
-            const offlineContext = new OfflineAudioContext(
-                buffer.numberOfChannels,
-                Math.ceil(buffer.length * targetSampleRate / buffer.sampleRate),
-                targetSampleRate
-            );
-            
-            const source = offlineContext.createBufferSource();
-            source.buffer = buffer;
-            source.connect(offlineContext.destination);
-            source.start();
-            
-            return await offlineContext.startRendering();
-        }
-        
-        async function extractFeatures(buffer) {
-            const audioData = buffer.getChannelData(0);
-            const sampleRate = buffer.sampleRate;
-            const duration = buffer.duration;
-            
-            // Extract F0 (pitch) using autocorrelation
-            const f0Values = extractF0(audioData, sampleRate);
-            
-            // Calculate features
-            // Calculate DSI parameters
-            const mpt = calculateMaxPhonation(audioData, sampleRate);
-            const f0High = f0Values.length > 0 ? calculateHighestF0(f0Values) : 0;
-            const iLow = calculateLowestIntensity(audioData, sampleRate);
-            
-            const features = {
-                jitter_percent: calculateJitter(f0Values),
-                shimmer_percent: calculateShimmer(audioData, f0Values, sampleRate),
-                hnr_db: calculateHNR(audioData, sampleRate),
-                rate_syl_sec: estimateSpeechRate(audioData, sampleRate),
-                f0_sd_hz: f0Values.length > 0 ? calculateStdDev(f0Values) : 0,
-                f0_mean_hz: f0Values.length > 0 ? calculateMean(f0Values) : 0,
-                amplitude_db_variation: calculateAmplitudeVariation(audioData, sampleRate),
-                pause_ratio: calculatePauseRatio(audioData, sampleRate),
-                rms_mean: calculateRMS(audioData),
-                amplitude_db_range: calculateAmplitudeRange(audioData, sampleRate),
-                // DSI parameters
-                mpt_sec: mpt,
-                f0_high_hz: f0High,
-                i_low_db: iLow
-            };
-            
-            return features;
-        }
-        
-        function extractF0(audioData, sampleRate) {
-            const frameLength = Math.floor(0.04 * sampleRate); // 40ms frames
-            const hopLength = Math.floor(0.01 * sampleRate);   // 10ms hop
-            const f0Values = [];
-            
-            for (let i = 0; i < audioData.length - frameLength; i += hopLength) {
-                const frame = audioData.slice(i, i + frameLength);
-                const f0 = autocorrelationPitch(frame, sampleRate);
-                if (f0 > 50 && f0 < 500) { // Valid pitch range
-                    f0Values.push(f0);
-                }
-            }
-            
-            return f0Values;
-        }
-        
-        function autocorrelationPitch(frame, sampleRate) {
-            // Normalize
-            const mean = frame.reduce((a, b) => a + b, 0) / frame.length;
-            const normalized = frame.map(x => x - mean);
-            
-            // Autocorrelation
-            const autocorr = [];
-            const maxLag = Math.floor(sampleRate / 50); // Minimum 50Hz
-            const minLag = Math.floor(sampleRate / 500); // Maximum 500Hz
-            
-            for (let lag = minLag; lag < maxLag; lag++) {
-                let sum = 0;
-                for (let i = 0; i < frame.length - lag; i++) {
-                    sum += normalized[i] * normalized[i + lag];
-                }
-                autocorr.push(sum);
-            }
-            
-            // Find peak
-            if (autocorr.length === 0) return 0;
-            
-            let maxIdx = 0;
-            let maxVal = autocorr[0];
-            for (let i = 1; i < autocorr.length; i++) {
-                if (autocorr[i] > maxVal) {
-                    maxVal = autocorr[i];
-                    maxIdx = i;
-                }
-            }
-            
-            const lag = maxIdx + minLag;
-            return sampleRate / lag;
-        }
-        
-        function calculateJitter(f0Values) {
-            if (f0Values.length < 2) return 0;
-            
-            const periods = f0Values.map(f => 1 / f);
-            const periodDiffs = [];
-            for (let i = 1; i < periods.length; i++) {
-                periodDiffs.push(Math.abs(periods[i] - periods[i - 1]));
-            }
-            
-            const meanPeriod = periods.reduce((a, b) => a + b, 0) / periods.length;
-            const meanDiff = periodDiffs.reduce((a, b) => a + b, 0) / periodDiffs.length;
-            
-            return (meanDiff / meanPeriod) * 100;
-        }
-        
-        function calculateShimmer(audioData, f0Values, sampleRate) {
-            if (f0Values.length < 2) return 0;
-            
-            const amplitudes = [];
-            const frameLength = Math.floor(0.01 * sampleRate);
-            
-            for (let i = 0; i < f0Values.length; i++) {
-                const frameStart = Math.floor(i * frameLength);
-                const frameEnd = Math.min(frameStart + frameLength, audioData.length);
-                if (frameEnd > frameStart) {
-                    const frame = audioData.slice(frameStart, frameEnd);
-                    const rms = Math.sqrt(frame.reduce((sum, x) => sum + x * x, 0) / frame.length);
-                    amplitudes.push(rms);
-                }
-            }
-            
-            if (amplitudes.length < 2) return 0;
-            
-            const ampDiffs = [];
-            for (let i = 1; i < amplitudes.length; i++) {
-                ampDiffs.push(Math.abs(amplitudes[i] - amplitudes[i - 1]));
-            }
-            
-            const meanAmp = amplitudes.reduce((a, b) => a + b, 0) / amplitudes.length;
-            const meanDiff = ampDiffs.reduce((a, b) => a + b, 0) / ampDiffs.length;
-            
-            return (meanDiff / (meanAmp + 1e-10)) * 100;
-        }
-        
-        function calculateHNR(audioData, sampleRate) {
-            const frameLength = Math.floor(0.04 * sampleRate);
-            const hopLength = Math.floor(0.02 * sampleRate);
-            const hnrValues = [];
-            
-            for (let i = 0; i < audioData.length - frameLength; i += hopLength) {
-                const frame = audioData.slice(i, i + frameLength);
-                const mean = frame.reduce((a, b) => a + b, 0) / frame.length;
-                const normalized = frame.map(x => x - mean);
-                
-                // Autocorrelation
-                const autocorr = [];
-                for (let lag = 0; lag < frame.length / 2; lag++) {
-                    let sum = 0;
-                    for (let j = 0; j < frame.length - lag; j++) {
-                        sum += normalized[j] * normalized[j + lag];
-                    }
-                    autocorr.push(sum);
-                }
-                
-                if (autocorr.length > 0) {
-                    const maxIdx = Math.floor(sampleRate / 200); // ~200Hz
-                    if (maxIdx < autocorr.length) {
-                        const peak = Math.max(...autocorr.slice(Math.floor(sampleRate / 500), maxIdx));
-                        const noise = autocorr.reduce((a, b) => a + b, 0) / autocorr.length;
-                        
-                        if (noise > 0 && peak > 0) {
-                            const hnr = 10 * Math.log10(peak / noise);
-                            if (hnr > 0) {
-                                hnrValues.push(hnr);
-                            }
-                        }
-                    }
-                }
-            }
-            
-            return hnrValues.length > 0 ? hnrValues.reduce((a, b) => a + b, 0) / hnrValues.length : 10.0;
-        }
-        
-        function estimateSpeechRate(audioData, sampleRate) {
-            const frameLength = Math.floor(0.025 * sampleRate);
-            const hopLength = Math.floor(0.01 * sampleRate);
-            const rmsFrames = [];
-            
-            for (let i = 0; i < audioData.length - frameLength; i += hopLength) {
-                const frame = audioData.slice(i, i + frameLength);
-                const rms = Math.sqrt(frame.reduce((sum, x) => sum + x * x, 0) / frame.length);
-                rmsFrames.push(rms);
-            }
-            
-            if (rmsFrames.length === 0) return 0;
-            
-            const threshold = rmsFrames.sort((a, b) => a - b)[Math.floor(rmsFrames.length * 0.2)];
-            const speechFrames = rmsFrames.filter(rms => rms > threshold);
-            const transitions = rmsFrames.reduce((count, rms, i) => {
-                if (i > 0 && (rms > threshold) !== (rmsFrames[i - 1] > threshold)) {
-                    return count + 1;
-                }
-                return count;
-            }, 0);
-            
-            const duration = audioData.length / sampleRate;
-            const syllables = transitions / 2;
-            return duration > 0 ? syllables / duration : 0;
-        }
-        
-        function calculateAmplitudeVariation(audioData, sampleRate) {
-            const frameLength = Math.floor(0.025 * sampleRate);
-            const hopLength = Math.floor(0.01 * sampleRate);
-            const dbValues = [];
-            
-            for (let i = 0; i < audioData.length - frameLength; i += hopLength) {
-                const frame = audioData.slice(i, i + frameLength);
-                const rms = Math.sqrt(frame.reduce((sum, x) => sum + x * x, 0) / frame.length);
-                const db = 20 * Math.log10(rms + 1e-10);
-                dbValues.push(db);
-            }
-            
-            if (dbValues.length === 0) return 0;
-            
-            const mean = dbValues.reduce((a, b) => a + b, 0) / dbValues.length;
-            const variance = dbValues.reduce((sum, db) => sum + Math.pow(db - mean, 2), 0) / dbValues.length;
-            return Math.sqrt(variance);
-        }
-        
-        function calculatePauseRatio(audioData, sampleRate) {
-            const frameLength = Math.floor(0.025 * sampleRate);
-            const hopLength = Math.floor(0.01 * sampleRate);
-            const rmsFrames = [];
-            
-            for (let i = 0; i < audioData.length - frameLength; i += hopLength) {
-                const frame = audioData.slice(i, i + frameLength);
-                const rms = Math.sqrt(frame.reduce((sum, x) => sum + x * x, 0) / frame.length);
-                rmsFrames.push(rms);
-            }
-            
-            if (rmsFrames.length === 0) return 0;
-            
-            const threshold = rmsFrames.sort((a, b) => a - b)[Math.floor(rmsFrames.length * 0.2)];
-            const silenceFrames = rmsFrames.filter(rms => rms <= threshold).length;
-            return silenceFrames / rmsFrames.length;
-        }
-        
-        function calculateRMS(audioData) {
-            const sumSquares = audioData.reduce((sum, x) => sum + x * x, 0);
-            return Math.sqrt(sumSquares / audioData.length);
-        }
-        
-        function calculateAmplitudeRange(audioData, sampleRate) {
-            const frameLength = Math.floor(0.025 * sampleRate);
-            const hopLength = Math.floor(0.01 * sampleRate);
-            const dbValues = [];
-            
-            for (let i = 0; i < audioData.length - frameLength; i += hopLength) {
-                const frame = audioData.slice(i, i + frameLength);
-                const rms = Math.sqrt(frame.reduce((sum, x) => sum + x * x, 0) / frame.length);
-                const db = 20 * Math.log10(rms + 1e-10);
-                dbValues.push(db);
-            }
-            
-            if (dbValues.length === 0) return 0;
-            
-            const max = Math.max(...dbValues);
-            const min = Math.min(...dbValues);
-            return max - min;
-        }
-        
-        function calculateMean(values) {
-            return values.reduce((a, b) => a + b, 0) / values.length;
-        }
-        
-        function calculateStdDev(values) {
-            const mean = calculateMean(values);
-            const variance = values.reduce((sum, val) => sum + Math.pow(val - mean, 2), 0) / values.length;
-            return Math.sqrt(variance);
-        }
-        
-        function calculateMaxPhonation(audioData, sampleRate) {
-            // Calculate RMS frames to detect vocalization
-            const frameLength = Math.floor(0.01 * sampleRate);
-            const hopLength = Math.floor(0.01 * sampleRate);
-            const rmsFrames = [];
-            
-            for (let i = 0; i < audioData.length - frameLength; i += hopLength) {
-                const frame = audioData.slice(i, i + frameLength);
-                const rms = Math.sqrt(frame.reduce((sum, x) => sum + x * x, 0) / frame.length);
-                rmsFrames.push(rms);
-            }
-            
-            if (rmsFrames.length === 0) return audioData.length / sampleRate;
-            
-            // Threshold for vocalization (50% of max)
-            const threshold = Math.max(...rmsFrames) * 0.5;
-            
-            // Find longest continuous vocalization segment
-            let maxDuration = 0;
-            let currentDuration = 0;
-            
-            for (const rms of rmsFrames) {
-                if (rms >= threshold) {
-                    currentDuration += 0.01; // time_step
-                    maxDuration = Math.max(maxDuration, currentDuration);
-                } else {
-                    currentDuration = 0;
-                }
-            }
-            
-            return maxDuration > 0 ? maxDuration : audioData.length / sampleRate;
-        }
-        
-        function calculateHighestF0(f0Values) {
-            if (f0Values.length === 0) return 0;
-            // Use 95th percentile to exclude outliers
-            const sorted = [...f0Values].sort((a, b) => a - b);
-            const index = Math.floor(sorted.length * 0.95);
-            return sorted[index];
-        }
-        
-        function calculateLowestIntensity(audioData, sampleRate) {
-            // Calculate intensity frames using RMS
-            const frameLength = Math.floor(0.01 * sampleRate);
-            const hopLength = Math.floor(0.01 * sampleRate);
-            const rmsFrames = [];
-            
-            for (let i = 0; i < audioData.length - frameLength; i += hopLength) {
-                const frame = audioData.slice(i, i + frameLength);
-                const rms = Math.sqrt(frame.reduce((sum, x) => sum + x * x, 0) / frame.length);
-                rmsFrames.push(rms);
-            }
-            
-            if (rmsFrames.length === 0) return 0;
-            
-            // Filter only vocalization (20% of max, same as Python)
-            const maxRms = Math.max(...rmsFrames);
-            if (maxRms <= 0) return 0;
-            
-            const threshold = maxRms * 0.20;
-            const vocalRms = rmsFrames.filter(rms => rms >= threshold);
-            
-            if (vocalRms.length === 0) {
-                // If no vocalization, use minimum
-                const minRms = Math.min(...rmsFrames.filter(r => r > 0));
-                if (minRms > 0 && maxRms > 0) {
-                    const relativeIntensity = minRms / maxRms;
-                    const iLowDb = 30 + (relativeIntensity * 30);
-                    return Math.max(25, Math.min(65, iLowDb));
-                }
-                return 0;
-            }
-            
-            // Use 5th percentile as I-Low (lowest intensity during vocalization)
-            const sorted = [...vocalRms].sort((a, b) => a - b);
-            const index = Math.floor(sorted.length * 0.05);
-            const iLowRms = sorted[index];
-            
-            // For DSI, I-Low should be in range 30-60 dB for normal speech
-            // Use relative intensity and scale to correct range
-            if (iLowRms > 0 && maxRms > 0) {
-                const relativeIntensity = iLowRms / maxRms;
-                // Scale to range 30-60 dB: 30 + (relative * 30)
-                const iLowDb = 30 + (relativeIntensity * 30);
-                // Limit to range 25-65 dB
-                return Math.max(25, Math.min(65, iLowDb));
-            }
-            
-            return 0;
-        }
-        
-        function calculateDSI(features) {
-            // DSI требует отдельных заданий (самая долгая гласная, самая высокая нота,
-            // самый тихий голос) и калибровки микрофона в дБ SPL. По обычной записи
-            // в браузере это не измерить, поэтому DSI здесь не считаем.
-            return {
-                dsi_score: null,
-                dsi_range: "Не рассчитывается",
-                status: "not_applicable",
-                reason: "Нужна отдельная запись с заданиями DSI и калибровка громкости микрофона.",
-                dsi_breakdown: {
-                    mpt_sec: features.mpt_sec || 0,
-                    f0_high_hz: features.f0_high_hz || 0,
-                    i_low_db: features.i_low_db || 0,
-                    jitter_percent: features.jitter_percent || 0
-                }
-            };
-        }
-        
-        function analyzeSymptoms(features) {
-            const THRESHOLDS = {
-                jitter_percent: 1.1,
-                shimmer_percent: 7.5,
-                hnr_db: 13.0,
-                f0_sd_hz: 50.0,
-                rate_syl_sec: 3.0,
-                pause_ratio: 0.30,
-                amplitude_db_variation: 6.0
-            };
-            
-            // Score symptoms (0-3)
-            const symptom_scores = {
-                hypophonia: scoreHypophonia(features),
-                monopitch: scoreMonopitch(features),
-                monoloudness: scoreMonoloudness(features),
-                hoarseness: scoreHoarseness(features),
-                imprecise_articulation: scoreArticulation(features)
-            };
-            
-            // Count exceeded thresholds
-            const exceeded = [];
-            if (features.jitter_percent > THRESHOLDS.jitter_percent) exceeded.push('jitter');
-            if (features.shimmer_percent > THRESHOLDS.shimmer_percent) exceeded.push('shimmer');
-            if (features.hnr_db < THRESHOLDS.hnr_db) exceeded.push('hnr');
-            if (features.f0_sd_hz < THRESHOLDS.f0_sd_hz) exceeded.push('f0_sd');
-            if (features.rate_syl_sec < THRESHOLDS.rate_syl_sec) exceeded.push('rate');
-            if (features.pause_ratio > THRESHOLDS.pause_ratio) exceeded.push('pause_ratio');
-            if (features.amplitude_db_variation < THRESHOLDS.amplitude_db_variation) exceeded.push('amplitude_variation');
-            
-            // Assess PD risk
-            const numExceeded = exceeded.length;
-            const severeSymptoms = Object.values(symptom_scores).filter(s => s >= 2).length;
-            
-            let riskLevel, accuracy;
-            if (numExceeded >= 4 || severeSymptoms >= 3) {
-                riskLevel = "Высокий";
-                accuracy = 92;
-            } else if (numExceeded >= 3 || severeSymptoms >= 2) {
-                riskLevel = "Высокий";
-                accuracy = 89;
-            } else if (numExceeded >= 2 || severeSymptoms >= 1) {
-                riskLevel = "Умеренный";
-                accuracy = 75;
-            } else if (numExceeded >= 1) {
-                riskLevel = "Низкий";
-                accuracy = 60;
-            } else {
-                riskLevel = "Минимальный";
-                accuracy = 30;
-            }
-            
-            symptom_scores.pd_risk = `${riskLevel} (${accuracy}%, согласно Little 2004 + Daoudi 2022)`;
-            
-            // Generate report
-            const report = generateReport(features, symptom_scores, exceeded);
-            
-            return { symptom_scores, report, exceeded };
-        }
-        
-        function scoreHypophonia(features) {
-            const rms = features.rms_mean || 0;
-            if (rms < 0.02) return 3;
-            if (rms < 0.04) return 2;
-            if (rms < 0.05) return 1;
-            return 0;
-        }
-        
-        function scoreMonopitch(features) {
-            const f0_sd = features.f0_sd_hz || 0;
-            if (f0_sd < 20) return 3;
-            if (f0_sd < 35) return 2;
-            if (f0_sd < 50) return 1;
-            return 0;
-        }
-        
-        function scoreMonoloudness(features) {
-            const dbVar = features.amplitude_db_variation || 0;
-            const dbRange = features.amplitude_db_range || 0;
-            if (dbVar < 2.0 || dbRange < 10.0) return 3;
-            if (dbVar < 4.0 || dbRange < 15.0) return 2;
-            if (dbVar < 6.0 || dbRange < 20.0) return 1;
-            return 0;
-        }
-        
-        function scoreHoarseness(features) {
-            const jitter = features.jitter_percent || 0;
-            const shimmer = features.shimmer_percent || 0;
-            const hnr = features.hnr_db || 20;
-            
-            let score = 0;
-            if (jitter > 2.0 || shimmer > 12.0) score += 2;
-            else if (jitter > 1.1 || shimmer > 7.5) score += 1;
-            
-            if (hnr < 8.0) score += 2;
-            else if (hnr < 13.0) score += 1;
-            
-            return Math.min(score, 3);
-        }
-        
-        function scoreArticulation(features) {
-            const rate = features.rate_syl_sec || 4.0;
-            const pauseRatio = features.pause_ratio || 0;
-            
-            let score = 0;
-            if (rate < 2.0) score += 2;
-            else if (rate < 3.0) score += 1;
-            
-            if (pauseRatio > 0.40) score += 2;
-            else if (pauseRatio > 0.30) score += 1;
-            
-            return Math.min(score, 3);
-        }
-        
-        function generateReport(features, symptom_scores, exceeded) {
-            const report = [];
-            const severityNames = ['', 'легкая', 'умеренная', 'тяжелая'];
-            const severityNamesM = ['', 'легкий', 'умеренный', 'тяжелый'];
-            
-            if (symptom_scores.hypophonia > 0) {
-                const severity = severityNames[symptom_scores.hypophonia];
-                report.push(`- Гипофония (${severity}): низкий RMS (${features.rms_mean.toFixed(3)}), типично для ПД [Little 2004].`);
-            }
-            
-            if (symptom_scores.monopitch > 0) {
-                const severity = severityNamesM[symptom_scores.monopitch];
-                report.push(`- Monopitch (${severity}): низкая вариация F0 (SD=${features.f0_sd_hz.toFixed(1)}Hz), отсутствие просодии характерно для ПД [Daoudi 2022].`);
-            }
-            
-            if (symptom_scores.monoloudness > 0) {
-                const severity = severityNames[symptom_scores.monoloudness];
-                report.push(`- Monoloudness (${severity}): вариация амплитуды ${features.amplitude_db_variation.toFixed(1)}dB, монотонная громкость [Little 2004].`);
-            }
-            
-            if (symptom_scores.hoarseness > 0) {
-                const severity = severityNames[symptom_scores.hoarseness];
-                const details = [];
-                if (features.jitter_percent > 1.1) details.push(`jitter=${features.jitter_percent.toFixed(2)}%`);
-                if (features.shimmer_percent > 7.5) details.push(`shimmer=${features.shimmer_percent.toFixed(2)}%`);
-                if (features.hnr_db < 13.0) details.push(`HNR=${features.hnr_db.toFixed(1)}dB`);
-                report.push(`- Охриплость (${severity}): нестабильность голосовых связок (${details.join(', ')}) [Little 2004, Daoudi 2022].`);
-            }
-            
-            if (symptom_scores.imprecise_articulation > 0) {
-                const severity = severityNames[symptom_scores.imprecise_articulation];
-                report.push(`- Неточная артикуляция (${severity}): скорость речи ${features.rate_syl_sec.toFixed(1)} сл/сек, паузы ${(features.pause_ratio * 100).toFixed(1)}% [NIH 2025].`);
-            }
-            
-            if (exceeded.length >= 3) {
-                report.push(`- Несколько показателей вне нормы. Это не диагноз: если есть жалобы на голос или речь, стоит показаться врачу (фониатру или неврологу).`);
-            } else if (exceeded.length >= 1) {
-                report.push(`- Рекомендация: мониторинг симптомов, логопедическая оценка.`);
-            }
-            
-            if (report.length === 0) {
-                report.push(`- Акустические параметры в пределах нормы. Симптомы ПД не выявлены.`);
-            }
-            
-            return report;
-        }
-        
-        function addDSIToReport(report, dsiResult) {
-            if (!dsiResult || dsiResult.dsi_score === null) {
-                return report;
-            }
-            
-            const updatedReport = [...report];
-            const breakdown = dsiResult.dsi_breakdown;
-            const interpretation = dsiResult.interpretation || {};
-            
-            updatedReport.push('');
-            updatedReport.push('=== DSI (Dysphonia Severity Index) ===');
-            updatedReport.push(`DSI Score: ${dsiResult.dsi_score.toFixed(2)} (${dsiResult.dsi_range})`);
-            updatedReport.push(`Параметры:`);
-            updatedReport.push(`  - MPT: ${breakdown.mpt_sec.toFixed(2)}с (${interpretation.mpt_status || 'N/A'})`);
-            updatedReport.push(`  - F0-High: ${breakdown.f0_high_hz.toFixed(1)} Гц (${interpretation.f0_high_status || 'N/A'})`);
-            updatedReport.push(`  - I-Low: ${breakdown.i_low_db.toFixed(1)} дБ (${interpretation.i_low_status || 'N/A'})`);
-            updatedReport.push(`  - Jitter: ${breakdown.jitter_percent.toFixed(2)}% (${interpretation.jitter_status || 'N/A'})`);
-            updatedReport.push(interpretation.note || 'DSI оценивает качество голоса, а не болезнь Паркинсона, и не является диагнозом.');
-            
-            return updatedReport;
-        }
-        
-        function displayResults(result) {
-            const localResults = document.getElementById('local-results');
-            if (!localResults) {
-                console.error('Элемент local-results не найден');
-                return;
-            }
-            localResults.style.display = 'block';
-            
-            // Display DSI
-            displayDSI(result);
-            
-            // Risk badge
-            const riskBadge = document.getElementById('risk-badge');
-            if (riskBadge) {
-                const riskText = result.symptom_scores.pd_risk || 'Не определен';
-                riskBadge.textContent = riskText;
-                riskBadge.className = 'risk-badge ' + (riskText.includes('Высокий') ? 'risk-high' : 
-                                                          riskText.includes('Умеренный') ? 'risk-medium' : 'risk-low');
-            }
-            
-            // Features table
-            const featuresTable = document.getElementById('features-table');
-            if (!featuresTable) {
-                console.error('Элемент features-table не найден');
-                return;
-            }
-            featuresTable.innerHTML = '';
-            
-            const thresholds = {
-                jitter_percent: { value: result.features.jitter_percent, threshold: 1.1, name: 'Jitter (%)', op: '>' },
-                shimmer_percent: { value: result.features.shimmer_percent, threshold: 7.5, name: 'Shimmer (%)', op: '>' },
-                hnr_db: { value: result.features.hnr_db, threshold: 13.0, name: 'HNR (dB)', op: '<' },
-                f0_sd_hz: { value: result.features.f0_sd_hz, threshold: 50.0, name: 'F0 SD (Hz)', op: '<' },
-                rate_syl_sec: { value: result.features.rate_syl_sec, threshold: 3.0, name: 'Скорость речи (сл/сек)', op: '<' },
-                pause_ratio: { value: result.features.pause_ratio, threshold: 0.30, name: 'Паузы (%)', op: '>', mult: 100 },
-                amplitude_db_variation: { value: result.features.amplitude_db_variation, threshold: 6.0, name: 'Вариация амплитуды (dB)', op: '<' }
-            };
-            
-            // Голос (jitter, shimmer, HNR) оценивается по гласной, интонация и темп - по речи
-            const task = result.recording_task;
-            const speechOnly = ['f0_sd_hz', 'rate_syl_sec', 'pause_ratio', 'amplitude_db_variation'];
-            const vowelOnly = ['jitter_percent', 'shimmer_percent', 'hnr_db'];
-            for (const [key, info] of Object.entries(thresholds)) {
-                if (task && task !== 'speech' && task !== 'exam' && speechOnly.includes(key)) continue;
-                if (task === 'speech' && vowelOnly.includes(key)) continue;
-                const row = document.createElement('tr');
-                const value = info.mult ? (info.value * info.mult) : info.value;
-                const displayValue = info.mult ? value.toFixed(1) : value.toFixed(2);
-                const thresholdValue = info.mult ? (info.threshold * info.mult) : info.threshold;
-                
-                let exceeded = false;
-                if (info.op === '>') {
-                    exceeded = info.value > info.threshold;
-                } else {
-                    exceeded = info.value < info.threshold;
-                }
-                
-                row.innerHTML = `
-                    <td>${info.name}</td>
-                    <td>${displayValue}</td>
-                    <td>${info.op} ${thresholdValue.toFixed(2)}</td>
-                    <td><span class="badge ${exceeded ? 'bg-danger' : 'bg-success'}">${exceeded ? 'Превышен' : 'Норма'}</span></td>
-                `;
-                featuresTable.appendChild(row);
-            }
-            
-            // Symptom scores
-            const symptomScoresDiv = document.getElementById('symptom-scores');
-            if (symptomScoresDiv) {
-                const symptomNames = {
-                    hypophonia: 'Гипофония',
-                    monopitch: 'Monopitch',
-                    monoloudness: 'Monoloudness',
-                    hoarseness: 'Охриплость',
-                    imprecise_articulation: 'Неточная артикуляция'
-                };
-                
-                symptomScoresDiv.innerHTML = '';
-                for (const [key, score] of Object.entries(result.symptom_scores || {})) {
-                    if (key === 'pd_risk') continue;
-                    const div = document.createElement('div');
-                    div.className = 'mb-2';
-                    div.innerHTML = `<strong>${symptomNames[key] || key}:</strong> ${renderSymptomScore(score)}`;
-                    symptomScoresDiv.appendChild(div);
-                }
-            }
-            
-            // Charts
-            createCharts(result);
-            
-            // Report
-            const reportList = document.getElementById('report-list');
-            if (reportList && result.report) {
-                reportList.innerHTML = '';
-                result.report.forEach(item => {
-                const li = document.createElement('li');
-                // Handle DSI section header
-                if (item.startsWith('===')) {
-                    li.className = 'fw-bold mt-3';
-                    li.style.borderLeft = '4px solid #0e5a78';
-                    li.style.background = '#e7f3ff';
-                } else if (item.startsWith('  -')) {
-                    // DSI parameters (indented)
-                    li.style.paddingLeft = '30px';
-                } else if (item.trim() === '') {
-                    // Empty line
-                    li.style.padding = '5px';
-                    li.style.border = 'none';
-                    li.style.background = 'transparent';
-                }
-                    li.textContent = item;
-                    reportList.appendChild(li);
-                });
-            }
-            
-            // Scroll to results
-            if (localResults) {
-                setTimeout(() => {
-                    localResults.scrollIntoView({ behavior: 'smooth' });
-                }, 100);
-            }
-        }
-        
-        function displayDSI(result) {
-            const dsiCard = document.getElementById('dsi-card');
-            if (!dsiCard) return;
-            const html = renderTestCards(result);
-            dsiCard.innerHTML = html;
-            dsiCard.className = 'mt-4 mb-4';
-            dsiCard.style.display = html ? 'block' : 'none';
-        }
-        
-        function createCharts(result) {
-            // Features chart
-            const featuresChartEl = document.getElementById('features-chart');
-            if (featuresChartEl) {
-                const featuresCtx = featuresChartEl.getContext('2d');
-                if (featuresCtx) {
-                    if (featuresChart) featuresChart.destroy();
-                    
-                    featuresChart = new Chart(featuresCtx, {
-                        type: 'bar',
-                        data: {
-                            labels: ['Jitter (%)', 'Shimmer (%)', 'HNR (dB)', 'F0 SD (Hz)', 'Скорость (сл/сек)', 'Паузы (%)', 'Амплитуда (dB)'],
-                            datasets: [{
-                                label: 'Значение',
-                                data: [
-                                    result.features.jitter_percent,
-                                    result.features.shimmer_percent,
-                                    result.features.hnr_db,
-                                    result.features.f0_sd_hz,
-                                    result.features.rate_syl_sec,
-                                    result.features.pause_ratio * 100,
-                                    result.features.amplitude_db_variation
-                                ],
-                                backgroundColor: '#0e5a78'
-                            }]
-                        },
-                        options: {
-                            responsive: true,
-                            maintainAspectRatio: false,
-                            plugins: {
-                                title: {
-                                    display: true,
-                                    text: 'Акустические признаки'
-                                }
-                            }
-                        }
-                    });
-                }
-            }
-            
-            // Symptoms chart
-            const symptomsChartEl = document.getElementById('symptoms-chart');
-            if (symptomsChartEl) {
-                const symptomsCtx = symptomsChartEl.getContext('2d');
-                if (symptomsCtx) {
-                    if (symptomsChart) symptomsChart.destroy();
-                    
-                    const symptomLabels = ['Гипофония', 'Monopitch', 'Monoloudness', 'Охриплость', 'Артикуляция'];
-                    const symptomValues = [
-                        result.symptom_scores?.hypophonia || 0,
-                        result.symptom_scores?.monopitch || 0,
-                        result.symptom_scores?.monoloudness || 0,
-                        result.symptom_scores?.hoarseness || 0,
-                        result.symptom_scores?.imprecise_articulation || 0
-                    ];
-                    
-                    symptomsChart = new Chart(symptomsCtx, {
-                        type: 'bar',
-                        data: {
-                            labels: symptomLabels,
-                            datasets: [{
-                                label: 'Оценка (0-3)',
-                                data: symptomValues,
-                                backgroundColor: symptomValues.map(v => 
-                                    v === 0 ? '#28a745' : v === 1 ? '#ffc107' : v === 2 ? '#fd7e14' : '#dc3545'
-                                )
-                            }]
-                        },
-                        options: {
-                            responsive: true,
-                            maintainAspectRatio: false,
-                            scales: {
-                                y: {
-                                    beginAtZero: true,
-                                    max: 3
-                                }
-                            },
-                            plugins: {
-                                title: {
-                                    display: true,
-                                    text: 'Оценка симптомов'
-                                }
-                            }
-                        }
-                    });
-                }
-            }
-        }
-        
-        function exportJSON() {
-            if (!window.lastAnalysisResult) {
-                alert('Нет результатов для экспорта');
-                return;
-            }
-            
-            const json = JSON.stringify(window.lastAnalysisResult, null, 2);
-            const blob = new Blob([json], { type: 'application/json' });
-            const url = URL.createObjectURL(blob);
-            const a = document.createElement('a');
-            a.href = url;
-            a.download = `parkinson_analysis_${new Date().toISOString().split('T')[0]}.json`;
-            a.click();
-            URL.revokeObjectURL(url);
-        }
-        
         // Helper: Convert AudioBuffer to WAV for wavesurfer
         function audioBufferToWav(audioBuffer, sampleRate) {
             // Получаем моно канал (используем первый канал)

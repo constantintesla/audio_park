@@ -17,6 +17,9 @@
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="assets/theme.css">
+    <script src="assets/auth.js"></script>
+    <script src="assets/exam_tasks.js"></script>
+    <script src="assets/speech_protocol.js"></script>
 </head>
 <body>
     <header class="app-nav">
@@ -35,7 +38,8 @@
     <div class="container">
         <div class="page-head">
             <div>
-                <h1>Визуализация</h1>
+                <h1>Результат исследования</h1>
+                <p id="study-identity" class="study-id"></p>
                 <p>Параметры голоса и графики, привязанные к аудиозаписи</p>
             </div>
         </div>
@@ -55,6 +59,8 @@
         </div>
         
         <div id="content" style="display: none;">
+            <div id="exam-results"></div>
+            <div class="card"><div class="card-header">Отчёт исследования</div><div class="card-body"><p id="study-summary"></p><p id="study-quality"></p><ul id="study-report"></ul></div></div>
             <!-- Параметры -->
             <div class="card">
                 <div class="card-header">Извлеченные параметры</div>
@@ -194,12 +200,12 @@
 
         
         // Префикс пути, чтобы страница работала и в корне, и за прокси (например /audio_park)
-        const API_URL = window.location.pathname.replace(/\/(index\.html|results|visualization)?\/?$/, '');
+        const API_URL = AudioPark.base;
 
         // Загрузка списка результатов
         async function loadResults(preselectIndex = null) {
             try {
-                const response = await fetch(`${API_URL}/api/results`);
+                const response = await fetch(`${API_URL}/api/results${['admin','moderator'].includes(AudioPark.user.role) ? '?scope=all' : ''}`);
                 const data = await response.json();
                 
                 const select = document.getElementById('result-select');
@@ -245,7 +251,7 @@
         ];
         let partRequests = {};
         let chartObserver = null;
-        
+
         // Один запрос на график, даже если он нужен и плееру, и графику волны
         function fetchPart(index, part) {
             const key = `${index}:${part}`;
@@ -259,12 +265,12 @@
             }
             return partRequests[key];
         }
-        
+
         function setChartStatus(canvasId, text) {
             const status = document.getElementById(canvasId).parentElement.querySelector('.chart-status');
             if (status) status.textContent = text;
         }
-        
+
         // Загрузка визуализации
         async function loadVisualization() {
             const select = document.getElementById('result-select');
@@ -299,11 +305,18 @@
         // Отображение визуализации
         function displayVisualization(result, index) {
             document.getElementById('content').style.display = 'block';
+            document.getElementById('study-identity').textContent = `${result.study_id || ''} · Пациент: ${result.patient_id || '—'} · Специалист: ${result.user_info?.tg_username || '—'}`;
+            document.getElementById('study-summary').textContent = `DSI: ${result.dsi?.dsi_score?.toFixed(2) ?? '—'} · ${result.symptom_scores?.pd_risk || ''}`;
+            const verdicts = {ok:'Пригодна',warning:'Есть замечания',reject:'Требуется перезапись'};
+            document.getElementById('study-quality').textContent = 'Качество записи: ' + (verdicts[result.quality?.verdict] || result.quality?.verdict || '—');
+            const report = document.getElementById('study-report'); report.replaceChildren();
+            for (const message of result.report || []) { const li = document.createElement('li'); li.textContent = message; report.append(li); }
             partRequests = {};
             Object.values(charts).forEach(chart => chart.destroy());
             charts = {};
             
             displayParameters(result);
+            document.getElementById('exam-results').innerHTML = renderSpeechProtocolCard(result.speech_protocol) + renderTaskRecordings(result);
             initAudioPlayer(index);
             
             if (chartObserver) chartObserver.disconnect();
@@ -674,7 +687,7 @@
         ];
         // Тише этого уровня (дБ от самого громкого места) - белый фон
         const SPECTROGRAM_VISIBLE_DB = -60;
-        
+
         function spectrogramColor(t) {
             t = Math.max(0, Math.min(1, t));
             for (let k = 1; k < SPECTROGRAM_COLORS.length; k++) {
@@ -687,7 +700,7 @@
             }
             return SPECTROGRAM_COLORS[SPECTROGRAM_COLORS.length - 1][1];
         }
-        
+
         // Спектрограмма рисуется одной картинкой (по пикселю на ячейку сетки),
         // а не тысячами точек: так она не тормозит при наведении и масштабе
         function createSpectrogramChart(spectrogramData) {
@@ -726,7 +739,7 @@
             const df = h > 1 ? freqs[1] - freqs[0] : 1;
             const tEnd = times[w - 1] + dt;
             const fEnd = freqs[h - 1] + df;
-            
+
             const imagePlugin = {
                 id: 'spectrogramImage',
                 beforeDatasetsDraw(chart) {
@@ -783,7 +796,7 @@
                     }
                 }
             });
-            
+
             // Шкала цвета
             const stops = [];
             for (let k = 0; k <= 10; k++) {
@@ -793,7 +806,7 @@
                 `linear-gradient(to right, ${stops.join(', ')})`;
             document.getElementById('spectrogram-range').textContent =
                 `(${dbMin} ... ${dbMax} дБ от самого громкого места записи)`;
-            
+
             // Значение под курсором: считаем по сетке, без поиска по точкам
             const readout = document.getElementById('spectrogram-readout');
             canvas.onmousemove = (event) => {
@@ -1029,12 +1042,19 @@
         // Показать ошибку
         function showError(message) {
             const container = document.getElementById('error-container');
-            container.innerHTML = `<div class="error">${message}</div>`;
+            container.replaceChildren(); const error = document.createElement('div'); error.className = 'error'; error.textContent = message; container.append(error);
         }
         
         // Инициализация при загрузке
         window.addEventListener('DOMContentLoaded', async () => {
+            await AudioPark.ready;
             const params = new URLSearchParams(window.location.search);
+            if (params.has('study')) {
+                const select = document.getElementById('result-select');
+                const option = document.createElement('option'); option.value = params.get('study'); option.textContent = params.get('study'); select.replaceChildren(option);
+                document.querySelector('.controls').style.display = 'none';
+                await loadVisualization(); return;
+            }
             const indexParam = params.get('index');
             const preselectIndex = indexParam !== null && Number.isFinite(Number(indexParam)) ? Number(indexParam) : null;
             

@@ -1,5 +1,18 @@
 # Развертывание
 
+## Учётки и проверка состояния
+
+Production Compose сохраняет учётки и ключ сессий в `./data/auth/`.
+Сохраняйте эту папку при обновлениях и включайте её в резервные копии вместе с результатами.
+`SESSION_COOKIE_SECURE` по умолчанию включён в production Compose: используйте HTTPS.
+Для отдельной локальной HTTP-проверки задайте `SESSION_COOKIE_SECURE=false`.
+
+После первого запуска импортируйте закрытую выгрузку через `scripts/manage_accounts.py`
+(см. README). Файл с хэшами передавайте отдельно от кода и удаляйте временную копию после импорта.
+Регистрация посетителями не предусмотрена: новые учётки создают moderator/admin на `/users`.
+
+Healthcheck: `GET /healthz`. `/api/stats` теперь требует входа.
+
 ## Как обновляется рабочий сервер
 
 Сервер: lab-сервер, адрес снаружи — https://msr25.ru/audio_park/.
@@ -10,7 +23,7 @@
 2. После слияния в `main` снова идет smoke-тест, и если он зеленый — задание **deploy**:
    - собирает образ `audio_park-api:latest` из `Dockerfile`;
    - перезапускает контейнер `parkinson_api` по `docker-compose.prod.yml`;
-   - ждет, пока ответит `http://127.0.0.1:5005/api/health`.
+   - ждет, пока ответит `http://127.0.0.1:5005/healthz`.
 
 Оба задания выполняет self-hosted runner, установленный на lab-сервере как служба.
 С сервера нет стабильного доступа к PyPI, поэтому виртуальное окружение для тестов
@@ -47,7 +60,7 @@ cp env.example .env              # при необходимости помен�
 mkdir -p data/results
 touch data/results.json
 docker compose -f docker-compose.prod.yml up -d --build
-curl http://localhost:5000/api/stats
+curl http://localhost:5000/healthz
 ```
 
 Если сервис открывается через nginx, увеличьте лимит на размер файла и таймауты —

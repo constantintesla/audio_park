@@ -1,0 +1,16 @@
+<!doctype html>
+<html lang="ru"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Вход · Анализ голоса</title><link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css"><link rel="stylesheet" href="assets/theme.css"><script src="assets/auth.js"></script></head>
+<body><main class="container auth-container"><a class="brand mb-4" href="./"><span class="brand-text"><strong>Анализ голоса</strong><small>Исследования голоса</small></span></a>
+<div class="card"><div class="card-body"><h1>Вход</h1><p class="text-muted">Войдите, чтобы проводить обследования и просматривать исследования.</p>
+<form id="login-form"><label class="form-label" for="login">Электронная почта или логин</label><input class="form-control mb-3" id="login" name="username" autocomplete="username" maxlength="200" required autofocus>
+<label class="form-label" for="password">Пароль</label><input class="form-control mb-4" id="password" name="password" type="password" autocomplete="current-password" maxlength="256" required>
+<p class="alert alert-danger" id="login-error" role="alert" hidden></p><button class="btn btn-primary w-100" id="login-submit">Войти</button></form></div></div></main>
+<script>document.querySelector('#login-form').addEventListener('submit', async event => {
+    event.preventDefault(); const button = document.querySelector('#login-submit'); const error = document.querySelector('#login-error');
+    button.disabled = true; error.hidden = true;
+    try {
+        const response = await fetch(AudioPark.url('/api/auth/login'), {method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({login:document.querySelector('#login').value,password:document.querySelector('#password').value})});
+        const data = await response.json(); if (!response.ok) throw new Error(data.error || 'Ошибка входа'); location.replace(AudioPark.url('/'));
+    } catch (exception) { error.textContent = exception.message; error.hidden = false; button.disabled = false; }
+});</script></body></html>

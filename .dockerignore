@@ -14,6 +14,12 @@ venv/
 .venv/
 env/
 
+# Результаты и данные (кроме структуры)
+auth_data/
+.local-backups/
+data/
+experiments/
+results/
 # Данные и секреты (монтируются в контейнер или передаются через docker compose)
 results.json
 results/
@@ -22,4 +28,10 @@ data/
 *.mp3
 *.ogg
 .env
+.env.local
+.env.production
+.env*
+.claude/
+.codex/
+.agents/
 .env.*

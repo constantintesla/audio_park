@@ -121,7 +121,7 @@ const EXAM_STEPS = Object.fromEntries([...SPEECH_STEPS, ...DSI_STEPS].map(step =
 // (послушать и скачать), плюс вся запись и архив прогона. Попытки (task_recordings)
 // присылает сервер, см. task_recordings.py. API_URL объявлен на каждой странице
 function renderTaskRecordings(result) {
-    const index = result._index;
+    const index = encodeURIComponent(result.study_id ?? result._index ?? '');
     const files = (result.raw_data || {}).files || {};
     if (index === undefined || index === null || !(files.original_audio || files.processed_audio)) return '';
     const base = `${API_URL}/api/audio/${index}`;

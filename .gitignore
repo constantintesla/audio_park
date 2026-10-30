@@ -8,6 +8,9 @@ venv/
 .venv/
 env/
 
+# Результаты и данные
+auth_data/
+.local-backups/
 # Данные анализов (на сервере лежат рядом с кодом, в git не попадают)
 results.json
 results/
@@ -32,3 +35,4 @@ Thumbs.db
 *.tmp
 *.bak
 *~
+env

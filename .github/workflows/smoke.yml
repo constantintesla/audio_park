@@ -34,7 +34,9 @@ jobs:
       - name: Smoke check
         env:
           MPLBACKEND: Agg
-        run: '"$VENV/bin/python" scripts/ci_smoke.py'
+        run: |
+          "$VENV/bin/python" scripts/test_access.py
+          "$VENV/bin/python" scripts/ci_smoke.py
 
   # Выкладка на lab-сервер (https://msr25.ru/audio_park/) после зелёного smoke в main.
   # Данные (results.json, results/) и .env лежат в ~/audio_park и не трогаются.
@@ -55,7 +57,7 @@ jobs:
       - name: Wait for the app
         run: |
           for i in $(seq 1 30); do
-            if wget -q -O /dev/null http://127.0.0.1:5005/api/health; then
+            if wget -q -O /dev/null http://127.0.0.1:5005/healthz; then
               echo "app is up"; exit 0
             fi
             sleep 2
