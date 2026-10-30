@@ -7,6 +7,7 @@ import re
 import secrets
 import sqlite3
 import time
+import ipaddress
 from datetime import timedelta
 
 from flask import g, jsonify, redirect, request, session
@@ -14,6 +15,33 @@ from werkzeug.security import generate_password_hash
 
 ROLES = {"expert", "moderator", "admin"}
 MANAGERS = {"moderator", "admin"}
+
+
+def client_address():
+    peer = request.remote_addr or "unknown"
+    trusted = os.getenv("TRUSTED_PROXY_CIDRS", "").split(",")
+    try:
+        if any(value.strip() and ipaddress.ip_address(peer) in ipaddress.ip_network(value.strip()) for value in trusted):
+            chain = request.headers.get("X-Forwarded-For", "").split(",")
+            for value in reversed(chain):
+                address = ipaddress.ip_address(value.strip())
+                if not any(net.strip() and address in ipaddress.ip_network(net.strip()) for net in trusted):
+                    return str(address)
+    except ValueError:
+        pass
+    return peer
+
+
+def audit_auth(event, login_name="", reason="", db=None):
+    def insert(conn):
+        conn.execute("DELETE FROM auth_audit WHERE created_at < strftime('%Y-%m-%dT%H:%M:%SZ','now','-90 days')")
+        conn.execute("INSERT INTO auth_audit(event,login,reason,ip) VALUES (?,?,?,?)",
+                     (event, login_name[:200], reason, client_address()))
+    if db is not None:
+        insert(db)
+    else:
+        with connection() as conn:
+            insert(conn)
 
 
 def connection():
@@ -131,6 +159,11 @@ def init_auth(app):
         CREATE TABLE IF NOT EXISTS sessions (
             token_hash TEXT PRIMARY KEY, user_id INTEGER NOT NULL, expires_at REAL NOT NULL
         );
+        CREATE TABLE IF NOT EXISTS auth_audit (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ','now')),
+            event TEXT NOT NULL, login TEXT NOT NULL, reason TEXT NOT NULL, ip TEXT NOT NULL
+        );
         """)
 
     @app.before_request
@@ -156,7 +189,11 @@ def init_auth(app):
             expected = session.get("csrf_token", "")
             supplied = request.headers.get("X-CSRF-Token", "")
             if not expected or not hmac.compare_digest(expected, supplied):
+                if request.path == "/api/auth/login":
+                    audit_auth("login_failed", reason="csrf_invalid")
                 return jsonify(error="Сессия устарела. Обновите страницу"), 403
+        if request.path in {"/auth-logs", "/api/admin/auth-logs"} and g.user["role"] != "admin":
+            return jsonify(error="Недостаточно прав"), 403
         manager_routes = {"/all-results", "/users", "/api/users", "/api/recalculate-all"}
         if request.path in manager_routes and not is_manager():
             return jsonify(error="Недостаточно прав"), 403
@@ -185,25 +222,31 @@ def init_auth(app):
         login_name = str(data.get("login", "")).strip().lower()[:200]
         password = data.get("password", "")
         if not isinstance(password, str) or len(password) > 256:
+            audit_auth("login_failed", login_name, "invalid_password_format")
             return jsonify(error="Неверный логин или пароль"), 401
         # Limit by source address and by login, so rotating logins cannot flood scrypt.
         now = time.time()
-        keys = ["ip:" + (request.remote_addr or "unknown"), "login:" + login_name]
+        keys = ["ip:" + client_address(), "login:" + login_name]
         with connection() as db:
             db.execute("DELETE FROM login_attempts WHERE first_at < ?", (now - 900,))
             attempts = [db.execute("SELECT failures FROM login_attempts WHERE attempt_key = ?", (key,)).fetchone()
                         for key in keys]
             if any(row and row["failures"] >= 20 for row in attempts):
+                audit_auth("login_failed", login_name, "rate_limited", db)
                 return jsonify(error="Слишком много попыток. Повторите через 15 минут"), 429
             row = db.execute("SELECT * FROM users WHERE login = ? AND active = 1", (login_name,)).fetchone()
             valid = password_matches(row["password_hash"], password) if row else False
             if not valid:
+                existing = db.execute("SELECT active FROM users WHERE login = ?", (login_name,)).fetchone()
+                reason = "unknown_login" if not existing else ("inactive_account" if not existing["active"] else "wrong_password")
+                audit_auth("login_failed", login_name, reason, db)
                 for key in keys:
                     db.execute("INSERT INTO login_attempts VALUES (?, 1, ?) ON CONFLICT(attempt_key) "
                                "DO UPDATE SET failures = failures + 1", (key, now))
                 return jsonify(error="Неверный логин или пароль"), 401
             for key in keys:
                 db.execute("DELETE FROM login_attempts WHERE attempt_key = ?", (key,))
+            audit_auth("login_success", login_name, db=db)
         session.clear()
         session.permanent = True
         session["user_id"] = row["id"]
@@ -222,11 +265,20 @@ def init_auth(app):
 
     @app.post("/api/auth/logout")
     def logout():
+        audit_auth("logout", g.user["login"])
         token = session.get("session_token", "")
         with connection() as db:
             db.execute("DELETE FROM sessions WHERE token_hash = ?", (hashlib.sha256(token.encode()).hexdigest(),))
         session.clear()
         return jsonify(status="ok")
+
+    @app.get("/api/admin/auth-logs")
+    def auth_logs():
+        before = request.args.get("before", type=int)
+        with connection() as db:
+            rows = db.execute("SELECT * FROM auth_audit WHERE (? IS NULL OR id < ?) ORDER BY id DESC LIMIT 100",
+                              (before, before)).fetchall()
+        return jsonify(events=[dict(row) for row in rows])
 
     @app.get("/api/users")
     def users():
