@@ -1186,6 +1186,11 @@ def users_page():
     return send_from_directory(WEB_DIR, 'users.html')
 
 
+@app.get('/auth-logs')
+def auth_logs_page():
+    return send_from_directory(WEB_DIR, 'auth-logs.html')
+
+
 @app.get('/assets/<path:path>')
 def serve_assets(path):
     return send_from_directory(os.path.join(WEB_DIR, 'assets'), path)
