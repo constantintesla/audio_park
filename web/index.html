@@ -41,16 +41,15 @@
         
         <div class="card"><div class="card-body">
             <div class="patient-picker-head">
-                <div><span class="form-label">Пациент</span><p class="hint mb-0">Введите привычные данные — они обрабатываются в браузере и не отправляются на сервер.</p></div>
-                <button id="new-patient-btn" class="btn btn-outline-secondary" type="button">Создать без ФИО</button>
+                <div><span class="form-label">Пациент</span><p class="hint mb-0">Введите ФИО, чтобы открыть карточку пациента или создать новую.</p></div>
             </div>
             <form id="patient-identity-form" class="patient-identity-form mt-3">
                 <div><label class="form-label" for="patient-surname">Фамилия</label><input id="patient-surname" class="form-control" autocomplete="off" required></div>
                 <div><label class="form-label" for="patient-name">Имя</label><input id="patient-name" class="form-control" autocomplete="off" required></div>
                 <div><label class="form-label" for="patient-patronymic">Отчество</label><input id="patient-patronymic" class="form-control" autocomplete="off" placeholder="Если есть"></div>
-                <button id="resolve-patient-btn" class="btn btn-primary" type="submit">Найти пациента</button>
+                <button id="resolve-patient-btn" class="btn btn-primary" type="submit">Продолжить</button>
             </form>
-            <p id="patient-identity-hint" class="hint mt-2 mb-0">На сервер передаётся только криптографический HMAC-токен. ФИО очищается после выбора. При полном совпадении ФИО потребуется ручной выбор карточки.</p>
+            <p id="patient-identity-hint" class="hint mt-2 mb-0">ФИО используется только на этом устройстве и не сохраняется.</p>
             <p id="patient-identity-status" class="patient-identity-status mt-2 mb-0" aria-live="polite"></p>
             <input id="patient-id" type="hidden" value="">
             <input id="patient-uuid" type="hidden" value="">
@@ -58,11 +57,24 @@
                 <div><strong id="patient-selected-label"></strong><small id="patient-selected-meta"></small></div>
                 <button id="change-patient-btn" class="btn btn-sm btn-outline-secondary" type="button">Изменить</button>
             </div>
-            <div id="patient-browser">
+            <div id="patient-browser" class="patient-browser mt-3" hidden>
+                <div class="patient-browser-head">
+                    <div><strong id="patient-browser-title">Выберите пациента</strong><p id="patient-browser-hint" class="hint mb-0">Найдите карточку по локальному номеру.</p></div>
+                    <button id="close-patient-browser-btn" class="btn btn-sm btn-outline-secondary" type="button">Назад</button>
+                </div>
                 <label class="visually-hidden" for="patient-search">Найти пациента по номеру</label>
-                <input id="patient-search" class="form-control mt-3" type="search" placeholder="Найти пациента по номеру">
+                <input id="patient-search" class="form-control mt-2" type="search" placeholder="Например, Пациент 12">
                 <div id="patient-list" class="patient-list mt-2" aria-live="polite"><p class="hint mb-0">Загрузка пациентов…</p></div>
             </div>
+            <div id="patient-next-actions" class="patient-next-actions mt-3" hidden>
+                <strong id="patient-next-title"></strong>
+                <p id="patient-next-text" class="hint mb-0"></p>
+                <div class="patient-next-buttons">
+                    <button id="new-patient-btn" class="btn btn-primary" type="button">Создать нового пациента</button>
+                    <button id="choose-existing-btn" class="btn btn-outline-secondary" type="button">Выбрать существующую карточку</button>
+                </div>
+            </div>
+            <button id="open-patient-browser-btn" class="btn btn-link patient-number-link" type="button">Найти пациента по номеру</button>
             <p id="patient-error" class="alert alert-danger mt-3 mb-0" hidden></p>
         </div></div>
         <!-- Новый анализ -->
@@ -249,7 +261,13 @@
             search.addEventListener('input', renderPatients);
             document.getElementById('patient-identity-form').addEventListener('submit', resolvePatientFromIdentity);
             document.getElementById('new-patient-btn').addEventListener('click', createPatient);
+            document.getElementById('choose-existing-btn').addEventListener('click', () => openPatientBrowser('existing'));
+            document.getElementById('open-patient-browser-btn').addEventListener('click', () => openPatientBrowser('number'));
+            document.getElementById('close-patient-browser-btn').addEventListener('click', closePatientBrowser);
             document.getElementById('change-patient-btn').addEventListener('click', clearPatientSelection);
+            for (const id of ['patient-surname', 'patient-name', 'patient-patronymic']) {
+                document.getElementById(id).addEventListener('input', resetPatientLookupResult);
+            }
             try {
                 await AudioPark.ready;
                 const [keyResponse] = await Promise.all([
@@ -304,18 +322,33 @@
                 if (!response.ok) throw new Error(data.error || 'Не удалось найти пациента');
                 if (data.found) {
                     pendingLookupToken = lookupToken;
+                    if (data.count === 1) {
+                        setPatientIdentityStatus('Пациент найден. Открываем карточку…');
+                        pendingLookupToken = '';
+                        clearIdentityFields();
+                        await selectPatient(data.patients[0]);
+                        return;
+                    }
                     matchedPatientUuids = new Set(data.patients.map(patient => patient.uuid));
-                    document.getElementById('patient-search').value = '';
-                    renderPatients();
-                    setPatientIdentityStatus(`Найдено карточек: ${data.count}. Выберите нужную по номеру и истории визитов или создайте отдельную для другого пациента с тем же ФИО.`);
-                    document.getElementById('new-patient-btn').textContent = 'Создать другого с тем же ФИО';
+                    showPatientNextActions(
+                        'Нужной карточки нет?',
+                        'Создайте отдельную карточку, если это другой человек с таким же ФИО.',
+                        'Создать отдельную карточку',
+                        false
+                    );
+                    openPatientBrowser('matches');
                     return;
                 }
                 pendingLookupToken = lookupToken;
                 matchedPatientUuids = null;
-                setPatientIdentityStatus('Пациент не найден. Создайте нового или выберите существующего из списка, чтобы связать его с введёнными данными.');
-                document.getElementById('new-patient-btn').textContent = 'Создать нового пациента';
-                document.getElementById('patient-search').focus();
+                setPatientIdentityStatus('');
+                showPatientNextActions(
+                    'Такого пациента ещё нет',
+                    'Создайте новую карточку. Ей автоматически присвоится номер.',
+                    'Создать пациента',
+                    true
+                );
+                document.getElementById('new-patient-btn').focus();
             } catch (error) {
                 setPatientIdentityStatus('');
                 showPatientError(error.message);
@@ -332,6 +365,53 @@
 
         function setPatientIdentityStatus(message) {
             document.getElementById('patient-identity-status').textContent = message;
+        }
+
+        function showPatientNextActions(title, message, createLabel, showExisting) {
+            const actions = document.getElementById('patient-next-actions');
+            document.getElementById('patient-next-title').textContent = title;
+            document.getElementById('patient-next-text').textContent = message;
+            document.getElementById('new-patient-btn').textContent = createLabel;
+            document.getElementById('new-patient-btn').className = showExisting ? 'btn btn-primary' : 'btn btn-outline-secondary';
+            document.getElementById('choose-existing-btn').hidden = !showExisting;
+            actions.hidden = false;
+        }
+
+        function hidePatientNextActions() {
+            document.getElementById('patient-next-actions').hidden = true;
+        }
+
+        function openPatientBrowser(mode) {
+            const browser = document.getElementById('patient-browser');
+            const isMatches = mode === 'matches';
+            if (!isMatches) matchedPatientUuids = null;
+            document.getElementById('patient-browser-title').textContent = isMatches ? 'Карточки с таким ФИО' : 'Выбор по номеру';
+            document.getElementById('patient-browser-hint').textContent = isMatches
+                ? 'Сверьте номер и дату последнего обследования.'
+                : (pendingLookupToken ? 'Выбранная карточка будет связана с введённым ФИО.' : 'Найдите пациента по локальному номеру.');
+            document.getElementById('patient-search').value = '';
+            document.getElementById('patient-search').hidden = isMatches;
+            browser.hidden = false;
+            document.getElementById('open-patient-browser-btn').hidden = true;
+            renderPatients();
+            if (!isMatches) document.getElementById('patient-search').focus();
+        }
+
+        function closePatientBrowser() {
+            document.getElementById('patient-browser').hidden = true;
+            document.getElementById('open-patient-browser-btn').hidden = false;
+            matchedPatientUuids = null;
+            renderPatients();
+        }
+
+        function resetPatientLookupResult() {
+            pendingLookupToken = '';
+            matchedPatientUuids = null;
+            hidePatientNextActions();
+            document.getElementById('patient-browser').hidden = true;
+            document.getElementById('open-patient-browser-btn').hidden = false;
+            setPatientIdentityStatus('');
+            showPatientError('');
         }
 
         async function loadPatients() {
@@ -366,9 +446,16 @@
                 description.append(name, meta);
                 const choose = document.createElement('button');
                 choose.type = 'button'; choose.className = 'btn btn-sm btn-outline-secondary'; choose.textContent = 'Выбрать';
-                choose.addEventListener('click', () => selectPatient(patient));
+                choose.addEventListener('click', () => matchedPatientUuids ? selectMatchedPatient(patient) : selectPatient(patient));
                 row.append(description, choose); list.append(row);
             }
+        }
+
+        function selectMatchedPatient(patient) {
+            pendingLookupToken = '';
+            matchedPatientUuids = null;
+            clearIdentityFields();
+            return selectPatient(patient);
         }
 
         async function createPatient() {
@@ -423,7 +510,8 @@
             document.getElementById('patient-browser').hidden = true;
             document.getElementById('patient-identity-form').hidden = true;
             document.getElementById('patient-identity-hint').hidden = true;
-            document.getElementById('new-patient-btn').textContent = 'Создать без ФИО';
+            document.getElementById('open-patient-browser-btn').hidden = true;
+            hidePatientNextActions();
             setPatientIdentityStatus('');
             showPatientError('');
         }
@@ -432,11 +520,16 @@
             if (isRecording) return;
             document.getElementById('patient-id').value = '';
             document.getElementById('patient-uuid').value = '';
+            pendingLookupToken = '';
             matchedPatientUuids = null;
             document.getElementById('patient-selected').hidden = true;
-            document.getElementById('patient-browser').hidden = false;
+            document.getElementById('patient-browser').hidden = true;
             document.getElementById('patient-identity-form').hidden = false;
             document.getElementById('patient-identity-hint').hidden = false;
+            document.getElementById('open-patient-browser-btn').hidden = false;
+            hidePatientNextActions();
+            setPatientIdentityStatus('');
+            showPatientError('');
             document.getElementById('patient-surname').focus();
         }
 
@@ -450,6 +543,9 @@
             document.getElementById('patient-id').disabled = disabled;
             document.getElementById('patient-uuid').disabled = disabled;
             document.getElementById('new-patient-btn').disabled = disabled;
+            document.getElementById('choose-existing-btn').disabled = disabled;
+            document.getElementById('open-patient-browser-btn').disabled = disabled;
+            document.getElementById('close-patient-browser-btn').disabled = disabled;
             document.getElementById('change-patient-btn').disabled = disabled;
             document.getElementById('patient-search').disabled = disabled;
             document.getElementById('resolve-patient-btn').disabled = disabled;
@@ -922,7 +1018,7 @@
         function openExamDisclaimer() {
             if (!micReady) return;
             if (!document.getElementById('patient-id').value.trim()) {
-                alert('Сначала выберите или создайте пациента'); document.getElementById('patient-search').focus(); return;
+                alert('Сначала укажите пациента'); document.getElementById('patient-surname').focus(); return;
             }
             document.getElementById('exam-disclaimer-check').checked = false;
             document.getElementById('exam-disclaimer-start').disabled = true;

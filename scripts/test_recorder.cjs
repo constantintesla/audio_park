@@ -11,9 +11,10 @@ const elements = new Map();
 const noop = () => {};
 const bodyClasses = new Set();
 function element() {
-    return {style:{}, dataset:{}, children:[], checked:false, disabled:false, value:'TEST-PATIENT',
+    return {style:{}, dataset:{}, children:[], checked:false, disabled:false, hidden:false, value:'TEST-PATIENT',
         classList:{add:noop,remove:noop,toggle:noop}, addEventListener:noop, scrollIntoView:noop,
         append(...children) { this.children.push(...children); }, appendChild(c) { this.children.push(c); },
+        replaceChildren(...children) { this.children = children; }, focus:noop,
         showModal() { this.open=true; }, close() { this.open=false; },
         setAttribute:noop, getContext:() => new Proxy({}, {get:()=>noop}), clientWidth:600,clientHeight:100};
 }
@@ -49,6 +50,17 @@ async function run(code) { return vm.runInContext(code,context); }
         document.getElementById('patient-patronymic').value='иванович';
         globalThis.patientTokenB=await patientLookupToken();
         assert.equal(patientTokenA,patientTokenB);assert.match(patientTokenA,/^[0-9a-f]{64}$/);})()`);
+    await run(`showPatientNextActions('Нет пациента','Создайте карточку','Создать пациента',true);
+        assert.equal(document.getElementById('patient-next-actions').hidden,false);
+        assert.match(document.getElementById('new-patient-btn').className,/btn-primary/);
+        assert.equal(document.getElementById('choose-existing-btn').hidden,false);
+        patientRecords=[{uuid:'a',label:'Пациент 1',study_count:1,last_visit:'2026-10-31'},
+            {uuid:'b',label:'Пациент 2',study_count:0,last_visit:null}];
+        matchedPatientUuids=new Set(['a','b']);openPatientBrowser('matches');
+        assert.equal(document.getElementById('patient-browser').hidden,false);
+        assert.equal(document.getElementById('patient-search').hidden,true);
+        assert.equal(document.getElementById('patient-list').children.length,2);
+        closePatientBrowser();assert.equal(document.getElementById('patient-browser').hidden,true);`);
     await run('audioContext=testAudioContext; initRecordButton();');
     let checking=run('startRecording({check:true})');
     await new Promise(r=>setImmediate(r));
