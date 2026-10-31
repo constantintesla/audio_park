@@ -41,9 +41,17 @@
         
         <div class="card"><div class="card-body">
             <div class="patient-picker-head">
-                <div><span class="form-label">Пациент</span><p class="hint mb-0">Номер действует только в вашем списке. Внутренний идентификатор система хранит сама.</p></div>
-                <button id="new-patient-btn" class="btn btn-primary" type="button">Новый пациент</button>
+                <div><span class="form-label">Пациент</span><p class="hint mb-0">Введите привычные данные — они обрабатываются в браузере и не отправляются на сервер.</p></div>
+                <button id="new-patient-btn" class="btn btn-outline-secondary" type="button">Создать без ФИО</button>
             </div>
+            <form id="patient-identity-form" class="patient-identity-form mt-3">
+                <div><label class="form-label" for="patient-surname">Фамилия</label><input id="patient-surname" class="form-control" autocomplete="off" required></div>
+                <div><label class="form-label" for="patient-name">Имя</label><input id="patient-name" class="form-control" autocomplete="off" required></div>
+                <div><label class="form-label" for="patient-patronymic">Отчество</label><input id="patient-patronymic" class="form-control" autocomplete="off" placeholder="Если есть"></div>
+                <button id="resolve-patient-btn" class="btn btn-primary" type="submit">Найти пациента</button>
+            </form>
+            <p id="patient-identity-hint" class="hint mt-2 mb-0">На сервер передаётся только криптографический HMAC-токен. ФИО очищается после выбора. При полном совпадении ФИО потребуется ручной выбор карточки.</p>
+            <p id="patient-identity-status" class="patient-identity-status mt-2 mb-0" aria-live="polite"></p>
             <input id="patient-id" type="hidden" value="">
             <input id="patient-uuid" type="hidden" value="">
             <div id="patient-selected" class="patient-selected" hidden>
@@ -232,18 +240,98 @@
         });
 
         let patientRecords = [];
+        let patientIdentityKey = '';
+        let pendingLookupToken = '';
+        let matchedPatientUuids = null;
 
         async function initPatientPicker() {
             const search = document.getElementById('patient-search');
             search.addEventListener('input', renderPatients);
+            document.getElementById('patient-identity-form').addEventListener('submit', resolvePatientFromIdentity);
             document.getElementById('new-patient-btn').addEventListener('click', createPatient);
             document.getElementById('change-patient-btn').addEventListener('click', clearPatientSelection);
             try {
                 await AudioPark.ready;
-                await loadPatients();
+                const [keyResponse] = await Promise.all([
+                    fetch(`${API_URL}/api/patients/identity-key`),
+                    loadPatients()
+                ]);
+                const keyData = await keyResponse.json();
+                if (!keyResponse.ok) throw new Error(keyData.error || 'Не удалось подготовить безопасный поиск');
+                patientIdentityKey = keyData.hmac_key;
             } catch (error) {
                 showPatientError(error.message);
             }
+        }
+
+        function normalizeIdentityPart(value) {
+            return value.normalize('NFKC').trim().replace(/\s+/g, ' ').toLocaleUpperCase('ru-RU').replaceAll('Ё', 'Е');
+        }
+
+        function hexBytes(value) {
+            if (!/^[0-9a-f]{64}$/i.test(value)) throw new Error('Некорректный ключ поиска пациента');
+            return new Uint8Array(value.match(/.{2}/g).map(byte => parseInt(byte, 16)));
+        }
+
+        function bytesHex(buffer) {
+            return [...new Uint8Array(buffer)].map(byte => byte.toString(16).padStart(2, '0')).join('');
+        }
+
+        async function patientLookupToken() {
+            if (!patientIdentityKey || !crypto?.subtle) throw new Error('Безопасный поиск недоступен в этом браузере');
+            const surname = normalizeIdentityPart(document.getElementById('patient-surname').value);
+            const name = normalizeIdentityPart(document.getElementById('patient-name').value);
+            const patronymic = normalizeIdentityPart(document.getElementById('patient-patronymic').value);
+            if (!surname || !name) throw new Error('Заполните фамилию и имя');
+            const payload = `v1-fio|${surname}|${name}|${patronymic}`;
+            const key = await crypto.subtle.importKey('raw', hexBytes(patientIdentityKey), {name: 'HMAC', hash: 'SHA-256'}, false, ['sign']);
+            return bytesHex(await crypto.subtle.sign('HMAC', key, new TextEncoder().encode(payload)));
+        }
+
+        async function resolvePatientFromIdentity(event) {
+            event.preventDefault();
+            const button = document.getElementById('resolve-patient-btn');
+            button.disabled = true;
+            showPatientError('');
+            setPatientIdentityStatus('Выполняется поиск…');
+            try {
+                const lookupToken = await patientLookupToken();
+                const response = await fetch(`${API_URL}/api/patients/resolve`, {
+                    method: 'POST', headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({lookup_token: lookupToken})
+                });
+                const data = await response.json();
+                if (!response.ok) throw new Error(data.error || 'Не удалось найти пациента');
+                if (data.found) {
+                    pendingLookupToken = lookupToken;
+                    matchedPatientUuids = new Set(data.patients.map(patient => patient.uuid));
+                    document.getElementById('patient-search').value = '';
+                    renderPatients();
+                    setPatientIdentityStatus(`Найдено карточек: ${data.count}. Выберите нужную по номеру и истории визитов или создайте отдельную для другого пациента с тем же ФИО.`);
+                    document.getElementById('new-patient-btn').textContent = 'Создать другого с тем же ФИО';
+                    return;
+                }
+                pendingLookupToken = lookupToken;
+                matchedPatientUuids = null;
+                setPatientIdentityStatus('Пациент не найден. Создайте нового или выберите существующего из списка, чтобы связать его с введёнными данными.');
+                document.getElementById('new-patient-btn').textContent = 'Создать нового пациента';
+                document.getElementById('patient-search').focus();
+            } catch (error) {
+                setPatientIdentityStatus('');
+                showPatientError(error.message);
+            } finally {
+                button.disabled = false;
+            }
+        }
+
+        function clearIdentityFields() {
+            for (const id of ['patient-surname', 'patient-name', 'patient-patronymic']) {
+                document.getElementById(id).value = '';
+            }
+        }
+
+        function setPatientIdentityStatus(message) {
+            document.getElementById('patient-identity-status').textContent = message;
         }
 
         async function loadPatients() {
@@ -257,7 +345,9 @@
         function renderPatients() {
             const list = document.getElementById('patient-list');
             const query = document.getElementById('patient-search').value.trim().toLocaleLowerCase('ru-RU');
-            const visible = patientRecords.filter(patient => patient.label.toLocaleLowerCase('ru-RU').includes(query));
+            const visible = patientRecords.filter(patient =>
+                (!matchedPatientUuids || matchedPatientUuids.has(patient.uuid)) &&
+                patient.label.toLocaleLowerCase('ru-RU').includes(query));
             list.replaceChildren();
             if (!visible.length) {
                 const empty = document.createElement('p');
@@ -286,11 +376,17 @@
             button.disabled = true;
             showPatientError('');
             try {
-                const response = await fetch(`${API_URL}/api/patients`, {method: 'POST'});
+                const response = await fetch(`${API_URL}/api/patients`, {
+                    method: 'POST', headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify(pendingLookupToken ? {lookup_token: pendingLookupToken} : {})
+                });
                 const data = await response.json();
                 if (!response.ok) throw new Error(data.error || 'Не удалось создать пациента');
                 const patient = {...data.patient, study_count: 0, last_visit: null};
-                patientRecords.unshift(patient);
+                if (!patientRecords.some(item => item.uuid === patient.uuid)) patientRecords.unshift(patient);
+                pendingLookupToken = '';
+                matchedPatientUuids = null;
+                clearIdentityFields();
                 selectPatient(patient, 'Новый пациент создан. Обследований пока нет.');
             } catch (error) {
                 showPatientError(error.message);
@@ -299,7 +395,24 @@
             }
         }
 
-        function selectPatient(patient, customMeta) {
+        async function selectPatient(patient, customMeta) {
+            if (pendingLookupToken) {
+                try {
+                    const response = await fetch(`${API_URL}/api/patients/${encodeURIComponent(patient.uuid)}/identity`, {
+                        method: 'POST', headers: {'Content-Type': 'application/json'},
+                        body: JSON.stringify({lookup_token: pendingLookupToken})
+                    });
+                    const data = await response.json();
+                    if (!response.ok) throw new Error(data.error || 'Не удалось связать данные с пациентом');
+                    customMeta = 'Введённые данные связаны с существующей карточкой.';
+                    pendingLookupToken = '';
+                    matchedPatientUuids = null;
+                    clearIdentityFields();
+                } catch (error) {
+                    showPatientError(error.message);
+                    return;
+                }
+            }
             document.getElementById('patient-id').value = patient.label;
             document.getElementById('patient-uuid').value = patient.uuid;
             document.getElementById('patient-selected-label').textContent = patient.label;
@@ -308,6 +421,10 @@
                 (patient.study_count ? `Последний визит: ${visit} · обследований: ${patient.study_count}` : 'Обследований пока нет');
             document.getElementById('patient-selected').hidden = false;
             document.getElementById('patient-browser').hidden = true;
+            document.getElementById('patient-identity-form').hidden = true;
+            document.getElementById('patient-identity-hint').hidden = true;
+            document.getElementById('new-patient-btn').textContent = 'Создать без ФИО';
+            setPatientIdentityStatus('');
             showPatientError('');
         }
 
@@ -315,9 +432,12 @@
             if (isRecording) return;
             document.getElementById('patient-id').value = '';
             document.getElementById('patient-uuid').value = '';
+            matchedPatientUuids = null;
             document.getElementById('patient-selected').hidden = true;
             document.getElementById('patient-browser').hidden = false;
-            document.getElementById('patient-search').focus();
+            document.getElementById('patient-identity-form').hidden = false;
+            document.getElementById('patient-identity-hint').hidden = false;
+            document.getElementById('patient-surname').focus();
         }
 
         function showPatientError(message) {
@@ -332,6 +452,10 @@
             document.getElementById('new-patient-btn').disabled = disabled;
             document.getElementById('change-patient-btn').disabled = disabled;
             document.getElementById('patient-search').disabled = disabled;
+            document.getElementById('resolve-patient-btn').disabled = disabled;
+            for (const id of ['patient-surname', 'patient-name', 'patient-patronymic']) {
+                document.getElementById(id).disabled = disabled;
+            }
             document.querySelectorAll('#patient-list button').forEach(button => { button.disabled = disabled; });
         }
         

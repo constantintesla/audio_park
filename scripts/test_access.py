@@ -135,6 +135,19 @@ class AccessTest(unittest.TestCase):
         self.assertEqual(doctor_a.post('/api/patients', headers=headers_a).get_json()['patient']['local_number'], 2)
         self.assertEqual(doctor_b.post('/api/patients', headers=headers_b).get_json()['patient']['local_number'], 2)
         self.assertEqual(doctor_a.post(f"/api/patients/{patient_b['uuid']}/archive", headers=headers_a).status_code, 404)
+        key_a = doctor_a.get('/api/patients/identity-key').get_json()['hmac_key']
+        key_b = doctor_b.get('/api/patients/identity-key').get_json()['hmac_key']
+        self.assertRegex(key_a, r'^[0-9a-f]{64}$')
+        self.assertNotEqual(key_a, key_b)
+        lookup_token = 'a' * 64
+        self.assertFalse(doctor_a.post('/api/patients/resolve', json={'lookup_token':lookup_token}, headers=headers_a).get_json()['found'])
+        resolved_a = doctor_a.post('/api/patients', json={'lookup_token':lookup_token}, headers=headers_a).get_json()['patient']
+        self.assertEqual(doctor_a.post('/api/patients/resolve', json={'lookup_token':lookup_token}, headers=headers_a).get_json()['patients'][0]['uuid'], resolved_a['uuid'])
+        resolved_b = doctor_b.post('/api/patients', json={'lookup_token':lookup_token}, headers=headers_b).get_json()['patient']
+        self.assertNotEqual(resolved_a['uuid'], resolved_b['uuid'])
+        linked = doctor_a.post(f"/api/patients/{patient_a['uuid']}/identity", json={'lookup_token':lookup_token}, headers=headers_a)
+        self.assertEqual(linked.status_code, 200)
+        self.assertEqual(doctor_a.post('/api/patients/resolve', json={'lookup_token':lookup_token}, headers=headers_a).get_json()['count'], 2)
 
     def test_recalculation_keeps_ids_and_ownership(self):
         client, headers = self.login('moderator')

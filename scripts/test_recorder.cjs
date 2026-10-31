@@ -2,6 +2,7 @@
 const fs = require('node:fs');
 const vm = require('node:vm');
 const assert = require('node:assert/strict');
+const crypto = require('node:crypto').webcrypto;
 const path = require('node:path');
 const root = path.resolve(__dirname, '..');
 const html = fs.readFileSync(path.join(root,'web/index.html'),'utf8');
@@ -25,7 +26,7 @@ const audioNode = () => ({connect:noop,disconnect:noop,gain:{value:0},getFloatTi
 const audioContext = {state:'running',sampleRate:1000,destination:{},
     createMediaStreamSource:audioNode,createAnalyser:audioNode,createScriptProcessor:audioNode,createGain:audioNode,
     createBuffer:(_,n,sr) => {const a=new Float32Array(n);return {sampleRate:sr,duration:n/sr,getChannelData:()=>a};}};
-const context = vm.createContext({console,Blob,URL,FormData,Float32Array,ArrayBuffer,DataView,Int16Array,
+const context = vm.createContext({console,Blob,URL,FormData,Float32Array,ArrayBuffer,DataView,Int16Array,TextEncoder,crypto,
     setTimeout,clearTimeout,setInterval,clearInterval,performance,assert,
     document:{body:{classList:{add:c=>bodyClasses.add(c),remove:c=>bodyClasses.delete(c),toggle:(c,on)=>on?bodyClasses.add(c):bodyClasses.delete(c),contains:c=>bodyClasses.has(c)}},addEventListener:noop,querySelectorAll:()=>[],createElement:element,
         getElementById(id){assert(ids.has(id), `Missing DOM element: ${id}`);if(!elements.has(id))elements.set(id,element());return elements.get(id);}},
@@ -38,6 +39,16 @@ for (const name of ['exam_tasks.js','speech_protocol.js']) vm.runInContext(fs.re
 for (const [,script] of html.matchAll(/<script\b[^>]*>([\s\S]*?)<\/script>/g)) if(script.trim())vm.runInContext(script,context);
 async function run(code) { return vm.runInContext(code,context); }
 (async()=>{
+    await run(`(async()=>{patientIdentityKey='00'.repeat(32);
+        document.getElementById('patient-surname').value='  Ёлкин  ';
+        document.getElementById('patient-name').value='Иван';
+        document.getElementById('patient-patronymic').value=' Иванович ';
+        globalThis.patientTokenA=await patientLookupToken();
+        document.getElementById('patient-surname').value='елкин';
+        document.getElementById('patient-name').value='  иван  ';
+        document.getElementById('patient-patronymic').value='иванович';
+        globalThis.patientTokenB=await patientLookupToken();
+        assert.equal(patientTokenA,patientTokenB);assert.match(patientTokenA,/^[0-9a-f]{64}$/);})()`);
     await run('audioContext=testAudioContext; initRecordButton();');
     let checking=run('startRecording({check:true})');
     await new Promise(r=>setImmediate(r));

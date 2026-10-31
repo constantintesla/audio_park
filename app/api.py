@@ -4,6 +4,7 @@ API сервер для сохранения и получения резуль�
 import os
 import json
 import math
+import re
 from html import escape as html_escape
 from datetime import datetime
 from typing import List, Dict, Any, Optional
@@ -14,13 +15,17 @@ from threading import RLock
 from functools import wraps
 from app.auth import (
     archive_patient,
+    bind_patient_lookup_token,
     create_patient,
+    create_patient_with_lookup_token,
     get_patient,
     get_patient_by_legacy_id,
     init_auth,
     is_manager,
     list_patients,
     owns_result,
+    patients_by_lookup_token,
+    patient_identity_key,
     visible_results,
 )
 from app.dsi_protocol import parse_segments
@@ -230,8 +235,42 @@ def get_patients():
 
 @app.route('/api/patients', methods=['POST'])
 def add_patient():
-    patient = create_patient(g.user['id'])
+    data = request.get_json(silent=True) or {}
+    lookup_token = str(data.get('lookup_token') or '').strip().lower()
+    if lookup_token:
+        if not re.fullmatch(r'[0-9a-f]{64}', lookup_token):
+            return jsonify(error="Некорректный токен пациента"), 400
+        patient = create_patient_with_lookup_token(g.user['id'], lookup_token)
+    else:
+        patient = create_patient(g.user['id'])
     return jsonify(patient=patient), 201
+
+
+@app.route('/api/patients/identity-key', methods=['GET'])
+def get_patient_identity_key():
+    return jsonify(hmac_key=patient_identity_key(g.user['id']), version=1)
+
+
+@app.route('/api/patients/resolve', methods=['POST'])
+def resolve_patient_identity():
+    data = request.get_json(silent=True) or {}
+    lookup_token = str(data.get('lookup_token') or '').strip().lower()
+    if not re.fullmatch(r'[0-9a-f]{64}', lookup_token):
+        return jsonify(error="Некорректный токен пациента"), 400
+    patients = patients_by_lookup_token(g.user['id'], lookup_token)
+    return jsonify(patients=patients, found=bool(patients), count=len(patients))
+
+
+@app.route('/api/patients/<patient_uuid>/identity', methods=['POST'])
+def bind_patient_identity(patient_uuid: str):
+    data = request.get_json(silent=True) or {}
+    lookup_token = str(data.get('lookup_token') or '').strip().lower()
+    if not re.fullmatch(r'[0-9a-f]{64}', lookup_token):
+        return jsonify(error="Некорректный токен пациента"), 400
+    patient, error = bind_patient_lookup_token(g.user['id'], patient_uuid, lookup_token)
+    if error == 'not_found':
+        return jsonify(error="Пациент не найден"), 404
+    return jsonify(patient=patient)
 
 
 @app.route('/api/patients/<patient_uuid>/archive', methods=['POST'])
