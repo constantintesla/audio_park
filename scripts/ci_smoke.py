@@ -272,13 +272,17 @@ def check_api(wav_path: str) -> None:
     for route in ("/results.json", "/api.py", "/.env", "/requirements.txt"):
         resp = client.get(route)
         assert resp.status_code == 404, f"GET {route} -> {resp.status_code}, ожидался 404"
+    patient_response = client.post('/api/patients', headers=headers)
+    assert patient_response.status_code == 201, patient_response.get_data(as_text=True)
+    patient = patient_response.get_json()['patient']
+    assert patient['local_number'] == 1 and patient['label'] == 'Пациент 1'
     with open(wav_path, "rb") as f:
-        data = {"file": (io.BytesIO(f.read()), "ci_smoke.wav"), "patient_id": "ci-patient-1"}
+        data = {"file": (io.BytesIO(f.read()), "ci_smoke.wav"), "patient_uuid": patient['uuid']}
     resp = client.post("/api/analyze", data=data, content_type="multipart/form-data", headers=headers)
     assert resp.status_code == 200, f"POST /api/analyze -> {resp.status_code}: {resp.get_data(as_text=True)[:500]}"
     first = resp.get_json()
     assert first['study_id'].startswith('AP-')
-    assert first['patient_id'] == 'ci-patient-1'
+    assert first['patient_id'] == 'Пациент 1' and first['patient_uuid'] == patient['uuid']
     assert len(api.load_results()) == 1, 'duplicate analysis'
     assert client.get('/api/results/' + first['study_id']).status_code == 200
 

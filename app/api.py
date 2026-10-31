@@ -12,7 +12,17 @@ import logging
 import numpy as np
 from threading import RLock
 from functools import wraps
-from app.auth import init_auth, is_manager, owns_result, visible_results
+from app.auth import (
+    archive_patient,
+    create_patient,
+    get_patient,
+    get_patient_by_legacy_id,
+    init_auth,
+    is_manager,
+    list_patients,
+    owns_result,
+    visible_results,
+)
 from app.dsi_protocol import parse_segments
 from app.speech_protocol import parse_protocol_segments
 from app.device_model_stats import loop_gain_check, model_spl_offset
@@ -180,6 +190,58 @@ def save_results(results: List[Dict]):
         raise
 
 
+def sync_legacy_patients(owner_id: int) -> None:
+    """Give old owner-scoped patient IDs stable UUIDs without changing their displayed labels."""
+    with RESULTS_LOCK:
+        results = load_results()
+        changed = False
+        for result in results:
+            if result.get('owner_id') != owner_id or result.get('patient_uuid'):
+                continue
+            legacy_id = str(result.get('patient_id') or '').strip()
+            if not legacy_id:
+                continue
+            patient = get_patient_by_legacy_id(owner_id, legacy_id) or create_patient(owner_id, legacy_id)
+            result['patient_uuid'] = patient['uuid']
+            changed = True
+        if changed:
+            save_results(results)
+
+
+@app.route('/api/patients', methods=['GET'])
+def get_patients():
+    """Patients are private to the signed-in doctor; local numbers may repeat across doctors."""
+    sync_legacy_patients(g.user['id'])
+    results = load_results()
+    stats = {}
+    for result in results:
+        if result.get('owner_id') != g.user['id'] or not result.get('patient_uuid'):
+            continue
+        item = stats.setdefault(result['patient_uuid'], {'study_count': 0, 'last_visit': None})
+        item['study_count'] += 1
+        timestamp = result.get('user_info', {}).get('timestamp')
+        if timestamp and (not item['last_visit'] or timestamp > item['last_visit']):
+            item['last_visit'] = timestamp
+    patients = []
+    for patient in list_patients(g.user['id'], request.args.get('include_archived') == '1'):
+        patients.append({**patient, **stats.get(patient['uuid'], {'study_count': 0, 'last_visit': None})})
+    return jsonify(patients=patients, count=len(patients))
+
+
+@app.route('/api/patients', methods=['POST'])
+def add_patient():
+    patient = create_patient(g.user['id'])
+    return jsonify(patient=patient), 201
+
+
+@app.route('/api/patients/<patient_uuid>/archive', methods=['POST'])
+def archive_patient_route(patient_uuid: str):
+    patient = archive_patient(patient_uuid, g.user['id'])
+    if not patient:
+        return jsonify(error="Пациент не найден"), 404
+    return jsonify(patient=patient)
+
+
 # Поля метаданных устройства, которые принимаются от приложения
 DEVICE_INFO_FIELDS = {
     'device_id': str,          # стабильный идентификатор устройства в приложении
@@ -280,9 +342,14 @@ def analyze_audio():
         # Сохранение временного файла
         import tempfile
         import uuid
-        patient_id = request.form.get('patient_id', '').strip()
+        patient_uuid = request.form.get('patient_uuid', '').strip()
+        patient = get_patient(patient_uuid, g.user['id']) if patient_uuid else None
+        if patient_uuid and (not patient or patient['status'] != 'active'):
+            return jsonify(error="Выбранный пациент не найден или архивирован"), 400
+        # Backward compatibility for integrations and old clients. The web UI always sends patient_uuid.
+        patient_id = patient['label'] if patient else request.form.get('patient_id', '').strip()
         if not patient_id or len(patient_id) > 100 or any(ord(c) < 32 for c in patient_id):
-            return jsonify(error="Укажите ID пациента (до 100 символов)"), 400
+            return jsonify(error="Выберите пациента"), 400
         result_id = f"AP-{datetime.now().strftime('%Y%m%d')}-{uuid.uuid4().hex}"
         
         temp_dir = tempfile.gettempdir()
@@ -307,6 +374,9 @@ def analyze_audio():
                 return jsonify(result), 422
             result['study_id'] = result_id
             result['patient_id'] = patient_id
+            if patient:
+                result['patient_uuid'] = patient['uuid']
+                result['patient_local_number'] = patient['local_number']
             result['owner_id'] = g.user['id']
             calibration = parse_calibration(request.form.get('calibration'))
             if calibration:
@@ -327,7 +397,10 @@ def analyze_audio():
             # Результат уже очищен в parkinson_analyzer, но дополнительно проверяем
             with RESULTS_LOCK:
                 results = load_results()
-                history = [r for r in results if r.get('patient_id') == patient_id and owns_result(r)]
+                if patient:
+                    history = [r for r in results if r.get('patient_uuid') == patient['uuid'] and owns_result(r)]
+                else:
+                    history = [r for r in results if r.get('patient_id') == patient_id and owns_result(r)]
                 result['baseline'] = compare_to_baseline(
                     result.get('features', {}), history,
                     result['user_info']['tg_user_id'], device_info,
@@ -459,7 +532,7 @@ def recalculate_all():
                 # Сохраняем оригинальную информацию о пользователе
                 original_user_info = result.get('user_info', {})
                 new_result['user_info'] = original_user_info
-                for key in ('study_id', 'patient_id', 'owner_id'):
+                for key in ('study_id', 'patient_id', 'patient_uuid', 'patient_local_number', 'owner_id'):
                     if key in result:
                         new_result[key] = result[key]
                 
