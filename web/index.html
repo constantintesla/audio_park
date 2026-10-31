@@ -33,42 +33,43 @@
     </header>
     <div class="container exam-page">
         <div class="card"><div class="card-body">
-            <div class="patient-picker-head">
-                <div><span class="form-label">Пациент</span><p class="hint mb-0">Введите ФИО, чтобы открыть карточку пациента или создать новую.</p></div>
+            <div id="patient-picker">
+                <div class="patient-picker-head">
+                    <div><h2 class="h5 mb-1">Пациенты</h2><p class="hint mb-0">Выберите пациента для обследования.</p></div>
+                    <button id="add-patient-btn" class="btn btn-primary" type="button">Добавить пациента</button>
+                </div>
+                <label class="form-label mt-3" for="patient-search">Поиск по ФИО</label>
+                <input id="patient-search" class="form-control" type="search" placeholder="Начните вводить фамилию, имя или отчество" autocomplete="off">
+                <p id="patient-list-count" class="hint mt-2 mb-2" role="status"></p>
+                <div id="patient-list" class="patient-list"><p class="hint">Загрузка пациентов…</p></div>
+                <button id="retry-patients-btn" class="btn btn-outline-secondary mt-2" type="button" hidden>Повторить загрузку</button>
             </div>
-            <form id="patient-identity-form" class="patient-identity-form mt-3">
-                <div><label class="form-label" for="patient-surname">Фамилия</label><input id="patient-surname" class="form-control" autocomplete="off" required></div>
-                <div><label class="form-label" for="patient-name">Имя</label><input id="patient-name" class="form-control" autocomplete="off" required></div>
-                <div><label class="form-label" for="patient-patronymic">Отчество</label><input id="patient-patronymic" class="form-control" autocomplete="off" placeholder="Если есть"></div>
-                <button id="resolve-patient-btn" class="btn btn-primary" type="submit">Продолжить</button>
-            </form>
-            <p id="patient-identity-hint" class="hint mt-2 mb-0">ФИО используется только на этом устройстве и не сохраняется.</p>
-            <p id="patient-identity-status" class="patient-identity-status mt-2 mb-0" aria-live="polite"></p>
             <input id="patient-id" type="hidden" value="">
             <input id="patient-uuid" type="hidden" value="">
             <div id="patient-selected" class="patient-selected" hidden>
-                <div><strong id="patient-selected-label"></strong><small id="patient-selected-meta"></small></div>
-                <button id="change-patient-btn" class="btn btn-sm btn-outline-secondary" type="button">Изменить</button>
+                <div><span class="hint">Пациент для обследования</span><strong id="patient-selected-label"></strong><small id="patient-selected-meta"></small></div>
+                <button id="change-patient-btn" class="btn btn-outline-secondary" type="button">Выбрать другого</button>
             </div>
-            <div id="patient-browser" class="patient-browser mt-3" hidden>
-                <div class="patient-browser-head">
-                    <div><strong id="patient-browser-title">Выберите пациента</strong><p id="patient-browser-hint" class="hint mb-0">Найдите карточку по локальному номеру.</p></div>
-                    <button id="close-patient-browser-btn" class="btn btn-sm btn-outline-secondary" type="button">Назад</button>
-                </div>
-                <label class="visually-hidden" for="patient-search">Найти пациента по номеру</label>
-                <input id="patient-search" class="form-control mt-2" type="search" placeholder="Например, Пациент 12">
-                <div id="patient-list" class="patient-list mt-2" aria-live="polite"><p class="hint mb-0">Загрузка пациентов…</p></div>
-            </div>
-            <div id="patient-next-actions" class="patient-next-actions mt-3" hidden>
-                <strong id="patient-next-title"></strong>
-                <p id="patient-next-text" class="hint mb-0"></p>
-                <div class="patient-next-buttons">
-                    <button id="new-patient-btn" class="btn btn-primary" type="button">Создать нового пациента</button>
-                    <button id="choose-existing-btn" class="btn btn-outline-secondary" type="button">Выбрать существующую карточку</button>
-                </div>
-            </div>
-            <button id="open-patient-browser-btn" class="btn btn-link patient-number-link" type="button">Найти пациента по номеру</button>
-            <p id="patient-error" class="alert alert-danger mt-3 mb-0" hidden></p>
+            <p id="patient-error" class="alert alert-danger mt-3 mb-0" role="alert" hidden></p>
+            <dialog id="patient-editor" class="app-modal" aria-labelledby="patient-editor-title">
+                <form id="patient-editor-form">
+                    <div class="app-modal-body">
+                        <h3 id="patient-editor-title">Добавить пациента</h3>
+                        <p id="patient-editor-hint" class="hint">ФИО сохраняется в вашей учётной записи.</p>
+                        <div class="patient-name-fields">
+                            <div><label class="form-label" for="patient-surname">Фамилия</label><input id="patient-surname" class="form-control" required maxlength="80" autocomplete="off"></div>
+                            <div><label class="form-label" for="patient-name">Имя</label><input id="patient-name" class="form-control" required maxlength="80" autocomplete="off"></div>
+                            <div><label class="form-label" for="patient-patronymic">Отчество <span class="hint">(если есть)</span></label><input id="patient-patronymic" class="form-control" maxlength="80" autocomplete="off"></div>
+                        </div>
+                        <label id="patient-duplicate" class="patient-duplicate mt-3" hidden><input id="patient-duplicate-confirm" type="checkbox"> Пациент с таким ФИО уже есть. Подтверждаю, что создаю карточку другого человека.</label>
+                        <p id="patient-editor-error" class="alert alert-danger mt-3 mb-0" role="alert" hidden></p>
+                    </div>
+                    <div class="app-modal-actions">
+                        <button id="cancel-patient-btn" class="btn btn-outline-secondary" type="button">Отмена</button>
+                        <button id="save-patient-btn" class="btn btn-primary" type="submit">Сохранить и выбрать</button>
+                    </div>
+                </form>
+            </dialog>
         </div></div>
         <!-- Новый анализ -->
         <div class="card">
@@ -213,6 +214,7 @@
     <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/wavesurfer.js@6/dist/wavesurfer.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.js"></script>
+    <script src="assets/patient-picker.js"></script>
     <script src="assets/exam_tasks.js"></script>
     <script src="assets/speech_protocol.js"></script>
     
@@ -244,310 +246,6 @@
 
         });
 
-        let patientRecords = [];
-        let patientIdentityKey = '';
-        let pendingLookupToken = '';
-        let matchedPatientUuids = null;
-
-        async function initPatientPicker() {
-            const search = document.getElementById('patient-search');
-            search.addEventListener('input', renderPatients);
-            document.getElementById('patient-identity-form').addEventListener('submit', resolvePatientFromIdentity);
-            document.getElementById('new-patient-btn').addEventListener('click', createPatient);
-            document.getElementById('choose-existing-btn').addEventListener('click', () => openPatientBrowser('existing'));
-            document.getElementById('open-patient-browser-btn').addEventListener('click', () => openPatientBrowser('number'));
-            document.getElementById('close-patient-browser-btn').addEventListener('click', closePatientBrowser);
-            document.getElementById('change-patient-btn').addEventListener('click', clearPatientSelection);
-            for (const id of ['patient-surname', 'patient-name', 'patient-patronymic']) {
-                document.getElementById(id).addEventListener('input', resetPatientLookupResult);
-            }
-            try {
-                await AudioPark.ready;
-                const [keyResponse] = await Promise.all([
-                    fetch(`${API_URL}/api/patients/identity-key`),
-                    loadPatients()
-                ]);
-                const keyData = await keyResponse.json();
-                if (!keyResponse.ok) throw new Error(keyData.error || 'Не удалось подготовить безопасный поиск');
-                patientIdentityKey = keyData.hmac_key;
-            } catch (error) {
-                showPatientError(error.message);
-            }
-        }
-
-        function normalizeIdentityPart(value) {
-            return value.normalize('NFKC').trim().replace(/\s+/g, ' ').toLocaleUpperCase('ru-RU').replaceAll('Ё', 'Е');
-        }
-
-        function hexBytes(value) {
-            if (!/^[0-9a-f]{64}$/i.test(value)) throw new Error('Некорректный ключ поиска пациента');
-            return new Uint8Array(value.match(/.{2}/g).map(byte => parseInt(byte, 16)));
-        }
-
-        function bytesHex(buffer) {
-            return [...new Uint8Array(buffer)].map(byte => byte.toString(16).padStart(2, '0')).join('');
-        }
-
-        async function patientLookupToken() {
-            if (!patientIdentityKey || !crypto?.subtle) throw new Error('Безопасный поиск недоступен в этом браузере');
-            const surname = normalizeIdentityPart(document.getElementById('patient-surname').value);
-            const name = normalizeIdentityPart(document.getElementById('patient-name').value);
-            const patronymic = normalizeIdentityPart(document.getElementById('patient-patronymic').value);
-            if (!surname || !name) throw new Error('Заполните фамилию и имя');
-            const payload = `v1-fio|${surname}|${name}|${patronymic}`;
-            const key = await crypto.subtle.importKey('raw', hexBytes(patientIdentityKey), {name: 'HMAC', hash: 'SHA-256'}, false, ['sign']);
-            return bytesHex(await crypto.subtle.sign('HMAC', key, new TextEncoder().encode(payload)));
-        }
-
-        async function resolvePatientFromIdentity(event) {
-            event.preventDefault();
-            const button = document.getElementById('resolve-patient-btn');
-            button.disabled = true;
-            showPatientError('');
-            setPatientIdentityStatus('Выполняется поиск…');
-            try {
-                const lookupToken = await patientLookupToken();
-                const response = await fetch(`${API_URL}/api/patients/resolve`, {
-                    method: 'POST', headers: {'Content-Type': 'application/json'},
-                    body: JSON.stringify({lookup_token: lookupToken})
-                });
-                const data = await response.json();
-                if (!response.ok) throw new Error(data.error || 'Не удалось найти пациента');
-                if (data.found) {
-                    pendingLookupToken = lookupToken;
-                    if (data.count === 1) {
-                        setPatientIdentityStatus('Пациент найден. Открываем карточку…');
-                        pendingLookupToken = '';
-                        clearIdentityFields();
-                        await selectPatient(data.patients[0]);
-                        return;
-                    }
-                    matchedPatientUuids = new Set(data.patients.map(patient => patient.uuid));
-                    showPatientNextActions(
-                        'Нужной карточки нет?',
-                        'Создайте отдельную карточку, если это другой человек с таким же ФИО.',
-                        'Создать отдельную карточку',
-                        false
-                    );
-                    openPatientBrowser('matches');
-                    return;
-                }
-                pendingLookupToken = lookupToken;
-                matchedPatientUuids = null;
-                setPatientIdentityStatus('');
-                showPatientNextActions(
-                    'Такого пациента ещё нет',
-                    'Создайте новую карточку. Ей автоматически присвоится номер.',
-                    'Создать пациента',
-                    true
-                );
-                document.getElementById('new-patient-btn').focus();
-            } catch (error) {
-                setPatientIdentityStatus('');
-                showPatientError(error.message);
-            } finally {
-                button.disabled = false;
-            }
-        }
-
-        function clearIdentityFields() {
-            for (const id of ['patient-surname', 'patient-name', 'patient-patronymic']) {
-                document.getElementById(id).value = '';
-            }
-        }
-
-        function setPatientIdentityStatus(message) {
-            document.getElementById('patient-identity-status').textContent = message;
-        }
-
-        function showPatientNextActions(title, message, createLabel, showExisting) {
-            const actions = document.getElementById('patient-next-actions');
-            document.getElementById('patient-next-title').textContent = title;
-            document.getElementById('patient-next-text').textContent = message;
-            document.getElementById('new-patient-btn').textContent = createLabel;
-            document.getElementById('new-patient-btn').className = showExisting ? 'btn btn-primary' : 'btn btn-outline-secondary';
-            document.getElementById('choose-existing-btn').hidden = !showExisting;
-            actions.hidden = false;
-        }
-
-        function hidePatientNextActions() {
-            document.getElementById('patient-next-actions').hidden = true;
-        }
-
-        function openPatientBrowser(mode) {
-            const browser = document.getElementById('patient-browser');
-            const isMatches = mode === 'matches';
-            if (!isMatches) matchedPatientUuids = null;
-            document.getElementById('patient-browser-title').textContent = isMatches ? 'Карточки с таким ФИО' : 'Выбор по номеру';
-            document.getElementById('patient-browser-hint').textContent = isMatches
-                ? 'Сверьте номер и дату последнего обследования.'
-                : (pendingLookupToken ? 'Выбранная карточка будет связана с введённым ФИО.' : 'Найдите пациента по локальному номеру.');
-            document.getElementById('patient-search').value = '';
-            document.getElementById('patient-search').hidden = isMatches;
-            browser.hidden = false;
-            document.getElementById('open-patient-browser-btn').hidden = true;
-            renderPatients();
-            if (!isMatches) document.getElementById('patient-search').focus();
-        }
-
-        function closePatientBrowser() {
-            document.getElementById('patient-browser').hidden = true;
-            document.getElementById('open-patient-browser-btn').hidden = false;
-            matchedPatientUuids = null;
-            renderPatients();
-        }
-
-        function resetPatientLookupResult() {
-            pendingLookupToken = '';
-            matchedPatientUuids = null;
-            hidePatientNextActions();
-            document.getElementById('patient-browser').hidden = true;
-            document.getElementById('open-patient-browser-btn').hidden = false;
-            setPatientIdentityStatus('');
-            showPatientError('');
-        }
-
-        async function loadPatients() {
-            const response = await fetch(`${API_URL}/api/patients`);
-            const data = await response.json();
-            if (!response.ok) throw new Error(data.error || 'Не удалось загрузить пациентов');
-            patientRecords = data.patients || [];
-            renderPatients();
-        }
-
-        function renderPatients() {
-            const list = document.getElementById('patient-list');
-            const query = document.getElementById('patient-search').value.trim().toLocaleLowerCase('ru-RU');
-            const visible = patientRecords.filter(patient =>
-                (!matchedPatientUuids || matchedPatientUuids.has(patient.uuid)) &&
-                patient.label.toLocaleLowerCase('ru-RU').includes(query));
-            list.replaceChildren();
-            if (!visible.length) {
-                const empty = document.createElement('p');
-                empty.className = 'hint mb-0';
-                empty.textContent = patientRecords.length ? 'Пациенты с таким номером не найдены.' : 'Пациентов пока нет. Создайте первого пациента.';
-                list.append(empty);
-                return;
-            }
-            for (const patient of visible) {
-                const row = document.createElement('div'); row.className = 'patient-row';
-                const description = document.createElement('div');
-                const name = document.createElement('strong'); name.textContent = patient.label;
-                const meta = document.createElement('small');
-                const visit = patient.last_visit ? new Date(patient.last_visit).toLocaleDateString('ru-RU') : 'ещё не обследован';
-                meta.textContent = patient.study_count ? `Последний визит: ${visit} · обследований: ${patient.study_count}` : 'Обследований пока нет';
-                description.append(name, meta);
-                const choose = document.createElement('button');
-                choose.type = 'button'; choose.className = 'btn btn-sm btn-outline-secondary'; choose.textContent = 'Выбрать';
-                choose.addEventListener('click', () => matchedPatientUuids ? selectMatchedPatient(patient) : selectPatient(patient));
-                row.append(description, choose); list.append(row);
-            }
-        }
-
-        function selectMatchedPatient(patient) {
-            pendingLookupToken = '';
-            matchedPatientUuids = null;
-            clearIdentityFields();
-            return selectPatient(patient);
-        }
-
-        async function createPatient() {
-            const button = document.getElementById('new-patient-btn');
-            button.disabled = true;
-            showPatientError('');
-            try {
-                const response = await fetch(`${API_URL}/api/patients`, {
-                    method: 'POST', headers: {'Content-Type': 'application/json'},
-                    body: JSON.stringify(pendingLookupToken ? {lookup_token: pendingLookupToken} : {})
-                });
-                const data = await response.json();
-                if (!response.ok) throw new Error(data.error || 'Не удалось создать пациента');
-                const patient = {...data.patient, study_count: 0, last_visit: null};
-                if (!patientRecords.some(item => item.uuid === patient.uuid)) patientRecords.unshift(patient);
-                pendingLookupToken = '';
-                matchedPatientUuids = null;
-                clearIdentityFields();
-                selectPatient(patient, 'Новый пациент создан. Обследований пока нет.');
-            } catch (error) {
-                showPatientError(error.message);
-            } finally {
-                button.disabled = false;
-            }
-        }
-
-        async function selectPatient(patient, customMeta) {
-            if (pendingLookupToken) {
-                try {
-                    const response = await fetch(`${API_URL}/api/patients/${encodeURIComponent(patient.uuid)}/identity`, {
-                        method: 'POST', headers: {'Content-Type': 'application/json'},
-                        body: JSON.stringify({lookup_token: pendingLookupToken})
-                    });
-                    const data = await response.json();
-                    if (!response.ok) throw new Error(data.error || 'Не удалось связать данные с пациентом');
-                    customMeta = 'Введённые данные связаны с существующей карточкой.';
-                    pendingLookupToken = '';
-                    matchedPatientUuids = null;
-                    clearIdentityFields();
-                } catch (error) {
-                    showPatientError(error.message);
-                    return;
-                }
-            }
-            document.getElementById('patient-id').value = patient.label;
-            document.getElementById('patient-uuid').value = patient.uuid;
-            document.getElementById('patient-selected-label').textContent = patient.label;
-            const visit = patient.last_visit ? new Date(patient.last_visit).toLocaleDateString('ru-RU') : null;
-            document.getElementById('patient-selected-meta').textContent = customMeta ||
-                (patient.study_count ? `Последний визит: ${visit} · обследований: ${patient.study_count}` : 'Обследований пока нет');
-            document.getElementById('patient-selected').hidden = false;
-            document.getElementById('patient-browser').hidden = true;
-            document.getElementById('patient-identity-form').hidden = true;
-            document.getElementById('patient-identity-hint').hidden = true;
-            document.getElementById('open-patient-browser-btn').hidden = true;
-            hidePatientNextActions();
-            setPatientIdentityStatus('');
-            showPatientError('');
-        }
-
-        function clearPatientSelection() {
-            if (isRecording) return;
-            document.getElementById('patient-id').value = '';
-            document.getElementById('patient-uuid').value = '';
-            pendingLookupToken = '';
-            matchedPatientUuids = null;
-            document.getElementById('patient-selected').hidden = true;
-            document.getElementById('patient-browser').hidden = true;
-            document.getElementById('patient-identity-form').hidden = false;
-            document.getElementById('patient-identity-hint').hidden = false;
-            document.getElementById('open-patient-browser-btn').hidden = false;
-            hidePatientNextActions();
-            setPatientIdentityStatus('');
-            showPatientError('');
-            document.getElementById('patient-surname').focus();
-        }
-
-        function showPatientError(message) {
-            const error = document.getElementById('patient-error');
-            error.textContent = message;
-            error.hidden = !message;
-        }
-
-        function setPatientPickerDisabled(disabled) {
-            document.getElementById('patient-id').disabled = disabled;
-            document.getElementById('patient-uuid').disabled = disabled;
-            document.getElementById('new-patient-btn').disabled = disabled;
-            document.getElementById('choose-existing-btn').disabled = disabled;
-            document.getElementById('open-patient-browser-btn').disabled = disabled;
-            document.getElementById('close-patient-browser-btn').disabled = disabled;
-            document.getElementById('change-patient-btn').disabled = disabled;
-            document.getElementById('patient-search').disabled = disabled;
-            document.getElementById('resolve-patient-btn').disabled = disabled;
-            for (const id of ['patient-surname', 'patient-name', 'patient-patronymic']) {
-                document.getElementById(id).disabled = disabled;
-            }
-            document.querySelectorAll('#patient-list button').forEach(button => { button.disabled = disabled; });
-        }
-        
         function initLocalAnalysisToggle() {
             const header = document.getElementById('local-analysis-header');
             if (header) {
@@ -1011,7 +709,7 @@
         function openExamDisclaimer() {
             if (!micReady) return;
             if (!document.getElementById('patient-id').value.trim()) {
-                alert('Сначала укажите пациента'); document.getElementById('patient-surname').focus(); return;
+                alert('Сначала укажите пациента'); document.getElementById('patient-search').focus(); return;
             }
             document.getElementById('exam-disclaimer-check').checked = false;
             document.getElementById('exam-disclaimer-start').disabled = true;
