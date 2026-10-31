@@ -869,6 +869,12 @@ def visualization():
     return send_from_directory(WEB_DIR, 'visualization.html')
 
 
+@app.route('/guide')
+def guide_page():
+    """Краткая инструкция врача по проведению обследования."""
+    return send_from_directory(WEB_DIR, 'guide.html')
+
+
 @app.route('/api/export/csv', methods=['GET'])
 def export_csv():
     """Экспорт результатов в CSV"""

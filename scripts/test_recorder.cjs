@@ -8,6 +8,7 @@ const html = fs.readFileSync(path.join(root,'web/index.html'),'utf8');
 const ids = new Set([...html.matchAll(/\bid="([^"]+)"/g)].map(m=>m[1]));
 const elements = new Map();
 const noop = () => {};
+const bodyClasses = new Set();
 function element() {
     return {style:{}, dataset:{}, children:[], checked:false, disabled:false, value:'TEST-PATIENT',
         classList:{add:noop,remove:noop,toggle:noop}, addEventListener:noop, scrollIntoView:noop,
@@ -26,7 +27,7 @@ const audioContext = {state:'running',sampleRate:1000,destination:{},
     createBuffer:(_,n,sr) => {const a=new Float32Array(n);return {sampleRate:sr,duration:n/sr,getChannelData:()=>a};}};
 const context = vm.createContext({console,Blob,URL,FormData,Float32Array,ArrayBuffer,DataView,Int16Array,
     setTimeout,clearTimeout,setInterval,clearInterval,performance,assert,
-    document:{addEventListener:noop,querySelectorAll:()=>[],createElement:element,
+    document:{body:{classList:{add:c=>bodyClasses.add(c),remove:c=>bodyClasses.delete(c),toggle:(c,on)=>on?bodyClasses.add(c):bodyClasses.delete(c),contains:c=>bodyClasses.has(c)}},addEventListener:noop,querySelectorAll:()=>[],createElement:element,
         getElementById(id){assert(ids.has(id), `Missing DOM element: ${id}`);if(!elements.has(id))elements.set(id,element());return elements.get(id);}},
     window:{location:{protocol:'http:'},addEventListener:noop,devicePixelRatio:1},
     navigator:{mediaDevices:{getUserMedia:async()=>stream()},platform:'test'},
@@ -51,7 +52,7 @@ async function run(code) { return vm.runInContext(code,context); }
     await run('assert(!micReady);assert(document.getElementById("exam-test-btn").disabled);');
     await run('micReady=true;');
     await run('startRecording({test:"exam"})');
-    await run('assert.equal(rec.test.steps.length,14);assert(document.getElementById("patient-id").disabled);');
+    await run('assert.equal(rec.test.steps.length,14);assert(document.getElementById("patient-id").disabled);assert(document.body.classList.contains("exam-focus-mode"));');
     await run(`for(let i=0;i<27;i++) { onTestTryButton(); rec.chunks.push(new Float32Array(2000).fill(0.05)); rec.nSamples+=2000; onTestTryButton(); }
         rec.chunks.push(new Float32Array(1000));rec.nSamples+=1000;`);
     await new Promise(r=>setTimeout(r,50));
@@ -64,7 +65,7 @@ async function run(code) { return vm.runInContext(code,context); }
         const d=lastRecording.deviceInfo;
         assert.equal(d.dsi_segments.length,7);assert.equal(d.protocol_segments.length,19);
         assert(d.dsi_segments.every(s=>s.end_sec>s.start_sec && s.end_sec<=audioBuffer.duration));
-        assert(tracks.every(t=>t.readyState==='ended'));`);
+        assert(tracks.every(t=>t.readyState==='ended'));assert(!document.body.classList.contains('exam-focus-mode'));`);
     // Browser permission rejection leaves controls usable and no active microphone.
     await run(`navigator.mediaDevices.getUserMedia=async()=>{throw Object.assign(new Error('denied'),{name:'NotAllowedError'});};`);
     await run('startRecording({check:true})');
