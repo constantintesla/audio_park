@@ -1,0 +1,37 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="760" viewBox="0 0 1200 760">
+  <rect width="1200" height="760" fill="#f3f6f8"/>
+  <style>
+    text{font-family:Arial,sans-serif;fill:#17212b}.muted{fill:#5b6878}.accent{fill:#0e5a78}.caps{font-size:14px;font-weight:bold;letter-spacing:1.2px}.small{font-size:15px}.body{font-size:24px}.title{font-size:42px;font-weight:bold}.say{font-size:36px;font-weight:bold;fill:#0e5a78}.btn{font-size:20px;font-weight:bold;fill:white}
+  </style>
+  <rect x="58" y="34" width="42" height="42" rx="11" fill="#0e5a78"/>
+  <path d="M70 55h4m5-10v20m8-14v8m8-4v1" stroke="white" stroke-width="3" stroke-linecap="round"/>
+  <text x="116" y="52" font-size="21" font-weight="bold">Обследование голоса</text>
+  <text x="116" y="73" class="muted small">Следуйте инструкции на экране</text>
+  <rect x="716" y="42" width="232" height="34" rx="7" fill="#e5f0f5"/>
+  <text x="832" y="64" text-anchor="middle" class="accent small" font-weight="bold">Расстояние до устройства 30 см</text>
+  <rect x="982" y="38" width="160" height="42" rx="8" fill="white" stroke="#efc5c1"/>
+  <text x="1062" y="64" text-anchor="middle" fill="#b42318" font-size="16" font-weight="bold">Прервать тест</text>
+  <rect x="58" y="102" width="1084" height="44" rx="8" fill="white" stroke="#d7e1e7"/>
+  <circle cx="82" cy="124" r="5" fill="#1d7a4c"/><text x="98" y="130" class="muted small">Микрофон включён · устройство не перемещать</text>
+  <rect x="58" y="164" width="1084" height="484" rx="18" fill="white" stroke="#cfdde4" stroke-width="2"/>
+  <text x="100" y="206" class="accent" font-size="18" font-weight="bold">Задание 4 из 14</text>
+  <text x="1100" y="206" text-anchor="end" class="accent" font-size="18" font-weight="bold">Попытка 1 из 2</text>
+  <text x="100" y="267" class="title">Протяжный звук «А»</text>
+  <rect x="100" y="300" width="1000" height="112" rx="10" fill="#f7f9fb"/>
+  <rect x="100" y="300" width="5" height="112" fill="#0e5a78"/>
+  <text x="130" y="331" class="muted caps">ИНСТРУКЦИЯ ВРАЧУ</text>
+  <text x="130" y="371" class="body">Попросите пациента сделать глубокий вдох и тянуть звук ровно,</text>
+  <text x="130" y="401" class="body">одним выдохом, как можно дольше.</text>
+  <rect x="100" y="432" width="1000" height="112" rx="12" fill="#e5f0f5" stroke="#9fc9d9" stroke-width="2"/>
+  <text x="130" y="464" class="muted caps">ЧТО СКАЗАТЬ ПАЦИЕНТУ</text>
+  <text x="130" y="516" class="say">«Сделайте вдох и тяните: А-а-а…»</text>
+  <rect x="100" y="570" width="240" height="56" rx="9" fill="#0e5a78"/>
+  <text x="220" y="605" text-anchor="middle" class="btn">Начать попытку</text>
+  <rect x="360" y="570" width="250" height="56" rx="9" fill="white" stroke="#cfd7e0"/>
+  <text x="485" y="605" text-anchor="middle" font-size="19" font-weight="bold" class="muted">Следующее упражнение</text>
+  <rect x="58" y="668" width="1084" height="58" rx="8" fill="white" stroke="#dce3e9"/>
+  <g stroke="#0e5a78" stroke-width="3">
+    <path d="M410 700v-8m18 16v-24m18 18v-12m18 26v-40m18 31v-22m18 15v-8m18 24v-40m18 29v-18m18 13v-8m18 18v-28m18 35v-42m18 32v-22m18 16v-10m18 25v-40m18 30v-20m18 12v-4"/>
+  </g>
+  <text x="1085" y="704" text-anchor="end" class="muted small">−18 dBFS · ожидание</text>
+</svg>

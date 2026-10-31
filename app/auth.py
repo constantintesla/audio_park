@@ -8,6 +8,7 @@ import secrets
 import sqlite3
 import time
 import ipaddress
+import uuid
 from datetime import timedelta
 
 from flask import g, jsonify, redirect, request, session
@@ -53,6 +54,84 @@ def connection():
 
 def public_user(row):
     return {key: row[key] for key in ("id", "login", "role", "active", "created_at")}
+
+
+def public_patient(row):
+    return {
+        "uuid": row["uuid"],
+        "owner_id": row["owner_id"],
+        "local_number": row["local_number"],
+        "label": f"Пациент {row['local_number']}",
+        "status": row["status"],
+        "created_at": row["created_at"],
+        "archived_at": row["archived_at"],
+    }
+
+
+def create_patient(owner_id, legacy_id=None):
+    """Atomically allocate the next doctor-local number and a global opaque UUID."""
+    legacy_id = str(legacy_id).strip()[:100] if legacy_id else None
+    with connection() as db:
+        db.execute("BEGIN IMMEDIATE")
+        if legacy_id:
+            existing = db.execute(
+                "SELECT * FROM patients WHERE owner_id = ? AND legacy_id = ?",
+                (owner_id, legacy_id),
+            ).fetchone()
+            if existing:
+                return public_patient(existing)
+        local_number = db.execute(
+            "SELECT COALESCE(MAX(local_number), 0) + 1 FROM patients WHERE owner_id = ?",
+            (owner_id,),
+        ).fetchone()[0]
+        patient_uuid = str(uuid.uuid4())
+        db.execute(
+            "INSERT INTO patients(uuid, owner_id, local_number, legacy_id) VALUES (?, ?, ?, ?)",
+            (patient_uuid, owner_id, local_number, legacy_id),
+        )
+        return public_patient(db.execute("SELECT * FROM patients WHERE uuid = ?", (patient_uuid,)).fetchone())
+
+
+def get_patient(patient_uuid, owner_id):
+    with connection() as db:
+        row = db.execute(
+            "SELECT * FROM patients WHERE uuid = ? AND owner_id = ?",
+            (str(patient_uuid), owner_id),
+        ).fetchone()
+    return public_patient(row) if row else None
+
+
+def get_patient_by_legacy_id(owner_id, legacy_id):
+    with connection() as db:
+        row = db.execute(
+            "SELECT * FROM patients WHERE owner_id = ? AND legacy_id = ?",
+            (owner_id, str(legacy_id)),
+        ).fetchone()
+    return public_patient(row) if row else None
+
+
+def list_patients(owner_id, include_archived=False):
+    sql = "SELECT * FROM patients WHERE owner_id = ?"
+    params = [owner_id]
+    if not include_archived:
+        sql += " AND status = 'active'"
+    sql += " ORDER BY local_number DESC"
+    with connection() as db:
+        rows = db.execute(sql, params).fetchall()
+    return [public_patient(row) for row in rows]
+
+
+def archive_patient(patient_uuid, owner_id):
+    with connection() as db:
+        cursor = db.execute(
+            "UPDATE patients SET status = 'archived', archived_at = strftime('%Y-%m-%dT%H:%M:%SZ','now') "
+            "WHERE uuid = ? AND owner_id = ? AND status = 'active'",
+            (str(patient_uuid), owner_id),
+        )
+        if not cursor.rowcount:
+            return None
+        row = db.execute("SELECT * FROM patients WHERE uuid = ?", (str(patient_uuid),)).fetchone()
+    return public_patient(row)
 
 
 def password_matches(stored, password):
@@ -164,6 +243,18 @@ def init_auth(app):
             created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ','now')),
             event TEXT NOT NULL, login TEXT NOT NULL, reason TEXT NOT NULL, ip TEXT NOT NULL
         );
+        CREATE TABLE IF NOT EXISTS patients (
+            uuid TEXT PRIMARY KEY,
+            owner_id INTEGER NOT NULL REFERENCES users(id),
+            local_number INTEGER NOT NULL CHECK(local_number > 0),
+            legacy_id TEXT,
+            status TEXT NOT NULL DEFAULT 'active' CHECK(status IN ('active', 'archived')),
+            created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ','now')),
+            archived_at TEXT,
+            UNIQUE(owner_id, local_number),
+            UNIQUE(owner_id, legacy_id)
+        );
+        CREATE INDEX IF NOT EXISTS patients_owner_status ON patients(owner_id, status, local_number);
         """)
 
     @app.before_request

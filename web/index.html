@@ -39,9 +39,23 @@
             </div>
         </div>
         
-        <div class="card"><div class="card-body study-identity">
-            <div><label class="form-label" for="patient-id">ID пациента</label><input id="patient-id" class="form-control" maxlength="100" required placeholder="Например, P-001"><p class="hint mb-0 mt-2">Для повторных обследований используйте тот же ID.</p></div>
-            <div><span class="form-label">ID исследования</span><p class="text-muted mb-0">Присваивается после завершения всех заданий и сохранения результата</p></div>
+        <div class="card"><div class="card-body">
+            <div class="patient-picker-head">
+                <div><span class="form-label">Пациент</span><p class="hint mb-0">Номер действует только в вашем списке. Внутренний идентификатор система хранит сама.</p></div>
+                <button id="new-patient-btn" class="btn btn-primary" type="button">Новый пациент</button>
+            </div>
+            <input id="patient-id" type="hidden" value="">
+            <input id="patient-uuid" type="hidden" value="">
+            <div id="patient-selected" class="patient-selected" hidden>
+                <div><strong id="patient-selected-label"></strong><small id="patient-selected-meta"></small></div>
+                <button id="change-patient-btn" class="btn btn-sm btn-outline-secondary" type="button">Изменить</button>
+            </div>
+            <div id="patient-browser">
+                <label class="visually-hidden" for="patient-search">Найти пациента по номеру</label>
+                <input id="patient-search" class="form-control mt-3" type="search" placeholder="Найти пациента по номеру">
+                <div id="patient-list" class="patient-list mt-2" aria-live="polite"><p class="hint mb-0">Загрузка пациентов…</p></div>
+            </div>
+            <p id="patient-error" class="alert alert-danger mt-3 mb-0" hidden></p>
         </div></div>
         <!-- Новый анализ -->
         <div class="card">
@@ -65,6 +79,10 @@
                         </div>
                         
                         <div id="live-recorder" style="display: none;">
+                            <div class="exam-focus-topbar" aria-hidden="true">
+                                <div class="exam-focus-brand"><span class="brand-mark"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M3 12h2M7 8v8M11 4v16M15 7v10M19 10v4M21 12h0"/></svg></span><span><strong>Обследование голоса</strong><small>Следуйте инструкции на экране</small></span></div>
+                                <span class="exam-focus-distance">Держите устройство на расстоянии 30 см</span>
+                            </div>
                             <div id="rec-status" class="rec-status"></div>
                             <div id="dsi-step" class="dsi-step" style="display: none;">
                                 <div class="dsi-step-head">
@@ -72,8 +90,14 @@
                                     <span id="dsi-step-tries"></span>
                                 </div>
                                 <h4 id="dsi-step-title"></h4>
-                                <p id="dsi-step-text"></p>
-                                <p id="dsi-step-say" class="dsi-step-say"></p>
+                                <div class="dsi-instruction-block">
+                                    <span class="dsi-field-label">Инструкция врачу</span>
+                                    <p id="dsi-step-text"></p>
+                                </div>
+                                <div class="dsi-say-block">
+                                    <span class="dsi-field-label">Что сказать пациенту</span>
+                                    <p id="dsi-step-say" class="dsi-step-say"></p>
+                                </div>
                                 <div class="dsi-step-actions">
                                     <button id="dsi-try-btn" class="btn btn-primary">Начать попытку</button>
                                     <button id="dsi-redo-btn" class="btn btn-outline-secondary" style="display: none;">Перезаписать задание</button>
@@ -198,6 +222,7 @@
 
             initRecordButton();
             initAnalyzeButton();
+            initPatientPicker();
 
 
 
@@ -205,6 +230,110 @@
             // Загружаем статистику сразу при загрузке страницы
 
         });
+
+        let patientRecords = [];
+
+        async function initPatientPicker() {
+            const search = document.getElementById('patient-search');
+            search.addEventListener('input', renderPatients);
+            document.getElementById('new-patient-btn').addEventListener('click', createPatient);
+            document.getElementById('change-patient-btn').addEventListener('click', clearPatientSelection);
+            try {
+                await AudioPark.ready;
+                await loadPatients();
+            } catch (error) {
+                showPatientError(error.message);
+            }
+        }
+
+        async function loadPatients() {
+            const response = await fetch(`${API_URL}/api/patients`);
+            const data = await response.json();
+            if (!response.ok) throw new Error(data.error || 'Не удалось загрузить пациентов');
+            patientRecords = data.patients || [];
+            renderPatients();
+        }
+
+        function renderPatients() {
+            const list = document.getElementById('patient-list');
+            const query = document.getElementById('patient-search').value.trim().toLocaleLowerCase('ru-RU');
+            const visible = patientRecords.filter(patient => patient.label.toLocaleLowerCase('ru-RU').includes(query));
+            list.replaceChildren();
+            if (!visible.length) {
+                const empty = document.createElement('p');
+                empty.className = 'hint mb-0';
+                empty.textContent = patientRecords.length ? 'Пациенты с таким номером не найдены.' : 'Пациентов пока нет. Создайте первого пациента.';
+                list.append(empty);
+                return;
+            }
+            for (const patient of visible) {
+                const row = document.createElement('div'); row.className = 'patient-row';
+                const description = document.createElement('div');
+                const name = document.createElement('strong'); name.textContent = patient.label;
+                const meta = document.createElement('small');
+                const visit = patient.last_visit ? new Date(patient.last_visit).toLocaleDateString('ru-RU') : 'ещё не обследован';
+                meta.textContent = patient.study_count ? `Последний визит: ${visit} · обследований: ${patient.study_count}` : 'Обследований пока нет';
+                description.append(name, meta);
+                const choose = document.createElement('button');
+                choose.type = 'button'; choose.className = 'btn btn-sm btn-outline-secondary'; choose.textContent = 'Выбрать';
+                choose.addEventListener('click', () => selectPatient(patient));
+                row.append(description, choose); list.append(row);
+            }
+        }
+
+        async function createPatient() {
+            const button = document.getElementById('new-patient-btn');
+            button.disabled = true;
+            showPatientError('');
+            try {
+                const response = await fetch(`${API_URL}/api/patients`, {method: 'POST'});
+                const data = await response.json();
+                if (!response.ok) throw new Error(data.error || 'Не удалось создать пациента');
+                const patient = {...data.patient, study_count: 0, last_visit: null};
+                patientRecords.unshift(patient);
+                selectPatient(patient, 'Новый пациент создан. Обследований пока нет.');
+            } catch (error) {
+                showPatientError(error.message);
+            } finally {
+                button.disabled = false;
+            }
+        }
+
+        function selectPatient(patient, customMeta) {
+            document.getElementById('patient-id').value = patient.label;
+            document.getElementById('patient-uuid').value = patient.uuid;
+            document.getElementById('patient-selected-label').textContent = patient.label;
+            const visit = patient.last_visit ? new Date(patient.last_visit).toLocaleDateString('ru-RU') : null;
+            document.getElementById('patient-selected-meta').textContent = customMeta ||
+                (patient.study_count ? `Последний визит: ${visit} · обследований: ${patient.study_count}` : 'Обследований пока нет');
+            document.getElementById('patient-selected').hidden = false;
+            document.getElementById('patient-browser').hidden = true;
+            showPatientError('');
+        }
+
+        function clearPatientSelection() {
+            if (isRecording) return;
+            document.getElementById('patient-id').value = '';
+            document.getElementById('patient-uuid').value = '';
+            document.getElementById('patient-selected').hidden = true;
+            document.getElementById('patient-browser').hidden = false;
+            document.getElementById('patient-search').focus();
+        }
+
+        function showPatientError(message) {
+            const error = document.getElementById('patient-error');
+            error.textContent = message;
+            error.hidden = !message;
+        }
+
+        function setPatientPickerDisabled(disabled) {
+            document.getElementById('patient-id').disabled = disabled;
+            document.getElementById('patient-uuid').disabled = disabled;
+            document.getElementById('new-patient-btn').disabled = disabled;
+            document.getElementById('change-patient-btn').disabled = disabled;
+            document.getElementById('patient-search').disabled = disabled;
+            document.querySelectorAll('#patient-list button').forEach(button => { button.disabled = disabled; });
+        }
         
         function initLocalAnalysisToggle() {
             const header = document.getElementById('local-analysis-header');
@@ -242,6 +371,7 @@
                     await startRecording({ check: true });
                 } else if (rec && rec.test) {
                     // Пошаговый тест прерывают целиком: незаконченный тест не анализируем
+                    if (!confirm('Прервать тест? Все записанные задания будут удалены.')) return;
                     cleanupRecording();
                 } else {
                     cleanupRecording();
@@ -392,6 +522,7 @@
                     chunks: [], nSamples: 0,
                     check: !!options.check,
                     patientId: options.test ? document.getElementById('patient-id').value.trim() : null,
+                    patientUuid: options.test ? document.getElementById('patient-uuid').value.trim() : null,
                     calibrate: !options.check && document.getElementById('calibrate-check').checked,
                     phase: 'start', speechStart: null, plan: null,
                     stopped: false, clipUntil: 0, columns: [], raf: null,
@@ -415,11 +546,12 @@
                 recordBtn.classList.add('recording');
                 recordBtn.disabled = false;
                 recordBtn.textContent = options.test ? 'Прервать тест' : 'Отменить проверку';
-                document.getElementById('patient-id').disabled = !!options.test;
+                setPatientPickerDisabled(!!options.test);
                 document.getElementById('exam-test-btn').disabled = true;
                 document.getElementById('analyze-btn').disabled = true;
                 document.getElementById('calibration-info').style.display = 'none';
                 document.getElementById('live-recorder').style.display = 'block';
+                document.body?.classList.toggle('exam-focus-mode', !!options.test);
                 rec.startedAt = performance.now();
                 drawLive();
 
@@ -666,7 +798,7 @@
         function openExamDisclaimer() {
             if (!micReady) return;
             if (!document.getElementById('patient-id').value.trim()) {
-                alert('Укажите ID пациента'); document.getElementById('patient-id').focus(); return;
+                alert('Сначала выберите или создайте пациента'); document.getElementById('patient-search').focus(); return;
             }
             document.getElementById('exam-disclaimer-check').checked = false;
             document.getElementById('exam-disclaimer-start').disabled = true;
@@ -910,11 +1042,12 @@
             }
             rec = null;
             isRecording = false;
+            document.body?.classList.remove('exam-focus-mode');
             closeExamReview();
             const recordBtn = document.getElementById('record-btn');
             recordBtn.classList.remove('recording');
             recordBtn.textContent = 'Проверить микрофон';
-            document.getElementById('patient-id').disabled = false;
+            setPatientPickerDisabled(false);
             document.getElementById('live-recorder').style.display = 'none';
             document.getElementById('dsi-step').style.display = 'none';
             document.getElementById('exam-test-btn').disabled = !micReady;
@@ -971,6 +1104,7 @@
             }
             lastRecording = {
                 patientId: state.patientId,
+                patientUuid: state.patientUuid,
                 calibration,
                 calibrationWav,
                 deviceInfo,
@@ -1310,7 +1444,7 @@
         async function analyzeAudio() {
             if (!audioBuffer || !lastRecording || lastRecording.deviceInfo.task !== 'exam') return;
             const patient = lastRecording.patientId;
-            if (!patient) { alert('Укажите ID пациента'); return; }
+            if (!patient) { alert('Сначала выберите или создайте пациента'); return; }
             const buttons = ['record-btn','exam-test-btn','analyze-btn'].map(id=>document.getElementById(id));
             buttons.forEach(button=>button.disabled=true);
             showAnalyzeProgress();
@@ -1318,6 +1452,7 @@
                 const form = new FormData();
                 form.append('file',audioBufferToWav(audioBuffer,audioBuffer.sampleRate),'examination.wav');
                 form.append('patient_id',patient);
+                if (lastRecording.patientUuid) form.append('patient_uuid', lastRecording.patientUuid);
                 form.append('device_info',JSON.stringify(lastRecording.deviceInfo));
                 if (lastRecording.calibration) form.append('calibration',JSON.stringify(lastRecording.calibration));
                 if (lastRecording.calibrationWav) form.append('calibration_file',lastRecording.calibrationWav,'calibration.wav');

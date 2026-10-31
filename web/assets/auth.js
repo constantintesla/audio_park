@@ -32,7 +32,7 @@
         if (isLogin) return;
         try {
             const user = await api.ready;
-            const links = [['/', 'Обследование'], ['/results', 'Мои исследования']];
+            const links = [['/', 'Обследование'], ['/results', 'Мои исследования'], ['/guide', 'Инструкция']];
             if (['moderator', 'admin'].includes(user.role)) links.push(['/all-results', 'Все исследования'], ['/users', 'Учётные записи']);
             const nav = document.querySelector('.app-links');
             if (user.role === 'admin') links.push(['/auth-logs', 'Журнал входов']);

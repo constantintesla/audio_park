@@ -27,6 +27,8 @@ class AccessTest(unittest.TestCase):
         with api.app.app_context():
             cls.users = {role: create_user(role, 'test-password', role=role if role != 'other' else 'expert')
                          for role in ['expert', 'other', 'moderator', 'admin']}
+            cls.users['patient-a'] = create_user('patient-a', 'test-password', role='expert')
+            cls.users['patient-b'] = create_user('patient-b', 'test-password', role='expert')
 
     def setUp(self):
         self.records = [self.record('expert', 'AP-own', 'P-001'), self.record('other', 'AP-other', 'P-002')]
@@ -49,7 +51,7 @@ class AccessTest(unittest.TestCase):
 
     def test_guest_has_no_data_access(self):
         client = api.app.test_client()
-        for path in ['/api/results', '/api/stats', '/api/results/AP-own', '/api/audio/AP-own', '/api/visualization/AP-own', '/api/users', '/api/export/csv', '/api/export/html', '/api/export/json']:
+        for path in ['/api/results', '/api/patients', '/api/stats', '/api/results/AP-own', '/api/audio/AP-own', '/api/visualization/AP-own', '/api/users', '/api/export/csv', '/api/export/html', '/api/export/json']:
             self.assertEqual(client.get(path).status_code, 401, path)
         self.assertEqual(client.get('/').status_code, 302)
         self.assertEqual(client.get('/healthz').get_json(), {'status':'ok'})
@@ -122,6 +124,18 @@ class AccessTest(unittest.TestCase):
         self.assertTrue(password_matches(stored, 'known-password'))
         self.assertFalse(password_matches(stored, 'wrong-password'))
 
+    def test_patient_numbers_are_local_to_each_doctor(self):
+        doctor_a, headers_a = self.login('patient-a')
+        doctor_b, headers_b = self.login('patient-b')
+        patient_a = doctor_a.post('/api/patients', headers=headers_a).get_json()['patient']
+        patient_b = doctor_b.post('/api/patients', headers=headers_b).get_json()['patient']
+        self.assertEqual(patient_a['local_number'], 1)
+        self.assertEqual(patient_b['local_number'], 1)
+        self.assertNotEqual(patient_a['uuid'], patient_b['uuid'])
+        self.assertEqual(doctor_a.post('/api/patients', headers=headers_a).get_json()['patient']['local_number'], 2)
+        self.assertEqual(doctor_b.post('/api/patients', headers=headers_b).get_json()['patient']['local_number'], 2)
+        self.assertEqual(doctor_a.post(f"/api/patients/{patient_b['uuid']}/archive", headers=headers_a).status_code, 404)
+
     def test_recalculation_keeps_ids_and_ownership(self):
         client, headers = self.login('moderator')
         class FakeAnalyzer:
@@ -139,15 +153,18 @@ class AccessTest(unittest.TestCase):
 
     def test_analysis_ignores_spoofed_owner_and_saves_once(self):
         client, headers = self.login('expert')
+        patient = client.post('/api/patients', headers=headers).get_json()['patient']
         class FakeAnalyzer:
             def __init__(self, **kwargs): pass
             def analyze_audio_file(self, *args, **kwargs):
                 return {'features':{},'report':[]}
         with patch('app.parkinson_analyzer.ParkinsonAnalyzer', FakeAnalyzer):
-            response = client.post('/api/analyze', data={'file':(io.BytesIO(b'fake'),'test.wav'), 'patient_id':'P-003', 'user_id':str(self.users['admin']['id']), 'username':'admin'}, headers=headers)
+            response = client.post('/api/analyze', data={'file':(io.BytesIO(b'fake'),'test.wav'), 'patient_uuid':patient['uuid'], 'patient_id':'SPOOFED', 'user_id':str(self.users['admin']['id']), 'username':'admin'}, headers=headers)
         self.assertEqual(response.status_code, 200)
         result = response.get_json()
         self.assertEqual(result['owner_id'], self.users['expert']['id'])
+        self.assertEqual(result['patient_uuid'], patient['uuid'])
+        self.assertEqual(result['patient_id'], patient['label'])
         self.assertEqual(result['user_info']['tg_username'], 'expert')
         self.assertTrue(result['study_id'].startswith('AP-'))
         self.assertEqual(len(api.load_results()), 3)
