@@ -11,7 +11,7 @@ import ipaddress
 import uuid
 from datetime import timedelta
 
-from flask import g, jsonify, redirect, request, session
+from flask import current_app, g, jsonify, redirect, request, session
 from werkzeug.security import generate_password_hash
 
 ROLES = {"expert", "moderator", "admin"}
@@ -90,6 +90,63 @@ def create_patient(owner_id, legacy_id=None):
             (patient_uuid, owner_id, local_number, legacy_id),
         )
         return public_patient(db.execute("SELECT * FROM patients WHERE uuid = ?", (patient_uuid,)).fetchone())
+
+
+def patient_identity_key(owner_id):
+    """Derive an account key from a master stored outside SQLite."""
+    master = bytes.fromhex(current_app.config["PATIENT_HMAC_MASTER_KEY"])
+    message = f"audio-park-patient-v1:{owner_id}".encode("ascii")
+    return hmac.new(master, message, hashlib.sha256).hexdigest()
+
+
+def patients_by_lookup_token(owner_id, lookup_token):
+    with connection() as db:
+        rows = db.execute(
+            "SELECT patients.* FROM patient_lookup_tokens "
+            "JOIN patients ON patients.uuid = patient_lookup_tokens.patient_uuid "
+            "WHERE patient_lookup_tokens.owner_id = ? AND patient_lookup_tokens.lookup_token = ? "
+            "AND patients.status = 'active' "
+            "ORDER BY patients.local_number DESC",
+            (owner_id, lookup_token),
+        ).fetchall()
+    return [public_patient(row) for row in rows]
+
+
+def create_patient_with_lookup_token(owner_id, lookup_token):
+    """Create a distinct patient; one HMAC may intentionally map to multiple same-name people."""
+    with connection() as db:
+        db.execute("BEGIN IMMEDIATE")
+        local_number = db.execute(
+            "SELECT COALESCE(MAX(local_number), 0) + 1 FROM patients WHERE owner_id = ?",
+            (owner_id,),
+        ).fetchone()[0]
+        patient_uuid = str(uuid.uuid4())
+        db.execute(
+            "INSERT INTO patients(uuid, owner_id, local_number) VALUES (?, ?, ?)",
+            (patient_uuid, owner_id, local_number),
+        )
+        db.execute(
+            "INSERT INTO patient_lookup_tokens(owner_id, lookup_token, patient_uuid) VALUES (?, ?, ?)",
+            (owner_id, lookup_token, patient_uuid),
+        )
+        row = db.execute("SELECT * FROM patients WHERE uuid = ?", (patient_uuid,)).fetchone()
+        return public_patient(row)
+
+
+def bind_patient_lookup_token(owner_id, patient_uuid, lookup_token):
+    with connection() as db:
+        db.execute("BEGIN IMMEDIATE")
+        patient = db.execute(
+            "SELECT * FROM patients WHERE uuid = ? AND owner_id = ? AND status = 'active'",
+            (str(patient_uuid), owner_id),
+        ).fetchone()
+        if not patient:
+            return None, "not_found"
+        db.execute(
+            "INSERT OR IGNORE INTO patient_lookup_tokens(owner_id, lookup_token, patient_uuid) VALUES (?, ?, ?)",
+            (owner_id, lookup_token, str(patient_uuid)),
+        )
+        return public_patient(patient), None
 
 
 def get_patient(patient_uuid, owner_id):
@@ -211,6 +268,18 @@ def init_auth(app):
         except FileExistsError:
             pass
         secret = key_file.read_text(encoding="ascii").strip()
+    patient_key_file = auth_dir / "patient-hmac.key"
+    patient_master = os.getenv("PATIENT_HMAC_MASTER_KEY")
+    if not patient_master:
+        try:
+            with patient_key_file.open("x", encoding="ascii") as stream:
+                stream.write(secrets.token_hex(32))
+            patient_key_file.chmod(0o600)
+        except FileExistsError:
+            pass
+        patient_master = patient_key_file.read_text(encoding="ascii").strip()
+    if not re.fullmatch(r"[0-9a-fA-F]{64}", patient_master):
+        raise RuntimeError("PATIENT_HMAC_MASTER_KEY должен содержать 64 шестнадцатеричных символа")
     app.config.update(
         SECRET_KEY=secret,
         AUTH_DB_PATH=str(auth_dir / "users.sqlite3"),
@@ -220,6 +289,7 @@ def init_auth(app):
         SESSION_COOKIE_SECURE=os.getenv("SESSION_COOKIE_SECURE", "false").lower() == "true",
         PERMANENT_SESSION_LIFETIME=timedelta(hours=12),
         MAX_CONTENT_LENGTH=50 * 1024 * 1024,
+        PATIENT_HMAC_MASTER_KEY=patient_master.lower(),
     )
     with app.app_context(), connection() as db:
         db.executescript("""
@@ -255,6 +325,14 @@ def init_auth(app):
             UNIQUE(owner_id, legacy_id)
         );
         CREATE INDEX IF NOT EXISTS patients_owner_status ON patients(owner_id, status, local_number);
+        CREATE TABLE IF NOT EXISTS patient_lookup_tokens (
+            owner_id INTEGER NOT NULL REFERENCES users(id),
+            lookup_token TEXT NOT NULL,
+            patient_uuid TEXT NOT NULL REFERENCES patients(uuid),
+            created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ','now')),
+            PRIMARY KEY(owner_id, lookup_token, patient_uuid)
+        );
+        CREATE INDEX IF NOT EXISTS patient_lookup_owner_token ON patient_lookup_tokens(owner_id, lookup_token);
         """)
 
     @app.before_request

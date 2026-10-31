@@ -1701,6 +1701,22 @@ body.exam-focus-mode {
     background: var(--surface-muted);
 }
 
+.patient-identity-form {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr)) auto;
+    gap: 12px;
+    align-items: end;
+}
+
+.patient-identity-form .form-label {
+    margin-bottom: 5px;
+}
+
+.patient-identity-status {
+    color: var(--accent);
+    font-size: 13px;
+}
+
 .patient-selected strong,
 .patient-row strong,
 .patient-selected small,
@@ -1733,6 +1749,10 @@ body.exam-focus-mode {
     .patient-row {
         align-items: stretch;
         flex-direction: column;
+    }
+
+    .patient-identity-form {
+        grid-template-columns: 1fr;
     }
 }
 
