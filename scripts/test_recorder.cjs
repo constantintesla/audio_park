@@ -36,31 +36,21 @@ const context = vm.createContext({console,Blob,URL,FormData,Float32Array,ArrayBu
     AudioPark:{base:''},alert:noop,confirm:()=>true,requestAnimationFrame:()=>1,cancelAnimationFrame:noop,
     testAudioContext:audioContext,tracks,
 });
-for (const name of ['exam_tasks.js','speech_protocol.js']) vm.runInContext(fs.readFileSync(path.join(root,'web/assets',name),'utf8'),context);
+for (const name of ['exam_tasks.js','speech_protocol.js','patient-picker.js']) vm.runInContext(fs.readFileSync(path.join(root,'web/assets',name),'utf8'),context);
 for (const [,script] of html.matchAll(/<script\b[^>]*>([\s\S]*?)<\/script>/g)) if(script.trim())vm.runInContext(script,context);
 async function run(code) { return vm.runInContext(code,context); }
 (async()=>{
-    await run(`(async()=>{patientIdentityKey='00'.repeat(32);
-        document.getElementById('patient-surname').value='  Ёлкин  ';
-        document.getElementById('patient-name').value='Иван';
-        document.getElementById('patient-patronymic').value=' Иванович ';
-        globalThis.patientTokenA=await patientLookupToken();
-        document.getElementById('patient-surname').value='елкин';
-        document.getElementById('patient-name').value='  иван  ';
-        document.getElementById('patient-patronymic').value='иванович';
-        globalThis.patientTokenB=await patientLookupToken();
-        assert.equal(patientTokenA,patientTokenB);assert.match(patientTokenA,/^[0-9a-f]{64}$/);})()`);
-    await run(`showPatientNextActions('Нет пациента','Создайте карточку','Создать пациента',true);
-        assert.equal(document.getElementById('patient-next-actions').hidden,false);
-        assert.match(document.getElementById('new-patient-btn').className,/btn-primary/);
-        assert.equal(document.getElementById('choose-existing-btn').hidden,false);
-        patientRecords=[{uuid:'a',label:'Пациент 1',study_count:1,last_visit:'2026-10-31'},
-            {uuid:'b',label:'Пациент 2',study_count:0,last_visit:null}];
-        matchedPatientUuids=new Set(['a','b']);openPatientBrowser('matches');
-        assert.equal(document.getElementById('patient-browser').hidden,false);
-        assert.equal(document.getElementById('patient-search').hidden,true);
-        assert.equal(document.getElementById('patient-list').children.length,2);
-        closePatientBrowser();assert.equal(document.getElementById('patient-browser').hidden,true);`);
+    await run(`assert.equal(normalizedPatientName('  Ёлкин  Иван  '), 'елкин иван');
+        patientRecords=[{uuid:'a',full_name:'Ёлкин Иван Иванович',local_number:1,study_count:1,last_visit:'2026-10-31'},
+            {uuid:'b',full_name:'Петров Пётр',local_number:2,study_count:0,last_visit:null}];
+        document.getElementById('patient-search').value='ИВАН елк';renderPatients();
+        assert.equal(document.getElementById('patient-list').children.length,1);
+        selectPatient(patientRecords[0]);
+        assert.equal(document.getElementById('patient-selected-label').textContent,'Ёлкин Иван Иванович');
+        assert.equal(document.getElementById('patient-uuid').value,'a');
+        assert.equal(document.getElementById('patient-picker').hidden,true);
+        clearPatientSelection();assert.equal(document.getElementById('patient-picker').hidden,false);
+        document.getElementById('patient-id').value='TEST-PATIENT';`);
     await run('audioContext=testAudioContext; initRecordButton();');
     let checking=run('startRecording({check:true})');
     await new Promise(r=>setImmediate(r));

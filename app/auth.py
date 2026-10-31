@@ -61,14 +61,15 @@ def public_patient(row):
         "uuid": row["uuid"],
         "owner_id": row["owner_id"],
         "local_number": row["local_number"],
-        "label": f"Пациент {row['local_number']}",
+        "full_name": row["full_name"],
+        "label": row["full_name"] or f"Пациент {row['local_number']}",
         "status": row["status"],
         "created_at": row["created_at"],
         "archived_at": row["archived_at"],
     }
 
 
-def create_patient(owner_id, legacy_id=None):
+def create_patient(owner_id, legacy_id=None, full_name=""):
     """Atomically allocate the next doctor-local number and a global opaque UUID."""
     legacy_id = str(legacy_id).strip()[:100] if legacy_id else None
     with connection() as db:
@@ -86,10 +87,19 @@ def create_patient(owner_id, legacy_id=None):
         ).fetchone()[0]
         patient_uuid = str(uuid.uuid4())
         db.execute(
-            "INSERT INTO patients(uuid, owner_id, local_number, legacy_id) VALUES (?, ?, ?, ?)",
-            (patient_uuid, owner_id, local_number, legacy_id),
+            "INSERT INTO patients(uuid, owner_id, local_number, legacy_id, full_name) VALUES (?, ?, ?, ?, ?)",
+            (patient_uuid, owner_id, local_number, legacy_id, full_name),
         )
         return public_patient(db.execute("SELECT * FROM patients WHERE uuid = ?", (patient_uuid,)).fetchone())
+
+
+def update_patient_name(owner_id, patient_uuid, full_name):
+    with connection() as db:
+        db.execute("UPDATE patients SET full_name = ? WHERE uuid = ? AND owner_id = ? AND status = 'active'",
+                   (full_name, patient_uuid, owner_id))
+        row = db.execute("SELECT * FROM patients WHERE uuid = ? AND owner_id = ? AND status = 'active'",
+                         (patient_uuid, owner_id)).fetchone()
+    return public_patient(row) if row else None
 
 
 def patient_identity_key(owner_id):
@@ -334,6 +344,9 @@ def init_auth(app):
         );
         CREATE INDEX IF NOT EXISTS patient_lookup_owner_token ON patient_lookup_tokens(owner_id, lookup_token);
         """)
+        db.execute("BEGIN IMMEDIATE")
+        if 'full_name' not in {row['name'] for row in db.execute('PRAGMA table_info(patients)')}:
+            db.execute("ALTER TABLE patients ADD COLUMN full_name TEXT NOT NULL DEFAULT ''")
 
     @app.before_request
     def authenticate():

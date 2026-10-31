@@ -164,6 +164,39 @@ class AccessTest(unittest.TestCase):
             for key in ['study_id','owner_id','patient_id']:
                 self.assertEqual(old[key], new[key])
 
+    def test_patient_names_persist_and_follow_existing_studies(self):
+        client, headers = self.login('expert')
+        other, other_headers = self.login('other')
+        response = client.post('/api/patients', json={'full_name': '  Иванов   Иван Иванович '}, headers=headers)
+        self.assertEqual(response.status_code, 201)
+        patient = response.get_json()['patient']
+        self.assertEqual(patient['label'], 'Иванов Иван Иванович')
+        records = api.load_results()
+        records[0]['patient_uuid'] = patient['uuid']
+        api.save_results(records)
+        self.assertEqual(other.patch(f"/api/patients/{patient['uuid']}", json={'full_name': 'Чужое Имя'}, headers=other_headers).status_code, 404)
+        renamed = client.patch(f"/api/patients/{patient['uuid']}", json={'full_name': 'Петров Иван Иванович'}, headers=headers)
+        self.assertEqual(renamed.status_code, 200)
+        self.assertEqual(renamed.get_json()['patient']['uuid'], patient['uuid'])
+        found = client.get('/api/results?q=Петров').get_json()['results']
+        self.assertEqual(len(found), 1)
+        self.assertEqual(found[0]['patient_id'], 'Петров Иван Иванович')
+        self.assertEqual(client.get('/api/results/AP-own').get_json()['patient_id'], 'Петров Иван Иванович')
+        self.assertNotIn(patient['uuid'], [p['uuid'] for p in other.get('/api/patients').get_json()['patients']])
+        for invalid in ['', 'Иванов', None, 123, 'А Б\nВ', 'А ' + 'Б' * 200]:
+            self.assertEqual(client.post('/api/patients', json={'full_name': invalid}, headers=headers).status_code, 400)
+        # Identical names remain distinct people; creation never merges studies.
+        duplicate = client.post('/api/patients', json={'full_name': 'Петров Иван Иванович'}, headers=headers).get_json()['patient']
+        self.assertNotEqual(duplicate['uuid'], patient['uuid'])
+
+    def test_old_patient_can_receive_name_without_losing_uuid(self):
+        client, headers = self.login('expert')
+        patient = client.post('/api/patients', headers=headers).get_json()['patient']
+        updated = client.patch(f"/api/patients/{patient['uuid']}", json={'full_name': 'Сидорова Анна'}, headers=headers).get_json()['patient']
+        self.assertEqual(updated['uuid'], patient['uuid'])
+        self.assertEqual(updated['local_number'], patient['local_number'])
+        self.assertEqual(updated['label'], 'Сидорова Анна')
+
     def test_analysis_ignores_spoofed_owner_and_saves_once(self):
         client, headers = self.login('expert')
         patient = client.post('/api/patients', headers=headers).get_json()['patient']

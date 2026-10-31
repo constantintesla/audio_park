@@ -26,6 +26,8 @@ from app.auth import (
     owns_result,
     patients_by_lookup_token,
     patient_identity_key,
+    update_patient_name,
+    connection,
     visible_results,
 )
 from app.dsi_protocol import parse_segments
@@ -90,6 +92,14 @@ def load_results() -> List[Dict]:
                 data = json.load(f)
                 # Убеждаемся, что это список
                 if isinstance(data, list):
+                    # Resolve current names by both UUID and owner, including older studies.
+                    with app.app_context(), connection() as db:
+                        names = {(row['uuid'], row['owner_id']): row['full_name'] for row in
+                                 db.execute("SELECT uuid, owner_id, full_name FROM patients WHERE full_name != ''")}
+                    for result in data:
+                        name = names.get((result.get('patient_uuid'), result.get('owner_id')))
+                        if name:
+                            result['patient_id'] = name
                     return data
                 else:
                     logger.warning("Файл results.json не содержит список, инициализируем пустым списком")
@@ -236,6 +246,11 @@ def get_patients():
 @app.route('/api/patients', methods=['POST'])
 def add_patient():
     data = request.get_json(silent=True) or {}
+    if 'full_name' in data:
+        name = validated_patient_name(data.get('full_name'))
+        if not name:
+            return jsonify(error="Укажите фамилию и имя (до 200 символов)"), 400
+        return jsonify(patient=create_patient(g.user['id'], full_name=name)), 201
     lookup_token = str(data.get('lookup_token') or '').strip().lower()
     if lookup_token:
         if not re.fullmatch(r'[0-9a-f]{64}', lookup_token):
@@ -244,6 +259,24 @@ def add_patient():
     else:
         patient = create_patient(g.user['id'])
     return jsonify(patient=patient), 201
+
+
+def validated_patient_name(value):
+    if not isinstance(value, str) or any(ord(c) < 32 for c in value):
+        return None
+    value = ' '.join(value.split())
+    return value if len(value) <= 200 and len(value.split()) >= 2 else None
+
+
+@app.route('/api/patients/<patient_uuid>', methods=['PATCH'])
+def rename_patient(patient_uuid):
+    name = validated_patient_name((request.get_json(silent=True) or {}).get('full_name'))
+    if not name:
+        return jsonify(error="Укажите фамилию и имя (до 200 символов)"), 400
+    patient = update_patient_name(g.user['id'], patient_uuid, name)
+    if not patient:
+        return jsonify(error="Пациент не найден"), 404
+    return jsonify(patient=patient)
 
 
 @app.route('/api/patients/identity-key', methods=['GET'])
@@ -387,7 +420,7 @@ def analyze_audio():
             return jsonify(error="Выбранный пациент не найден или архивирован"), 400
         # Backward compatibility for integrations and old clients. The web UI always sends patient_uuid.
         patient_id = patient['label'] if patient else request.form.get('patient_id', '').strip()
-        if not patient_id or len(patient_id) > 100 or any(ord(c) < 32 for c in patient_id):
+        if not patient_id or len(patient_id) > 200 or any(ord(c) < 32 for c in patient_id):
             return jsonify(error="Выберите пациента"), 400
         result_id = f"AP-{datetime.now().strftime('%Y%m%d')}-{uuid.uuid4().hex}"
         
