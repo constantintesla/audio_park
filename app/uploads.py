@@ -144,7 +144,7 @@ def init_uploads(app):
     @app.get('/api/uploads/config')
     def upload_config():
         allowed = os.getenv('CHUNKED_UPLOAD_USERS', '').split(',')
-        return jsonify(enabled=os.getenv('CHUNKED_UPLOAD_ENABLED', 'false').lower() == 'true' or g.user['login'] in allowed,
+        return jsonify(enabled=os.getenv('CHUNKED_UPLOAD_ENABLED', 'true').lower() == 'true' or g.user['login'] in allowed,
                        version=1, part_bytes=app.config['UPLOAD_PART_BYTES'],
                        max_bytes=app.config['UPLOAD_MAX_BYTES'], max_seconds=app.config['UPLOAD_MAX_SECONDS'])
 
