@@ -60,26 +60,12 @@
         
         <div id="content" style="display: none;">
             <div id="exam-results"></div>
-            <div class="card"><div class="card-header">Отчёт исследования</div><div class="card-body"><p id="study-summary"></p><p id="study-quality"></p><ul id="study-report"></ul></div></div>
+            <details class="card study-accordion"><summary class="card-header">Отчёт исследования</summary><div class="card-body"><p id="study-summary"></p><p id="study-quality"></p><ul id="study-report"></ul></div></details>
             <!-- Параметры -->
-            <div class="card">
-                <div class="card-header">Извлеченные параметры</div>
+            <details class="card study-accordion">
+                <summary class="card-header">Извлеченные параметры</summary>
                 <div class="parameter-grid" id="parameters-grid"></div>
-            </div>
-            
-            <!-- Аудио плеер -->
-            <div class="card">
-                <div class="card-header">Аудиозапись</div>
-                <div class="audio-player">
-                    <div class="waveform-container">
-                        <div id="waveform"></div>
-                    </div>
-                    <div class="player-controls">
-                        <button onclick="wavesurfer && wavesurfer.playPause()">Воспроизвести / пауза</button>
-                        <button onclick="wavesurfer && wavesurfer.stop()">Стоп</button>
-                    </div>
-                </div>
-            </div>
+            </details>
             
             <!-- Waveform -->
             <div class="card">
@@ -151,6 +137,22 @@
         </div>
     </div>
     
+    <section id="sticky-player" class="sticky-player" aria-label="Аудиоплеер исследования" hidden>
+        <div class="sticky-player-inner">
+            <div id="player-track" class="player-track"></div>
+            <div id="player-status" role="status">Загрузка аудио...</div>
+            <div id="waveform" aria-label="Волновая форма записи"></div>
+            <div class="player-controls">
+                <button id="player-back" type="button" disabled aria-label="Назад на 10 секунд">−10 с</button>
+                <button id="player-play" type="button" disabled>Воспроизвести</button>
+                <button id="player-forward" type="button" disabled aria-label="Вперёд на 10 секунд">+10 с</button>
+                <span id="player-time">0:00 / 0:00</span>
+                <label class="player-volume">Громкость <input id="player-volume" type="range" min="0" max="1" step="0.01" value="1"></label>
+            </div>
+            <input id="player-progress" class="player-progress" aria-label="Позиция воспроизведения" type="range" min="0" max="0" step="0.01" value="0" disabled>
+        </div>
+    </section>
+    <script src="assets/visualization-player.js"></script>
     <script>
         // Общий стиль графиков в цветах интерфейса
         if (window.Chart) {
@@ -164,6 +166,8 @@
         let charts = {};
         let currentData = null;
         let currentTime = 0;
+        let visualizationVersion = 0;
+        let loadVersion = 0;
         const MAX_POINTS = {
             waveform: 5000,
             f0: 4000,
@@ -281,6 +285,7 @@
                 return;
             }
             
+            const requestVersion = ++loadVersion;
             document.getElementById('loading').style.display = 'block';
             document.getElementById('content').style.display = 'none';
             document.getElementById('error-container').innerHTML = '';
@@ -292,18 +297,21 @@
                 if (result.error) {
                     throw new Error(result.error);
                 }
+                if (requestVersion !== loadVersion) return;
                 currentData = result;
                 displayVisualization(result, index);
             } catch (error) {
+                if (requestVersion !== loadVersion) return;
                 showError('Ошибка загрузки визуализации: ' + error.message);
                 console.error(error);
             } finally {
-                document.getElementById('loading').style.display = 'none';
+                if (requestVersion === loadVersion) document.getElementById('loading').style.display = 'none';
             }
         }
         
         // Отображение визуализации
         function displayVisualization(result, index) {
+            const version = ++visualizationVersion;
             document.getElementById('content').style.display = 'block';
             document.getElementById('study-identity').textContent = `${result.study_id || ''} · Пациент: ${result.patient_id || '—'} · Специалист: ${result.user_info?.tg_username || '—'}`;
             document.getElementById('study-summary').textContent = `DSI: ${result.dsi?.dsi_score?.toFixed(2) ?? '—'} · ${result.symptom_scores?.pd_risk || ''}`;
@@ -315,8 +323,9 @@
             Object.values(charts).forEach(chart => chart.destroy());
             charts = {};
             
+            document.querySelectorAll('#content details.study-accordion').forEach(panel => { panel.open = false; });
             displayParameters(result);
-            document.getElementById('exam-results').innerHTML = renderSpeechProtocolCard(result.speech_protocol) + renderTaskRecordings(result);
+            document.getElementById('exam-results').innerHTML = renderSpeechProtocolCard(result.speech_protocol, { collapsible: true }) + renderTaskRecordings(result, { collapsible: true, showFullRecording: false });
             initAudioPlayer(index);
             
             if (chartObserver) chartObserver.disconnect();
@@ -332,6 +341,7 @@
                     const spec = byCanvas[entry.target.id];
                     fetchPart(index, spec.part)
                         .then(data => {
+                            if (version !== visualizationVersion) return;
                             const d = data[spec.part] || {};
                             if (!spec.ok(d)) {
                                 setChartStatus(spec.canvas, 'Нет данных для этого графика');
@@ -339,9 +349,13 @@
                             }
                             setChartStatus(spec.canvas, '');
                             // Отрисовка в следующем кадре, чтобы не блокировать прокрутку
-                            requestAnimationFrame(() => spec.draw(d));
+                            requestAnimationFrame(() => {
+                                if (version !== visualizationVersion) return;
+                                spec.draw(d);
+                                Object.values(charts).forEach(chart => AudioParkPlayer.attachChart(chart));
+                            });
                         })
-                        .catch(error => setChartStatus(spec.canvas, 'Не удалось загрузить график: ' + error.message));
+                        .catch(error => { if (version === visualizationVersion) setChartStatus(spec.canvas, 'Не удалось загрузить график: ' + error.message); });
                 });
             }, { rootMargin: '200px 0px' });
             CHARTS.forEach(spec => chartObserver.observe(document.getElementById(spec.canvas)));
@@ -466,47 +480,34 @@
             });
         }
         
-            // Инициализация аудио плеера: волну рисуем по точкам с сервера,
-        // а сама запись подгружается потоком при воспроизведении
         function initAudioPlayer(index) {
-            if (wavesurfer) {
-                wavesurfer.destroy();
-                wavesurfer = null;
-            }
+            const version = visualizationVersion;
+            AudioParkPlayer.reset();
+            if (wavesurfer) wavesurfer.destroy();
+            wavesurfer = null;
+            currentTime = 0;
+            document.getElementById('player-track').textContent =
+                `Исследование ${currentData.study_id || index} · Пациент: ${currentData.patient_id || '—'}`;
             fetchPart(index, 'waveform').then(data => {
+                if (version !== visualizationVersion) return;
+                if (!data.audio_url) throw new Error('Аудиофайл недоступен');
                 const waveform = data.waveform || {};
-                const container = document.getElementById('waveform');
-                container.innerHTML = '';
-                if (!data.audio_url) {
-                    container.innerHTML = '<div class="error">Аудиофайл недоступен</div>';
-                    return;
-                }
                 const options = {
-                    container: '#waveform',
-                    waveColor: '#7fa8bb',
-                    progressColor: '#0e5a78',
-                    cursorColor: '#b42318',
-                    barWidth: 2,
-                    barRadius: 3,
-                    height: 100,
-                    normalize: true,
-                    url: API_URL + data.audio_url
+                    container: '#waveform', waveColor: '#7fa8bb', progressColor: '#0e5a78',
+                    cursorColor: '#b42318', barWidth: 2, barRadius: 3, height: 40,
+                    normalize: true, url: API_URL + data.audio_url
                 };
-                if (waveform.amplitude && waveform.amplitude.length && waveform.duration) {
+                if (waveform.amplitude?.length && waveform.duration) {
                     options.peaks = [waveform.amplitude];
                     options.duration = waveform.duration;
                 }
                 wavesurfer = WaveSurfer.create(options);
-                wavesurfer.on('timeupdate', (time) => {
-                    currentTime = time;
-                    updateChartsTime(time);
-                });
+                AudioParkPlayer.bind(wavesurfer, updateChartsTime);
             }).catch(error => {
-                document.getElementById('waveform').innerHTML =
-                    `<div class="error">Не удалось загрузить запись: ${error.message}</div>`;
+                if (version === visualizationVersion) AudioParkPlayer.fail(error);
             });
         }
-        
+
         // Создание графика waveform
         function createWaveformChart(waveformData) {
             const ctx = document.getElementById('waveform-chart').getContext('2d');
@@ -1031,12 +1032,14 @@
         
         // Обновление времени на графиках
         function updateChartsTime(time) {
-            // Можно добавить вертикальную линию на графиках
+            currentTime = time;
+            AudioParkPlayer.drawCharts(charts, time);
         }
         
         // Синхронизация всех графиков
         function syncAllCharts() {
-            // Синхронизация масштаба по оси X
+            Object.values(charts).forEach(chart => chart.resetZoom());
+            updateChartsTime(currentTime);
         }
         
         // Показать ошибку

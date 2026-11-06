@@ -1,6 +1,12 @@
 // Карточка результатов речевых заданий (speech_protocol.py). Общая для главной и /results
-function renderSpeechProtocolCard(sp) {
-    if (!sp) return '';
+function renderSpeechProtocolCard(sp, { collapsible = false } = {}) {
+    if (!sp) {
+        if (!collapsible) return '';
+        return `<details class="card mt-3 mb-3 study-accordion">
+            <summary class="card-header"><span class="h5 mb-0">Речевые задания</span></summary>
+            <div class="card-body"><p class="text-muted mb-0">В этом исследовании нет результатов речевых заданий.</p></div>
+        </details>`;
+    }
     const num = (v, digits = 1) => (v === null || v === undefined) ? '—' : Number(v).toFixed(digits);
     const row = (name, value, hint) => `
         <tr><td><strong>${name}</strong></td><td>${value}</td><td><small>${hint || ''}</small></td></tr>`;
@@ -38,10 +44,10 @@ function renderSpeechProtocolCard(sp) {
     const missing = (sp.missing || []).length
         ? `<p class="text-muted mb-2"><small>Не выполнены: ${sp.missing.join(', ')}</small></p>` : '';
     return `
-        <div class="card mt-3 mb-3">
-            <div class="card-header bg-primary text-white">
-                <h5 class="mb-0">Речевые задания</h5>
-            </div>
+        <${collapsible ? 'details' : 'div'} class="card mt-3 mb-3${collapsible ? ' study-accordion' : ''}">
+            <${collapsible ? 'summary' : 'div'} class="card-header bg-primary text-white">
+                <span class="h5 mb-0">Речевые задания</span>
+            </${collapsible ? 'summary' : 'div'}>
             <div class="card-body">
                 <table class="table table-sm table-bordered">
                     <thead class="table-light"><tr><th>Показатель</th><th>Значение</th><th>Ориентир</th></tr></thead>
@@ -54,7 +60,7 @@ function renderSpeechProtocolCard(sp) {
                     Ориентиры примерные, это измерения, а не диагноз.</small>
                 </div>
             </div>
-        </div>`;
+        </${collapsible ? 'details' : 'div'}>`;
 }
 
 // Записи заданий, карточки DSI и речевых заданий. renderDsiCard объявлена на каждой странице,
