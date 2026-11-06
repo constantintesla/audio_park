@@ -89,7 +89,7 @@
                         <p id="mic-check-status" class="hint mt-3" role="status">Микрофон ещё не проверен.</p>
                         <div class="form-check mt-3">
                             <input class="form-check-input" type="checkbox" id="calibrate-check" checked>
-                            <label class="form-check-label" for="calibrate-check">Калибровка перед записью (тишина и тестовый звук, около 7 с). Поставьте громкость устройства на максимум</label>
+                            <label class="form-check-label" for="calibrate-check">Проверка шума и микрофона перед записью (тишина и тестовый звук, около 7 с). Поставьте громкость устройства на максимум. Абсолютная громкость в дБ SPL при этом не калибруется</label>
                         </div>
                         
                         <div id="live-recorder" style="display: none;">
@@ -1295,7 +1295,7 @@
             const fmt = (v, unit) => v === null || v === undefined ? '—' : `${v} ${unit}`;
             const agc = cal.agc_suspected === null || cal.agc_suspected === undefined ? 'не определено'
                 : (cal.agc_suspected ? `похоже, включена (ступенька ${cal.agc_step_measured_db} дБ)` : 'не обнаружена');
-            let html = '<strong>Калибровка:</strong><br>';
+            let html = '<strong>Проверка шума и микрофона:</strong><br>';
             html += `Шум: ${fmt(cal.noise_floor_dbfs, 'dBFS')}<br>`;
             html += `Тестовый сигнал: ${cal.sweep_detected ? `услышан, запас над шумом ${fmt(cal.sweep_snr_db, 'дБ')}` : 'не услышан'}<br>`;
             if (cal.sweep_detected) {
@@ -1307,6 +1307,7 @@
             } else {
                 html += '<div class="text-success mt-1">Устройство в порядке</div>';
             }
+            html += '<div class="mt-1">Эта проверка не калибрует абсолютную громкость в дБ SPL. Без отдельной SPL-калибровки DSI рассчитывается приблизительно.</div>';
             box.innerHTML = html;
             box.style.display = 'block';
         }
