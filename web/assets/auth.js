@@ -16,6 +16,13 @@
             api.user = data.user || null;
             return api.user;
         });
+    api.refreshAuth = async () => {
+        const response = await nativeFetch(api.url('/api/auth/me'), {credentials: 'same-origin'});
+        if (!response.ok) throw new Error('Восстановите вход в отдельной вкладке и повторите отправку');
+        const data = await response.json();
+        if (data.user.id !== api.user.id) { location.reload(); throw new Error('Учётная запись изменилась'); }
+        csrf = data.csrf_token;
+    };
     window.fetch = async (input, options = {}) => {
         const url = new URL(typeof input === 'string' ? input : input.url, location.href);
         const local = url.origin === location.origin && url.pathname.startsWith(base + '/api/');
@@ -24,8 +31,9 @@
         const headers = new Headers(options.headers || (input instanceof Request ? input.headers : {}));
         const method = (options.method || (input instanceof Request ? input.method : 'GET')).toUpperCase();
         if (!['GET', 'HEAD', 'OPTIONS'].includes(method)) headers.set('X-CSRF-Token', csrf);
-        const response = await nativeFetch(input, {...options, headers, credentials:'same-origin'});
-        if (response.status === 401 && !isLogin) location.replace(api.url('/login'));
+        const {keepUploadOnAuthFailure, ...fetchOptions} = options;
+        const response = await nativeFetch(input, {...fetchOptions, headers, credentials:'same-origin'});
+        if (response.status === 401 && !isLogin && !options.keepUploadOnAuthFailure) location.replace(api.url('/login'));
         return response;
     };
     document.addEventListener('DOMContentLoaded', async () => {

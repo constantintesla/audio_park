@@ -6,7 +6,7 @@ services:
     ports:
       - "${API_PORT:-5000}:5000"
     volumes:
-      - ./data/results.json:/app/results.json
+      - ./data/results.json:/app/results.json:ro
       - ./data/results:/app/results
       - ./data/auth:/app/auth
     env_file:
@@ -16,6 +16,7 @@ services:
       - FLASK_ENV=${FLASK_ENV:-production}
       - DEBUG=${DEBUG:-False}
       - HOST=0.0.0.0
+      - RESULTS_FILE=/app/auth/results.json
       - AUTH_DATA_DIR=/app/auth
       - SESSION_COOKIE_SECURE=${SESSION_COOKIE_SECURE:-true}
     restart: unless-stopped
@@ -30,6 +31,23 @@ services:
       interval: 30s
       timeout: 10s
       retries: 3
+
+  upload-worker:
+    build: .
+    image: audio_park-api:latest
+    command: ["python", "-m", "app.upload_worker"]
+    env_file:
+      - .env
+    environment:
+      - RESULTS_FILE=/app/auth/results.json
+      - AUTH_DATA_DIR=/app/auth
+      - UPLOAD_DIR=/app/auth/uploads
+    volumes:
+      - ./data/results.json:/app/results.json:ro
+      - ./data/results:/app/results
+      - ./data/auth:/app/auth
+    restart: unless-stopped
+    mem_limit: 1536m
 
 networks:
   parkinson_network:
