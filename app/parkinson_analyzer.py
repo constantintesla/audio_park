@@ -151,17 +151,41 @@ class ParkinsonAnalyzer:
             # Делается до нормализации громкости: клиппинг и уровень шума
             # от приложения (noise_floor_dbfs) заданы в шкале исходного файла.
             device_info = device_info or {}
+            task = device_info.get('task')
+            dsi_segments = (parse_segments(device_info.get('dsi_segments'))
+                            if task in ('dsi', 'exam') else [])
+            protocol_segments = (parse_protocol_segments(device_info.get('protocol_segments'))
+                                 if task in ('speech_protocol', 'exam') else [])
+            # Normalize and assess only accepted attempts. Instruction gaps and
+            # discarded takes must not change the gain or quality verdict.
+            ranges = sorted((max(0, int(s['start_sec'] * sr)),
+                             min(len(raw_audio), int(s['end_sec'] * sr)))
+                            for s in dsi_segments + protocol_segments)
+            merged = []
+            for start, end in ranges:
+                if end <= start:
+                    continue
+                if merged and start <= merged[-1][1]:
+                    merged[-1][1] = max(merged[-1][1], end)
+                else:
+                    merged.append([start, end])
+            reference_audio = (np.concatenate([raw_audio[start:end] for start, end in merged])
+                               if merged else raw_audio)
             try:
                 import librosa
                 source_sr = librosa.get_samplerate(file_path)
             except Exception:
                 source_sr = device_info.get('sample_rate')
             quality = assess_recording_quality(
-                raw_audio, sr,
+                reference_audio, sr,
                 source_sample_rate=source_sr,
                 noise_floor_dbfs=device_info.get('noise_floor_dbfs'))
             
-            audio, loudness_info = self.audio_processor.normalize_loudness(raw_audio, sr)
+            _, loudness_info = self.audio_processor.normalize_loudness(reference_audio, sr)
+            audio = raw_audio * (10 ** (loudness_info['gain_db'] / 20))
+            normalized_noise_floor = device_info.get('noise_floor_dbfs')
+            if normalized_noise_floor is not None:
+                normalized_noise_floor += loudness_info['gain_db']
             logger.info(f"Громкость записи {loudness_info['input_lufs']:.1f} LUFS, "
                         f"усиление {loudness_info['gain_db']:+.1f} дБ")
             
@@ -187,11 +211,6 @@ class ParkinsonAnalyzer:
             # по своим упражнениям (границы упражнений передает приложение)
             # В речевых заданиях интонацию, темп и громкость оцениваем по чтению текста.
             # Обследование (task='exam') - оба набора заданий в одной записи
-            task = device_info.get('task')
-            dsi_segments = (parse_segments(device_info.get('dsi_segments'))
-                            if task in ('dsi', 'exam') else [])
-            protocol_segments = (parse_protocol_segments(device_info.get('protocol_segments'))
-                                 if task in ('speech_protocol', 'exam') else [])
             spl_offset = device_info.get('spl_offset_db')
             vowel = segment_audio(audio, sr, dsi_segments, 'vowel')
             reading = segment_audio(audio, sr, protocol_segments, 'reading')
@@ -216,10 +235,11 @@ class ParkinsonAnalyzer:
             dsi_protocol = None
             if dsi_segments:
                 dsi_protocol = measure_dsi_tasks(raw_audio, audio, sr, dsi_segments,
-                                                 spl_offset, model_offset)
+                                                 spl_offset, model_offset, normalized_noise_floor)
                 for key in ('mpt_sec', 'f0_high_hz', 'i_low_db', 'i_low_dbfs', 'i_low_calibrated'):
                     all_features[key] = dsi_protocol[key]
-            speech_protocol = measure_speech_tasks(audio, sr, protocol_segments) if protocol_segments else None
+            speech_protocol = (measure_speech_tasks(audio, sr, protocol_segments, normalized_noise_floor)
+                               if protocol_segments else None)
             
             # 3. Анализ симптомов: что можно оценить, зависит от типа записи
             recording_task = self._detect_recording_task(all_features, device_info)
