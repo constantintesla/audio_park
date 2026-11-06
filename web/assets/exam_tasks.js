@@ -120,7 +120,7 @@ const EXAM_STEPS = Object.fromEntries([...SPEECH_STEPS, ...DSI_STEPS].map(step =
 // Блок «задание — запись»: каждое задание с инструкцией и записями его попыток
 // (послушать и скачать), плюс вся запись и архив прогона. Попытки (task_recordings)
 // присылает сервер, см. task_recordings.py. API_URL объявлен на каждой странице
-function renderTaskRecordings(result) {
+function renderTaskRecordings(result, { collapsible = false, showFullRecording = true } = {}) {
     const index = encodeURIComponent(result.study_id ?? result._index ?? '');
     const files = (result.raw_data || {}).files || {};
     if (index === undefined || index === null || !(files.original_audio || files.processed_audio)) return '';
@@ -167,23 +167,23 @@ function renderTaskRecordings(result) {
         ? `${groups.length} ${plural(groups.length, 'задание', 'задания', 'заданий')}, ${result.task_recordings.length} ${plural(result.task_recordings.length, 'запись', 'записи', 'записей')}`
         : 'Запись без заданий';
     return `
-        <div class="card mt-3 mb-3 task-rec-card">
-            <div class="card-header d-flex justify-content-between align-items-center flex-wrap gap-2">
-                <div>
-                    <h5 class="mb-0">Задания и записи</h5>
+        <${collapsible ? 'details' : 'div'} class="card mt-3 mb-3 task-rec-card${collapsible ? ' study-accordion' : ''}">
+            <${collapsible ? 'summary' : 'div'} class="card-header d-flex justify-content-between align-items-center flex-wrap gap-2">
+                <span>
+                    <span class="h5 mb-0 d-block">Задания и записи</span>
                     <small class="text-muted">${count}</small>
-                </div>
-                <a class="btn btn-sm btn-primary" href="${API_URL}/api/archive/${index}"
-                   title="ZIP: вся запись, калибровка, записи заданий и results.json">Скачать архив прогона</a>
-            </div>
+                </span>
+            </${collapsible ? 'summary' : 'div'}>
             <div class="card-body">
-                <div class="task-rec-full">
+                <a class="btn btn-sm btn-primary mb-3" href="${API_URL}/api/archive/${index}"
+                   title="ZIP: вся запись, калибровка, записи заданий и results.json">Скачать архив прогона</a>
+                ${showFullRecording ? `<div class="task-rec-full">
                     <span class="task-rec-try-label">Вся запись</span>
                     <audio controls preload="none" src="${base}"></audio>
-                </div>
+                </div>` : ''}
                 ${tasks}
             </div>
-        </div>`;
+        </${collapsible ? 'details' : 'div'}>`;
 }
 
 function plural(n, one, few, many) {
