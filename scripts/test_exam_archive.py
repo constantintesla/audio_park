@@ -44,6 +44,47 @@ def main(filename):
         result = response.get_json()
         assert result['recording_task'] == 'exam'
         assert len(api.load_results()) == 1
+        # Same archived bytes and boundaries through the durable transport.
+        import hashlib
+        import wave
+        from app.upload_worker import process_one
+        patient_response = client.post('/api/patients', json={}, headers=headers)
+        patient_uuid = patient_response.json['patient']['uuid']
+        upload = client.post('/api/uploads', json={'version': 1, 'patient_uuid': patient_uuid}, headers=headers).json['upload_id']
+        manifest = {'version': 1, 'files': {}, 'device_info': expected['device_info'], 'calibration': expected['calibration']}
+        number = 0
+        for name, filename in [('recording', 'recording.wav'), ('calibration', 'calibration.wav')]:
+            audio = archive.read(filename)
+            with wave.open(io.BytesIO(audio), 'rb') as wav:
+                assert wav.getsampwidth() == 2, 'Reference must contain PCM 16-bit WAV'
+                spec = {'format': 'pcm_s16le', 'channels': wav.getnchannels(), 'sample_rate': wav.getframerate(),
+                        'samples': wav.getnframes(), 'size': len(audio), 'sha256': hashlib.sha256(audio).hexdigest(), 'parts': []}
+            for offset in range(0, len(audio), 4 * 1024 * 1024):
+                part = audio[offset:offset + 4 * 1024 * 1024]
+                checksum = hashlib.sha256(part).hexdigest()
+                response = client.put(f'/api/uploads/{upload}/parts/{number}', data=part,
+                                      headers={**headers, 'X-Part-Size': str(len(part)), 'X-Part-SHA256': checksum})
+                assert response.status_code == 200, response.data
+                spec['parts'].append({'number': number, 'size': len(part), 'sha256': checksum})
+                number += 1
+            manifest['files'][name] = spec
+        response = client.post(f'/api/uploads/{upload}/complete', json=manifest, headers=headers)
+        assert response.status_code == 202, response.data
+        with api.app.app_context():
+            assert process_one()
+        status = client.get(f'/api/uploads/{upload}').json
+        assert status['state'] == 'completed', status
+        transported = client.get(f"/api/results/{status['study_id']}").json
+        import numpy as np
+        # Fixed tolerances: numerical features rtol=1e-5, atol=1e-6;
+        # DSI absolute tolerance 0.05 (same as the existing archive check).
+        for feature, value in result['features'].items():
+            if isinstance(value, (int, float)):
+                assert np.isclose(value, transported['features'][feature], rtol=1e-5, atol=1e-6), feature
+        assert abs(result['dsi']['dsi_score'] - transported['dsi']['dsi_score']) <= 0.05
+        assert transported['task_recordings'] == result['task_recordings']
+        original = Path(transported['raw_data']['files']['original_audio']).read_bytes()
+        assert original == archive.read('recording.wav')
         attempts = result['task_recordings']
         assert len(attempts) == len(expected['task_recordings']) == 27
         assert len({a['task'] for a in attempts}) == 14

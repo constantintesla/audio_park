@@ -79,6 +79,12 @@ async function run(code) { return vm.runInContext(code,context); }
         assert.equal(d.dsi_segments.length,7);assert.equal(d.protocol_segments.length,19);
         assert(d.dsi_segments.every(s=>s.end_sec>s.start_sec && s.end_sec<=audioBuffer.duration));
         assert(tracks.every(t=>t.readyState==='ended'));assert(!document.body.classList.contains('exam-focus-mode'));`);
+    // Transport retains pauses and replaced attempts in one continuous WAV.
+    await run(`(async()=>{const exported = audioBufferToWav(audioBuffer, audioBuffer.sampleRate);
+        const bytes = await exported.arrayBuffer(); const header = new DataView(bytes);
+        assert.equal(header.getUint32(40,true), audioBuffer.getChannelData(0).length * 2);
+        assert.equal(bytes.byteLength, 44 + audioBuffer.getChannelData(0).length * 2);
+        assert(audioBuffer.duration > Math.max(...lastRecording.deviceInfo.dsi_segments.map(s=>s.end_sec)));})()`);
     // Browser permission rejection leaves controls usable and no active microphone.
     await run(`navigator.mediaDevices.getUserMedia=async()=>{throw Object.assign(new Error('denied'),{name:'NotAllowedError'});};`);
     await run('startRecording({check:true})');
