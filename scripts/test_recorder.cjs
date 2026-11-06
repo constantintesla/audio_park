@@ -64,28 +64,60 @@ async function run(code) { return vm.runInContext(code,context); }
     await checking;
     await run('assert(!micReady);assert(document.getElementById("exam-test-btn").disabled);');
     await run('micReady=true;');
-    await run('startRecording({test:"exam"})');
+    const starting = run('startRecording({test:"exam"})');
+    await new Promise(r=>setImmediate(r));
+    await run(`function feed(n, value=0.05) {
+        rec.processor.onaudioprocess({inputBuffer:{getChannelData:()=>new Float32Array(n).fill(value)}});
+    }
+    feed(3000, 0.0001);`);
+    await starting;
     await run('assert.equal(rec.test.steps.length,14);assert(document.getElementById("patient-id").disabled);assert(document.body.classList.contains("exam-focus-mode"));');
-    await run(`for(let i=0;i<27;i++) { onTestTryButton(); rec.chunks.push(new Float32Array(2000).fill(0.05)); rec.nSamples+=2000; onTestTryButton(); }
-        rec.chunks.push(new Float32Array(1000));rec.nSamples+=1000;`);
+    await run(`(async()=>{for(let i=0;i<27;i++) {
+        assert(rec.paused);
+        const before=rec.nSamples; feed(60000, .9); assert.equal(rec.nSamples,before);
+        await onTestTryButton(); feed(2000);
+        const finishing=onTestTryButton(); await onTestTryButton();
+        feed(1000); // Only the 300 ms tail is retained, even if a larger block arrives.
+        await finishing;
+        assert.equal(rec.nSamples,before+2300);
+    }})()`);
     await new Promise(r=>setTimeout(r,50));
     await run('assert(rec.paused);assert(document.getElementById("exam-review").open);assert.equal(rec.test.segments.length,27);');
-    await run(`redoExamStep(rec,0);onTestTryButton();rec.chunks.push(new Float32Array(2000));rec.nSamples+=2000;onTestTryButton();
-        rec.chunks.push(new Float32Array(1000));rec.nSamples+=1000;nextTestStep(rec);`);
+    await run(`(async()=>{redoExamStep(rec,0); assert(rec.paused);
+        const before=rec.nSamples;feed(60000);assert.equal(rec.nSamples,before);
+        await onTestTryButton();feed(2000);
+        const finishing=onTestTryButton();feed(1000);await finishing;nextTestStep(rec);})()`);
     await new Promise(r=>setTimeout(r,50));
     await run(`assert(rec.paused);assert.equal(rec.test.segments.filter(s=>s.task==='mpt').length,1);
         assert(stopRecording());assert.equal(lastRecording.patientId,'TEST-PATIENT');assert.equal(lastRecording.deviceInfo.task,'exam');
         const d=lastRecording.deviceInfo;
         assert.equal(d.dsi_segments.length,7);assert.equal(d.protocol_segments.length,19);
         assert(d.dsi_segments.every(s=>s.end_sec>s.start_sec && s.end_sec<=audioBuffer.duration));
+        assert.equal(d.noise_floor_dbfs,-80);
+        assert.equal(audioBuffer.getChannelData(0).length,28*2300);
         assert(tracks.every(t=>t.readyState==='ended'));assert(!document.body.classList.contains('exam-focus-mode'));`);
-    // Transport retains pauses and replaced attempts in one continuous WAV.
+    // Transport keeps attempts and replaced takes, excluding instruction gaps.
     await run(`(async()=>{const exported = audioBufferToWav(audioBuffer, audioBuffer.sampleRate);
         const bytes = await exported.arrayBuffer(); const header = new DataView(bytes);
         assert.equal(header.getUint32(40,true), audioBuffer.getChannelData(0).length * 2);
         assert.equal(bytes.byteLength, 44 + audioBuffer.getChannelData(0).length * 2);
-        assert(audioBuffer.duration > Math.max(...lastRecording.deviceInfo.dsi_segments.map(s=>s.end_sec)));})()`);
+        assert(audioBuffer.duration >= Math.max(...lastRecording.deviceInfo.dsi_segments.map(s=>s.end_sec)));})()`);
     // Browser permission rejection leaves controls usable and no active microphone.
+    await run(`document.getElementById('calibrate-check').checked=true;
+        const savedSignal=playCalibrationSignal, savedBeep=playBeep;
+        playCalibrationSignal=state=>({end:state.nSamples});
+        playBeep=state=>({end:state.nSamples});`);
+    const calibrated=run('startRecording({test:"exam"})');
+    await new Promise(r=>setImmediate(r));
+    await run('feed(3000,0.0001)');
+    await new Promise(r=>setTimeout(r,40));
+    await run('feed(1000)');
+    await new Promise(r=>setTimeout(r,40));
+    await run('feed(1000)');
+    await calibrated;
+    await run(`assert(rec.paused);assert.equal(rec.speechStart,5000);
+        feed(60000);assert.equal(rec.nSamples,5000);cleanupRecording();
+        playCalibrationSignal=savedSignal;playBeep=savedBeep;`);
     await run(`navigator.mediaDevices.getUserMedia=async()=>{throw Object.assign(new Error('denied'),{name:'NotAllowedError'});};`);
     await run('startRecording({check:true})');
     await run('assert.equal(rec,null);assert(!startingRecording);assert(!micReady);assert(!document.getElementById("record-btn").disabled);');

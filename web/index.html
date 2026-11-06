@@ -458,9 +458,12 @@
                 };
                 processor.onaudioprocess = (e) => {
                     if (!rec || rec.stopped || rec.paused) return;
-                    const data = new Float32Array(e.inputBuffer.getChannelData(0));
+                    const input = e.inputBuffer.getChannelData(0);
+                    const remaining = rec.captureUntil == null ? input.length : rec.captureUntil - rec.nSamples;
+                    const data = new Float32Array(input.subarray(0, Math.max(0, remaining)));
                     rec.chunks.push(data);
                     rec.nSamples += data.length;
+                    if (rec.captureUntil != null && rec.nSamples >= rec.captureUntil) rec.paused = true;
                     for (let i = 0; i < data.length; i++) {
                         if (Math.abs(data[i]) >= 0.98) { rec.clipUntil = performance.now() + 1000; break; }
                     }
@@ -556,7 +559,16 @@
 
         async function runRecordingPhases(state) {
             if (!state.calibrate) {
-                state.speechStart = 0;
+                if (state.test) {
+                    setRecPhase('silence', 'Измерение фонового шума: 3 секунды тишины, пожалуйста, молчите');
+                    if (!await waitForSample(state, Math.round(3 * state.sr))) return;
+                    const samples = new Float32Array(state.nSamples);
+                    let offset = 0;
+                    for (const chunk of state.chunks) { samples.set(chunk, offset); offset += chunk.length; }
+                    const levels = frameLevelsDb(samples, 0.5 * state.sr, state.nSamples, state.sr).map(f => f.db);
+                    state.noiseFloor = Math.max(-120, percentile(levels, 50) ?? -120);
+                }
+                state.speechStart = state.nSamples;
                 if (state.test) return showTestStep(state);
                 setRecPhase('speech', 'Идет запись. Говорите. Нажмите «Остановить», когда закончите');
                 return;
@@ -601,9 +613,10 @@
         const canLeaveStep = (test) => test.tries > 0 || test.pendingReplace === test.steps[test.step].task;
 
         function showTestStep(state) {
+            state.paused = true;
             const test = state.test;
             const step = test.steps[test.step];
-            setRecPhase('dsi-wait', 'Микрофон включен. Держите устройство на 30 см (длина линейки) весь тест. Прочитайте задание и нажмите «Начать попытку»');
+            setRecPhase('dsi-wait', 'Запись на паузе. Прочитайте задание или выслушайте объяснение, затем нажмите «Начать попытку». Держите устройство на расстоянии 30 см');
             document.getElementById('dsi-step').style.display = 'block';
             document.getElementById('dsi-step-count').textContent =
                 `${test.redo ? 'Перезапись: ' : ''}${test.stepName} ${test.step + 1} из ${test.steps.length}`;
@@ -634,12 +647,15 @@
             showTestStep(state);
         }
 
-        function onTestTryButton() {
+        async function onTestTryButton() {
             const state = rec;
-            if (!state || !state.test || state.speechStart === null) return;
+            if (!state || !state.test || state.speechStart === null || state.test.finishing) return;
             const test = state.test;
             const step = test.steps[test.step];
             if (test.tryStart === null) {
+                state.captureUntil = null;
+                state.paused = false;
+                test.resumedAt = state.nSamples;
                 test.tryStart = state.nSamples;
                 setRecPhase('speech', `Идет попытка: ${step.title.toLowerCase()}. Нажмите «Готово», когда закончите`);
                 document.getElementById('dsi-try-btn').textContent = 'Готово';
@@ -649,6 +665,10 @@
             }
             // Небольшой запас по краям: нажатие кнопки чуть запаздывает за голосом
             const margin = Math.round(0.3 * state.sr);
+            test.finishing = true;
+            state.captureUntil = state.nSamples + margin;
+            document.getElementById('dsi-try-btn').disabled = true;
+            if (!await waitForSample(state, state.captureUntil) || rec !== state) return;
             if (test.pendingReplace === step.task) {
                 test.segments = test.segments.filter(seg => seg.task !== step.task);
                 test.pendingReplace = null;
@@ -657,9 +677,10 @@
                 task: step.task,
                 // После паузы не захватываем звук до нее
                 start: Math.max(state.speechStart, test.resumedAt || 0, test.tryStart - margin),
-                end: state.nSamples + margin
+                end: state.nSamples
             });
             test.tryStart = null;
+            test.finishing = false;
             test.tries += 1;
             if (test.tries >= stepTries(step)) {
                 nextTestStep(state);
@@ -669,7 +690,7 @@
         }
 
         async function nextTestStep(state) {
-            if (!state || !state.test || state.test.tryStart !== null) return;
+            if (!state || !state.test || state.test.tryStart !== null || state.test.finishing) return;
             const test = state.test;
             test.pendingReplace = null;
             if (!test.redo) {
@@ -815,7 +836,7 @@
             test.redo = true;
             test.pendingReplace = test.steps[index].task;
             test.resumedAt = state.nSamples;
-            state.paused = false;
+            state.paused = true;
             document.getElementById('dsi-try-btn').disabled = false;
             showTestStep(state);
             document.getElementById('dsi-step').scrollIntoView({ behavior: 'smooth', block: 'center' });
@@ -1282,6 +1303,8 @@
             };
             if (calibration && calibration.noise_floor_dbfs !== null) {
                 info.noise_floor_dbfs = calibration.noise_floor_dbfs;
+            } else if (Number.isFinite(state.noiseFloor)) {
+                info.noise_floor_dbfs = round1(state.noiseFloor);
             }
             return info;
         }

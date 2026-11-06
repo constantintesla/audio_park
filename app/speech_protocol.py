@@ -105,18 +105,20 @@ def _phrase_rate(piece: np.ndarray, sr: int) -> Optional[float]:
     return round(float(len(peaks) / sounding), 1) if sounding > 0.3 and len(peaks) >= 3 else None
 
 
-def measure_speech_tasks(audio: np.ndarray, sr: int, segments: List[Dict]) -> Dict:
+def measure_speech_tasks(audio: np.ndarray, sr: int, segments: List[Dict],
+                         noise_floor_dbfs: Optional[float] = None) -> Dict:
     """
     Показатели по заданиям документа «Задания по голосу».
 
     Args:
         audio: запись после нормализации громкости
         segments: границы заданий (parse_protocol_segments)
+        noise_floor_dbfs: отдельно измеренный шум в шкале нормализованной записи
     """
     pieces = {task: segment_audio(audio, sr, segments, task) for task in PROTOCOL_TASKS}
     notes = []
 
-    floor_db = noise_floor_db(audio, sr)
+    floor_db = noise_floor_dbfs if noise_floor_dbfs is not None else noise_floor_db(audio, sr)
     mpt_attempts = [round(_phonation_time(p, sr, floor_db), 2) for p in pieces['mpt']]
     mpt = {'mpt_sec': max(mpt_attempts, default=None), 'attempts': mpt_attempts}
     if mpt['mpt_sec'] is not None and mpt['mpt_sec'] < MPT_SHORT_SEC:

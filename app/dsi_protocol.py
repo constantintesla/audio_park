@@ -135,7 +135,8 @@ def _median_voiced_dbfs(piece: np.ndarray, sr: int) -> Optional[float]:
 
 def measure_dsi_tasks(raw_audio: np.ndarray, audio: np.ndarray, sr: int,
                       segments: List[Dict], spl_offset_db: Optional[float],
-                      model_offset: Optional[Dict] = None) -> Dict:
+                      model_offset: Optional[Dict] = None,
+                      noise_floor_dbfs: Optional[float] = None) -> Dict:
     """
     Параметры DSI по упражнениям.
 
@@ -146,12 +147,15 @@ def measure_dsi_tasks(raw_audio: np.ndarray, audio: np.ndarray, sr: int,
         spl_offset_db: калибровка микрофона, дБ SPL = dBFS + offset
         model_offset: поправка модели по обычной громкости многих людей
             (device_model_stats.model_spl_offset), если калибровки нет
+        noise_floor_dbfs: отдельно измеренный шум с учетом усиления нормализации;
+            без него используется оценка по всей записи для совместимости
 
     Returns:
         mpt_sec, f0_high_hz, i_low_dbfs, i_low_db, i_low_calibrated, а также
         missing (упражнения, которых нет в записи) и attempts (значения попыток)
     """
-    floor_db = noise_floor_db(audio, sr)
+    # Explicit noise level is in the same (normalized) scale as audio.
+    floor_db = noise_floor_dbfs if noise_floor_dbfs is not None else noise_floor_db(audio, sr)
     attempts = {
         'mpt': [round(_phonation_time(p, sr, floor_db), 2) for p in segment_audio(audio, sr, segments, 'mpt')],
         'glide': [round(_highest_f0(p, sr), 1) for p in segment_audio(audio, sr, segments, 'glide')],
