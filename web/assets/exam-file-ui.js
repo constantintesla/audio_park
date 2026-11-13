@@ -257,8 +257,13 @@ function initExamFiles() {
             }
             // The local format always stores WAV, even when a legacy ZIP used another codec.
             const restoredBuffer=exam.buffer || await audioContext.decodeAudioData(await exam.audio.arrayBuffer());
-            // Keep the original WAV bytes so retries after reload have the same fingerprint.
-            if(exam.audio.type !== 'audio/wav') exam.audio=audioBufferToWav(restoredBuffer,restoredBuffer.sampleRate);
+            // The chunked transport expects the recorder's standard 44-byte PCM header.
+            // Convert once on import; local restores retain these exact bytes for retries.
+            exam.audio=audioBufferToWav(restoredBuffer,restoredBuffer.sampleRate);
+            if(exam.calibrationWav) {
+                const calibrationBuffer=await audioContext.decodeAudioData(await exam.calibrationWav.arrayBuffer());
+                exam.calibrationWav=audioBufferToWav(calibrationBuffer,calibrationBuffer.sampleRate);
+            }
             await restoreExam(exam,restoredBuffer);
         } catch(error) {showFileError(error);} finally {fileImportBusy=false;}
     };

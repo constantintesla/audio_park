@@ -43,20 +43,15 @@ Docker-шлюза lab-сервера. При изменении сети про�
 - `data/results.json` и `data/results/` — все результаты и записи. Монтируются в контейнер
   и при выкладке не трогаются.
 
-В production папка `data/` подключается как `/app/data`, а `RESULTS_FILE` указывает
-на `/app/data/results.json`. Подключение родительской папки необходимо для атомарной
-замены JSON через `os.replace`: отдельный bind mount файла вызывает `EBUSY`.
-Путь файла на хосте остаётся `~/audio_park/data/results.json`; перенос данных и ручная
-миграция не нужны. Старые пути `/app/results` и `/app/auth` сохраняются отдельными
-монтированиями, чтобы ранее сохранённые аудиозаписи и учётные записи оставались доступны.
-После обновления нужно пересоздать контейнер с новым compose-файлом; обычный
-`docker restart` не применяет изменения монтирований. Штатная выкладка через
-`docker compose ... up -d --no-build` применяет новую конфигурацию автоматически.
-
-Локальный `docker-compose.yml` также подключает родительскую папку: рабочий каталог
-проекта доступен контейнеру как `/app/local-data`, а JSON остаётся в прежнем
-`./results.json` на хосте. При запуске Python без Docker путь по умолчанию —
-`results.json`; его можно изменить переменной `RESULTS_FILE`.
+В Docker API и worker используют общий индекс `/app/auth/results.json`
+(на production-хосте `data/auth/results.json`, локально `auth_data/results.json`).
+При первом запуске он автоматически импортируется из прежнего `results.json`,
+подключённого только для чтения. Существующий новый индекс не перезаписывается.
+Папки аудио и учётных записей сохраняют прежние монтирования. Подробности:
+[docs/chunked-upload.md](docs/chunked-upload.md).
+После обновления пересоздайте контейнеры через `docker compose ... up -d --no-build`.
+При запуске Python без Docker путь по умолчанию — `results.json`;
+его можно изменить переменной `RESULTS_FILE`.
 
 Наружу сервис отдает общий контейнер nginx (`msr_map_nginx`), который проксирует
 `/audio_park/` на порт 5005. Его конфигурация лежит вне этого репозитория.
@@ -92,7 +87,7 @@ location / {
     proxy_pass http://localhost:5000;
     proxy_set_header Host $host;
     proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
-    client_max_body_size 50M;
+    client_max_body_size 150M;
     proxy_read_timeout 300s;
     proxy_send_timeout 300s;
 }

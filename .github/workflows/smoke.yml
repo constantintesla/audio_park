@@ -37,7 +37,17 @@ jobs:
         run: |
           "$VENV/bin/python" scripts/test_results_storage.py
           "$VENV/bin/python" scripts/test_access.py
+          "$VENV/bin/python" scripts/test_uploads.py
+          if command -v node >/dev/null 2>&1; then
+            node scripts/test_recorder.cjs
+            node scripts/test_upload_client.cjs
+            node scripts/test_visualization_player.cjs
+          else
+            docker run --rm -v "$PWD:/workspace:ro" -w /workspace node:22-alpine \
+              sh -c 'node scripts/test_recorder.cjs && node scripts/test_upload_client.cjs && node scripts/test_visualization_player.cjs'
+          fi
           "$VENV/bin/python" scripts/ci_smoke.py
+          "$VENV/bin/python" scripts/test_recording_pauses.py
 
   # Выкладка на lab-сервер (https://msr25.ru/audio_park/) после зелёного smoke в main.
   # Данные (results.json, results/) и .env лежат в ~/audio_park и не трогаются.

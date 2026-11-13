@@ -14,7 +14,7 @@ const RecordingCache = (() => {
     function metadata(state) {
         const test=state.test;
         return {sr:state.sr,nSamples:state.nSamples,speechStart:state.speechStart,
-            calibrate:state.calibrate,silenceEnd:state.silenceEnd,plan:state.plan,phase:state.phase,paused:!!state.paused,
+            calibrate:state.calibrate,noiseFloor:state.noiseFloor,silenceEnd:state.silenceEnd,plan:state.plan,phase:state.phase,paused:!!state.paused,
             settings:{...state.settings},deviceInfo:state.deviceInfo || buildDeviceInfo(state,null),
             test:test?{task:test.task,step:test.step,tries:test.tries,tryStart:test.tryStart,
                 segments:test.segments.map(s=>({...s})),redo:!!test.redo,pendingReplace:test.pendingReplace,resumedAt:test.resumedAt}:null};
@@ -31,7 +31,7 @@ const RecordingCache = (() => {
             if(raw.deviceInfo?.device_id && raw.deviceInfo.device_id!==buildDeviceInfo(state,null).device_id) throw new Error('Микрофон изменился. Скачайте сохранённую часть и начните новое обследование с калибровкой');
             if(raw.settings?.deviceId && state.settings.deviceId && raw.settings.deviceId!==state.settings.deviceId) throw new Error('Микрофон изменился. Скачайте сохранённую часть и начните новое обследование с калибровкой');
             state.chunks=[draft.samples];state.nSamples=raw.nSamples;state.speechStart=raw.speechStart;
-            state.calibrate=raw.calibrate;state.silenceEnd=raw.silenceEnd;state.plan=raw.plan;
+            state.calibrate=raw.calibrate;state.noiseFloor=raw.noiseFloor;state.silenceEnd=raw.silenceEnd;state.plan=raw.plan;
             state.paused=!!raw.paused;state.phase=raw.phase;
             state.deviceInfo=raw.deviceInfo;
             if(raw.test) {

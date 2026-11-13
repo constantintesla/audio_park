@@ -11,7 +11,7 @@ from typing import List, Dict, Any, Optional
 from flask import Flask, request, jsonify, send_from_directory, Response, g
 import logging
 import numpy as np
-from threading import RLock
+from app.storage_lock import ResultsLock
 from functools import wraps
 from app.auth import (
     archive_patient,
@@ -43,7 +43,7 @@ logger = logging.getLogger(__name__)
 
 app = Flask(__name__, static_folder=None)
 init_auth(app)
-RESULTS_LOCK = RLock()
+RESULTS_LOCK = ResultsLock(lambda: os.path.join(os.path.dirname(app.config['AUTH_DB_PATH']), 'results.lock'))
 
 
 def locked_results(func):
@@ -59,6 +59,20 @@ WEB_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__)
 # JSON defaults to the current folder; production places it inside a directory mount.
 RESULTS_FILE = os.getenv("RESULTS_FILE", "results.json")
 RESULTS_DIR = "results"
+
+# Docker used to bind-mount a single results.json (cannot be atomically
+# replaced). Import it once into the shared auth volume; never overwrite an
+# existing index. Keep the old mount as a read-only migration source.
+if os.getenv('RESULTS_FILE') and os.path.abspath(RESULTS_FILE) != os.path.abspath('results.json'):
+    with RESULTS_LOCK:
+        if not os.path.exists(RESULTS_FILE) and os.path.isfile('results.json'):
+            import shutil
+            with open('results.json', encoding='utf-8') as legacy:
+                if not isinstance(json.load(legacy), list):
+                    raise RuntimeError('Legacy result index is invalid')
+            os.makedirs(os.path.dirname(os.path.abspath(RESULTS_FILE)), exist_ok=True)
+            shutil.copyfile('results.json', RESULTS_FILE + '.tmp')
+            os.replace(RESULTS_FILE + '.tmp', RESULTS_FILE)
 
 # Создание директории для результатов, если её нет
 os.makedirs(RESULTS_DIR, exist_ok=True)
@@ -429,6 +443,93 @@ def analysis_request_result(request_id):
     return jsonify(study_id=result['study_id'], request_id=request_id), 200
 
 
+def serialized_analysis(func):
+    @wraps(func)
+    def wrapped(*args, **kwargs):
+        from app.storage_lock import file_lock
+        with file_lock(os.path.join(os.path.dirname(app.config['AUTH_DB_PATH']), 'analysis.lock')):
+            return func(*args, **kwargs)
+    return wrapped
+
+
+@serialized_analysis
+def analyze_and_save(temp_file, result_id, patient_id, patient, user, metadata,
+                     filename='examination.wav', calibration_file=None):
+    """Shared legacy/queued analysis; caller supplies a trusted owner and patient."""
+    from app.parkinson_analyzer import ParkinsonAnalyzer
+    g.user = user
+    with RESULTS_LOCK:
+        existing = next((r for r in load_results() if r.get('study_id') == result_id), None)
+        if existing:
+            return existing
+    # Анализ с сохранением сырых данных
+    # Используем абсолютный путь для RESULTS_DIR
+    results_dir_abs = os.path.abspath(RESULTS_DIR)
+    logger.info(f"📁 Сохранение сырых данных в: {results_dir_abs}")
+    device_info = parse_device_info(metadata.get('device_info'))
+    if metadata.get('request_id'):
+        from app.exam_archive import validate_segments
+        import soundfile as sf
+        raw_info = json.loads(metadata.get('device_info', '{}'))
+        try:
+            duration = sf.info(temp_file).duration
+        except RuntimeError:
+            import librosa
+            duration = librosa.get_duration(path=temp_file)
+        validate_segments(raw_info, duration)
+    history = load_results()
+    analyzer = ParkinsonAnalyzer(save_raw_data=True, raw_data_dir=results_dir_abs)
+    result = analyzer.analyze_audio_file(temp_file, save_raw=True, result_id=result_id,
+                                         device_info=device_info,
+                                         model_offset=model_spl_offset(history, device_info))
+    if 'error' in result:
+        raise ValueError(result['error'])
+    result['study_id'] = result_id
+    result['patient_id'] = patient_id
+    if patient:
+        result['patient_uuid'] = patient['uuid']
+        result['patient_local_number'] = patient['local_number']
+    result['owner_id'] = g.user['id']
+    if getattr(g, 'analysis_request_id', None):
+        result['request_id'] = g.analysis_request_id
+        result['request_fingerprint'] = g.analysis_fingerprint
+    calibration = parse_calibration(metadata.get('calibration'))
+    if calibration:
+        result['calibration'] = calibration
+        add_loop_gain_check(result, calibration, history, device_info)
+    save_calibration_audio(calibration_file, result)
+
+    # Добавление информации о пользователе
+    result['user_info'] = {
+        'tg_username': g.user['login'],
+        'tg_user_id': g.user['id'],
+        'timestamp': datetime.now().isoformat(),
+        'source': 'web_interface',
+        'filename': filename
+    }
+
+    # Сохранение результата
+    # Результат уже очищен в parkinson_analyzer, но дополнительно проверяем
+    with RESULTS_LOCK:
+        results = load_results()
+        if patient:
+            history = [r for r in results if r.get('patient_uuid') == patient['uuid'] and owns_result(r)]
+        else:
+            history = [r for r in results if r.get('patient_id') == patient_id and owns_result(r)]
+        result['baseline'] = compare_to_baseline(
+            result.get('features', {}), history,
+            result['user_info']['tg_user_id'], device_info,
+            result.get('quality', {}).get('unreliable_features'))
+        cleaned_result = clean_json_values(without_visuals(result))
+        results = [r for r in results if r.get('study_id') != result_id]
+        results.append(cleaned_result)
+        save_results(results)
+        # В ответ (не в файл): индекс для ссылок на записи заданий и сами попытки
+        result['_index'] = len(results) - 1
+        result['task_recordings'] = task_attempts(cleaned_result)
+    return result
+
+
 @app.route('/api/analyze', methods=['POST'])
 @idempotent_analysis
 def analyze_audio():
@@ -465,74 +566,11 @@ def analyze_audio():
         file.save(temp_file)
         
         try:
-            # Анализ с сохранением сырых данных
-            # Используем абсолютный путь для RESULTS_DIR
-            results_dir_abs = os.path.abspath(RESULTS_DIR)
-            logger.info(f"📁 Сохранение сырых данных в: {results_dir_abs}")
-            device_info = parse_device_info(request.form.get('device_info'))
-            if request.form.get('request_id'):
-                from app.exam_archive import validate_segments
-                try:
-                    import soundfile as sf
-                    raw_info = json.loads(request.form.get('device_info', '{}'))
-                    try:
-                        duration = sf.info(temp_file).duration
-                    except RuntimeError:
-                        import librosa
-                        duration = librosa.get_duration(path=temp_file)
-                    validate_segments(raw_info, duration)
-                except (ValueError, TypeError, RuntimeError) as error:
-                    return jsonify(error=str(error)), 400
-            history = load_results()
-            analyzer = ParkinsonAnalyzer(save_raw_data=True, raw_data_dir=results_dir_abs)
-            result = analyzer.analyze_audio_file(temp_file, save_raw=True, result_id=result_id,
-                                                 device_info=device_info,
-                                                 model_offset=model_spl_offset(history, device_info))
-            if 'error' in result:
-                return jsonify(result), 422
-            result['study_id'] = result_id
-            result['patient_id'] = patient_id
-            if patient:
-                result['patient_uuid'] = patient['uuid']
-                result['patient_local_number'] = patient['local_number']
-            result['owner_id'] = g.user['id']
-            if getattr(g, 'analysis_request_id', None):
-                result['request_id'] = g.analysis_request_id
-                result['request_fingerprint'] = g.analysis_fingerprint
-            calibration = parse_calibration(request.form.get('calibration'))
-            if calibration:
-                result['calibration'] = calibration
-                add_loop_gain_check(result, calibration, history, device_info)
-            save_calibration_audio(request.files.get('calibration_file'), result)
-            
-            # Добавление информации о пользователе
-            result['user_info'] = {
-                'tg_username': g.user['login'],
-                'tg_user_id': g.user['id'],
-                'timestamp': datetime.now().isoformat(),
-                'source': 'web_interface',
-                'filename': file.filename
-            }
-            
-            # Сохранение результата
-            # Результат уже очищен в parkinson_analyzer, но дополнительно проверяем
-            with RESULTS_LOCK:
-                results = load_results()
-                if patient:
-                    history = [r for r in results if r.get('patient_uuid') == patient['uuid'] and owns_result(r)]
-                else:
-                    history = [r for r in results if r.get('patient_id') == patient_id and owns_result(r)]
-                result['baseline'] = compare_to_baseline(
-                    result.get('features', {}), history,
-                    result['user_info']['tg_user_id'], device_info,
-                    result.get('quality', {}).get('unreliable_features'))
-                cleaned_result = clean_json_values(without_visuals(result))
-                results.append(cleaned_result)
-                save_results(results)
-                # В ответ (не в файл): индекс для ссылок на записи заданий и сами попытки
-                result['_index'] = len(results) - 1
-                result['task_recordings'] = task_attempts(cleaned_result)
-            
+            try:
+                result = analyze_and_save(temp_file, result_id, patient_id, patient, g.user,
+                                          request.form, file.filename, request.files.get('calibration_file'))
+            except (ValueError, TypeError, RuntimeError) as error:
+                return jsonify(error=str(error)), 400
             # Проверяем наличие сырых данных в результате
             if 'raw_data' in result:
                 logger.info(f"✅ Сырые данные сохранены для {result_id}: {result['raw_data'].get('data_directory', 'N/A')}")
@@ -552,6 +590,8 @@ def analyze_audio():
             except:
                 pass
         
+    except ValueError as e:
+        return jsonify(error=str(e)), 422
     except Exception as e:
         logger.error(f"Ошибка анализа аудио: {e}", exc_info=True)
         return jsonify({"error": str(e)}), 500
@@ -605,6 +645,7 @@ def get_results():
 
 
 @app.route('/api/recalculate-all', methods=['POST'])
+@serialized_analysis
 @locked_results
 def recalculate_all():
     """Пересчет всех результатов с обновленными параметрами (без капов и фолбеков)"""
@@ -714,6 +755,7 @@ def get_result(result_key: str):
 
 
 @app.route('/api/visualization/<result_key>', methods=['GET'])
+@serialized_analysis
 def get_visualization_data(result_key: str):
     """Получение данных для визуализации параметров"""
     index = g.result_index
@@ -1394,6 +1436,10 @@ def auth_logs_page():
 @app.get('/assets/<path:path>')
 def serve_assets(path):
     return send_from_directory(os.path.join(WEB_DIR, 'assets'), path)
+
+
+from app.uploads import init_uploads
+init_uploads(app)
 
 
 if __name__ == '__main__':

@@ -343,6 +343,42 @@ def check_api(wav_path: str) -> None:
     assert "visuals" not in client.get(f"/api/results/{result['_index']}").get_json()
     saved = result["raw_data"]["files"]["waveform_data"]
     assert os.path.getsize(saved) < 1_000_000, f"waveform_data.json {os.path.getsize(saved)} байт"
+    # Identical examination through immutable byte parts and the durable worker.
+    import hashlib
+    import wave
+    from app.upload_worker import process_one
+    patient = client.post('/api/patients', json={}, headers=headers).json['patient']['uuid']
+    created = client.post('/api/uploads', json={'version': 1, 'patient_uuid': patient}, headers=headers)
+    assert created.status_code == 201, created.data
+    upload = created.json['upload_id']
+    checksum = hashlib.sha256(audio).hexdigest()
+    for number in (1, 0):  # out of order, then same bytes again (lost response)
+        midpoint = len(audio) // 2
+        part = audio[:midpoint] if number == 0 else audio[midpoint:]
+        response = client.put(f'/api/uploads/{upload}/parts/{number}', data=part,
+                              headers={**headers, 'X-Part-Size': str(len(part)), 'X-Part-SHA256': hashlib.sha256(part).hexdigest()})
+        assert response.status_code == 200, response.data
+    with wave.open(io.BytesIO(audio), 'rb') as wav:
+        spec = {'format': 'pcm_s16le', 'channels': wav.getnchannels(), 'sample_rate': wav.getframerate(),
+                'samples': wav.getnframes(), 'size': len(audio), 'sha256': checksum, 'parts': []}
+    for number, part in enumerate((audio[:midpoint], audio[midpoint:])):
+        spec['parts'].append({'number': number, 'size': len(part), 'sha256': hashlib.sha256(part).hexdigest()})
+    manifest = {'version': 1, 'files': {'recording': spec},
+                'device_info': {'task': 'exam', 'dsi_segments': segments, 'protocol_segments': segments[:1]}}
+    response = client.post(f'/api/uploads/{upload}/complete', json=manifest, headers=headers)
+    assert response.status_code == 202, response.data
+    with api.app.app_context():
+        assert process_one()
+    status = client.get(f'/api/uploads/{upload}').json
+    assert status['state'] == 'completed', status
+    transported = client.get(f"/api/results/{status['study_id']}").json
+    for feature, value in result['features'].items():
+        if isinstance(value, (int, float)):
+            assert np.isclose(value, transported['features'][feature], rtol=1e-5, atol=1e-6), feature
+    assert transported['task_recordings'] == result['task_recordings']
+    with open(transported['raw_data']['files']['original_audio'], 'rb') as source:
+        assert source.read() == audio
+    print("chunked analysis: byte/feature/attempt equivalence ok")
     print("api: ok")
 
 

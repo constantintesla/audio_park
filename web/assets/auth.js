@@ -26,6 +26,7 @@
         csrf=data.csrf_token;
         return data.user;
     };
+    api.refreshAuth = () => api.verifyOwner(api.user.id);
     window.fetch = async (input, options = {}) => {
         const url = new URL(typeof input === 'string' ? input : input.url, location.href);
         const local = url.origin === location.origin && url.pathname.startsWith(base + '/api/');
@@ -35,10 +36,11 @@
         const method = (options.method || (input instanceof Request ? input.method : 'GET')).toUpperCase();
         if (!['GET', 'HEAD', 'OPTIONS'].includes(method)) headers.set('X-CSRF-Token', csrf);
         if(api.user) headers.set('X-AudioPark-Owner',String(api.user.id));
-        const response = await nativeFetch(input, {...options, headers, credentials:'same-origin'});
+        const {keepUploadOnAuthFailure, ...fetchOptions} = options;
+        const response = await nativeFetch(input, {...fetchOptions, headers, credentials:'same-origin'});
         if (response.status === 401 && !isLogin) {
             if(api.onSessionExpired) api.onSessionExpired();
-            else location.replace(api.url('/login'));
+            else if(!options.keepUploadOnAuthFailure) location.replace(api.url('/login'));
         }
         return response;
     };

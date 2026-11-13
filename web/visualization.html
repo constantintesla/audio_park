@@ -20,6 +20,7 @@
     <script src="assets/auth.js"></script>
     <script src="assets/exam_tasks.js"></script>
     <script src="assets/speech_protocol.js"></script>
+    <script src="assets/study-report.js"></script>
 </head>
 <body>
     <header class="app-nav">
@@ -60,8 +61,8 @@
         </div>
         
         <div id="content" style="display: none;">
+            <div id="study-report"></div>
             <div id="exam-results"></div>
-            <details class="card study-accordion"><summary class="card-header">Отчёт исследования</summary><div class="card-body"><p id="study-summary"></p><p id="study-quality"></p><ul id="study-report"></ul></div></details>
             <!-- Параметры -->
             <details class="card study-accordion">
                 <summary class="card-header">Извлеченные параметры</summary>
@@ -318,11 +319,7 @@
             archive.hidden = false;
             document.getElementById('content').style.display = 'block';
             document.getElementById('study-identity').textContent = `${result.study_id || ''} · Пациент: ${result.patient_id || '—'} · Специалист: ${result.user_info?.tg_username || '—'}`;
-            document.getElementById('study-summary').textContent = `DSI: ${result.dsi?.dsi_score?.toFixed(2) ?? '—'} · ${result.symptom_scores?.pd_risk || ''}`;
-            const verdicts = {ok:'Пригодна',warning:'Есть замечания',reject:'Требуется перезапись'};
-            document.getElementById('study-quality').textContent = 'Качество записи: ' + (verdicts[result.quality?.verdict] || result.quality?.verdict || '—');
-            const report = document.getElementById('study-report'); report.replaceChildren();
-            for (const message of result.report || []) { const li = document.createElement('li'); li.textContent = message; report.append(li); }
+            document.getElementById('study-report').innerHTML = renderStudyReport(result);
             partRequests = {};
             Object.values(charts).forEach(chart => chart.destroy());
             charts = {};

@@ -89,7 +89,7 @@
                         <p id="mic-check-status" class="hint mt-3" role="status">Микрофон ещё не проверен.</p>
                         <div class="form-check mt-3">
                             <input class="form-check-input" type="checkbox" id="calibrate-check" checked>
-                            <label class="form-check-label" for="calibrate-check">Калибровка перед записью (тишина и тестовый звук, около 7 с). Поставьте громкость устройства на максимум</label>
+                            <label class="form-check-label" for="calibrate-check">Проверка шума и микрофона перед записью (тишина и тестовый звук, около 7 с). Поставьте громкость устройства на максимум. Абсолютная громкость в дБ SPL при этом не калибруется</label>
                         </div>
                         
                         <div id="live-recorder" style="display: none;">
@@ -161,6 +161,7 @@
                 <div class="analyze-bar">
                     <span class="text-muted small">Исследование сохраняется в вашей учётке после проверки записанных заданий.</span>
                     <button id="analyze-btn" hidden class="btn btn-primary btn-lg" disabled>Анализировать</button>
+                    <button id="download-original-btn" hidden class="btn btn-outline-primary">Скачать исходную запись</button>
                 </div>
 
                 <div id="analyze-progress" class="analyze-progress" style="display: none;" aria-live="polite">
@@ -246,6 +247,13 @@
     </div>
     
     <!-- Scripts -->
+    <div id="upload-recovery" class="container alert alert-info" hidden>
+        <p id="upload-message">Есть сохранённое обследование для отправки. Локальная копия будет удалена после сохранения результата или отмены.</p>
+        <p id="upload-local-warning" class="text-danger"></p>
+        <button id="upload-resume" class="btn btn-primary">Продолжить отправку</button>
+        <button id="upload-download" class="btn btn-outline-primary">Скачать исходную запись</button>
+        <button id="upload-cancel" class="btn btn-outline-danger">Отменить загрузку</button>
+    </div>
     <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/wavesurfer.js@6/dist/wavesurfer.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.js"></script>
@@ -255,6 +263,7 @@
     <script src="assets/exam-files.js"></script>
     <script src="assets/exam-file-ui.js"></script>
     <script src="assets/recording-cache.js"></script>
+    <script src="assets/chunked-upload.js"></script>
     
     <script>
         // Global variables
@@ -338,6 +347,12 @@
         
         function initAnalyzeButton() {
             document.getElementById('analyze-btn').addEventListener('click', analyzeAudio);
+            document.getElementById('download-original-btn').addEventListener('click', () => {
+                if (!audioBuffer) return;
+                const url = URL.createObjectURL(audioBufferToWav(audioBuffer, audioBuffer.sampleRate));
+                const link = document.createElement('a'); link.href = url; link.download = 'examination.wav'; link.click();
+                setTimeout(() => URL.revokeObjectURL(url), 60000);
+            });
         }
         
         function displayAudioInfo(name, buffer) {
@@ -489,9 +504,12 @@
                 }
                 processor.onaudioprocess = (e) => {
                     if (!rec || rec.stopped || rec.paused) return;
-                    const data = new Float32Array(e.inputBuffer.getChannelData(0));
+                    const input = e.inputBuffer.getChannelData(0);
+                    const remaining = rec.captureUntil == null ? input.length : rec.captureUntil - rec.nSamples;
+                    const data = new Float32Array(input.subarray(0, Math.max(0, remaining)));
                     rec.chunks.push(data);
                     rec.nSamples += data.length;
+                    if (rec.captureUntil != null && rec.nSamples >= rec.captureUntil) rec.paused = true;
                     for (let i = 0; i < data.length; i++) {
                         if (Math.abs(data[i]) >= 0.98) { rec.clipUntil = performance.now() + 1000; break; }
                     }
@@ -514,7 +532,8 @@
 
                 if(options.draft && rec.speechStart!==null) {
                     rec.paused=options.draft.recorder.paused;
-                    if(rec.paused) openExamReview(rec); else showTestStep(rec);
+                    if(options.draft.recorder.test?.step >= rec.test.steps.length) openExamReview(rec);
+                    else showTestStep(rec);
                 }
                 else if (options.check) await checkMicrophone(rec);
                 else await runRecordingPhases(rec);
@@ -591,7 +610,16 @@
 
         async function runRecordingPhases(state) {
             if (!state.calibrate) {
-                state.speechStart = 0;
+                if (state.test) {
+                    setRecPhase('silence', 'Измерение фонового шума: 3 секунды тишины, пожалуйста, молчите');
+                    if (!await waitForSample(state, Math.round(3 * state.sr))) return;
+                    const samples = new Float32Array(state.nSamples);
+                    let offset = 0;
+                    for (const chunk of state.chunks) { samples.set(chunk, offset); offset += chunk.length; }
+                    const levels = frameLevelsDb(samples, 0.5 * state.sr, state.nSamples, state.sr).map(f => f.db);
+                    state.noiseFloor = Math.max(-120, percentile(levels, 50) ?? -120);
+                }
+                state.speechStart = state.nSamples;
                 if (state.test) return showTestStep(state);
                 setRecPhase('speech', 'Идет запись. Говорите. Нажмите «Остановить», когда закончите');
                 return;
@@ -636,9 +664,10 @@
         const canLeaveStep = (test) => test.tries > 0 || test.pendingReplace === test.steps[test.step].task;
 
         function showTestStep(state) {
+            state.paused = true;
             const test = state.test;
             const step = test.steps[test.step];
-            setRecPhase('dsi-wait', 'Микрофон включен. Держите устройство на 30 см (длина линейки) весь тест. Прочитайте задание и нажмите «Начать попытку»');
+            setRecPhase('dsi-wait', 'Запись на паузе. Прочитайте задание или выслушайте объяснение, затем нажмите «Начать попытку». Держите устройство на расстоянии 30 см');
             document.getElementById('dsi-step').style.display = 'block';
             document.getElementById('dsi-step-count').textContent =
                 `${test.redo ? 'Перезапись: ' : ''}${test.stepName} ${test.step + 1} из ${test.steps.length}`;
@@ -669,12 +698,15 @@
             showTestStep(state);
         }
 
-        function onTestTryButton() {
+        async function onTestTryButton() {
             const state = rec;
-            if (!state || !state.test || state.speechStart === null || state.cache?.failed) return;
+            if (!state || !state.test || state.speechStart === null || state.cache?.failed || state.test.finishing) return;
             const test = state.test;
             const step = test.steps[test.step];
             if (test.tryStart === null) {
+                state.captureUntil = null;
+                state.paused = false;
+                test.resumedAt = state.nSamples;
                 test.tryStart = state.nSamples;
                 setRecPhase('speech', `Идет попытка: ${step.title.toLowerCase()}. Нажмите «Готово», когда закончите`);
                 document.getElementById('dsi-try-btn').textContent = 'Готово';
@@ -684,6 +716,10 @@
             }
             // Небольшой запас по краям: нажатие кнопки чуть запаздывает за голосом
             const margin = Math.round(0.3 * state.sr);
+            test.finishing = true;
+            state.captureUntil = state.nSamples + margin;
+            document.getElementById('dsi-try-btn').disabled = true;
+            if (!await waitForSample(state, state.captureUntil) || rec !== state) return;
             if (test.pendingReplace === step.task) {
                 test.segments = test.segments.filter(seg => seg.task !== step.task);
                 test.pendingReplace = null;
@@ -692,9 +728,10 @@
                 task: step.task,
                 // После паузы не захватываем звук до нее
                 start: Math.max(state.speechStart, test.resumedAt || 0, test.tryStart - margin),
-                end: state.nSamples + margin
+                end: state.nSamples
             });
             test.tryStart = null;
+            test.finishing = false;
             test.tries += 1;
             if (test.tries >= stepTries(step)) {
                 nextTestStep(state);
@@ -704,7 +741,7 @@
         }
 
         async function nextTestStep(state) {
-            if (!state || !state.test || state.test.tryStart !== null || state.cache?.failed) return;
+            if (!state || !state.test || state.test.tryStart !== null || state.cache?.failed || state.test.finishing) return;
             const test = state.test;
             test.pendingReplace = null;
             if (!test.redo) {
@@ -857,7 +894,7 @@
             test.redo = true;
             test.pendingReplace = test.steps[index].task;
             test.resumedAt = state.nSamples;
-            state.paused = false;
+            state.paused = true;
             document.getElementById('dsi-try-btn').disabled = false;
             showTestStep(state);
             document.getElementById('dsi-step').scrollIntoView({ behavior: 'smooth', block: 'center' });
@@ -1089,6 +1126,7 @@
             displayCalibration(calibration);
             initWaveform(audioBuffer);
             document.getElementById('analyze-btn').disabled = false;
+            document.getElementById('download-original-btn').hidden = false;
             return true;
         }
 
@@ -1120,7 +1158,7 @@
 
         function recordingSegments(state,tasks) {
             const start=state.speechStart ?? 0;
-            const segments=(state.test?.segments || []).filter(s=>tasks.has(s.task)).map(s=>({task:s.task,
+            const segments=(state.test?.segments || []).map(s=>({task:s.task,
                 start_sec:round3(Math.max(0,s.start-start)/state.sr),
                 end_sec:round3((Math.min(s.end,state.nSamples)-start)/state.sr)
             })).filter(s=>s.end_sec-s.start_sec>=0.2).sort((a,b)=>a.start_sec-b.start_sec);
@@ -1130,7 +1168,7 @@
                 const boundary=round3((segments[i-1].end_sec+segments[i].start_sec)/2);
                 segments[i-1].end_sec=boundary;segments[i].start_sec=boundary;
             }
-            return segments;
+            return segments.filter(s=>tasks.has(s.task));
         }
 
         function round1(x) {
@@ -1344,6 +1382,8 @@
             };
             if (calibration && calibration.noise_floor_dbfs !== null) {
                 info.noise_floor_dbfs = calibration.noise_floor_dbfs;
+            } else if (Number.isFinite(state.noiseFloor)) {
+                info.noise_floor_dbfs = round1(state.noiseFloor);
             }
             return info;
         }
@@ -1357,7 +1397,7 @@
             const fmt = (v, unit) => v === null || v === undefined ? '—' : `${v} ${unit}`;
             const agc = cal.agc_suspected === null || cal.agc_suspected === undefined ? 'не определено'
                 : (cal.agc_suspected ? `похоже, включена (ступенька ${cal.agc_step_measured_db} дБ)` : 'не обнаружена');
-            let html = '<strong>Калибровка:</strong><br>';
+            let html = '<strong>Проверка шума и микрофона:</strong><br>';
             html += `Шум: ${fmt(cal.noise_floor_dbfs, 'dBFS')}<br>`;
             html += `Тестовый сигнал: ${cal.sweep_detected ? `услышан, запас над шумом ${fmt(cal.sweep_snr_db, 'дБ')}` : 'не услышан'}<br>`;
             if (cal.sweep_detected) {
@@ -1369,6 +1409,7 @@
             } else {
                 html += '<div class="text-success mt-1">Устройство в порядке</div>';
             }
+            html += '<div class="mt-1">Эта проверка не калибрует абсолютную громкость в дБ SPL. Без отдельной SPL-калибровки DSI рассчитывается приблизительно.</div>';
             box.innerHTML = html;
             box.style.display = 'block';
         }
@@ -1448,7 +1489,6 @@
             try {
                 exam = await submissionExam();
                 await withExamSendLock(exam,async()=>{
-                if (exam.audio.size + (exam.calibrationWav?.size || 0) > 49 * 1024 * 1024) throw new Error('Для отправки запись и калибровка должны занимать менее 49 МиБ. Скачайте ZIP для сохранения');
                 await AudioPark.verifyOwner(exam.owner || (await AudioPark.ready).id);
                 exam=await setExamStatus(exam,'sending',{lastError:''});
                 const form=analysisForm(exam);
@@ -1457,10 +1497,21 @@
                 setAnalyzeStage('analyze', 'Отправка и анализ обследования. Дождитесь результата…');
                 analyzeProgress.analyzeFrom = performance.now();
                 analyzeProgress.tau = Math.max(30, audioBuffer.duration / 2);
+                const config = await ChunkedUpload.config();
+                if (config.enabled) {
+                    result = await ChunkedUpload.start({wav: exam.audio, duration: audioBuffer.duration,
+                        patientUuid: exam.patientUuid, deviceInfo: exam.deviceInfo,
+                        calibration: exam.calibration, calibrationWav: exam.calibrationWav,
+                        clientToken: exam.id}, config, (state, text, fraction) => {
+                            setAnalyzeStage(state === 'uploading' ? 'upload' : 'prepare', text);
+                            setAnalyzePercent(fraction * 90);
+                        });
+                } else {
                 const controller=new AbortController();timer=setTimeout(()=>controller.abort(),600000);
                 const response = await fetch(`${API_URL}/api/analyze`,{method:'POST',body:form,signal:controller.signal});
                 result = await response.json();
                 if (!response.ok) throw new Error(result.error || 'Ошибка анализа');
+                }
                 }
                 if(!result.study_id) throw new Error('Сервер не подтвердил сохранение обследования');
                 await setExamStatus(exam,'sent',{studyId:result.study_id,lastError:''});

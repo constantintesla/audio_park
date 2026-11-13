@@ -13,6 +13,7 @@ const server=http.createServer((req,res)=>{
     const url=new URL(req.url,'http://localhost');
     const json=(status,data)=>{res.writeHead(status,{'Content-Type':'application/json','Cache-Control':'no-store'});res.end(JSON.stringify(data));};
     if(url.pathname==='/api/auth/me') return json(authorized?200:401,authorized?{user:{id:owner,login:'test',role:'expert'},csrf_token:'fixture'}:{error:'Сессия истекла'});
+    if(url.pathname==='/api/uploads/config') return json(200,{enabled:false});
     if(url.pathname==='/api/patients') return json(200,{patients:[patient]});
     if(url.pathname.startsWith('/api/analysis-requests/')) {
         if(!authorized) return json(401,{error:'Сессия истекла'});
@@ -59,7 +60,7 @@ async function open(base) {
     }
     await evaluate(`await AudioPark.ready;await refreshLocalExams(); window.alert=message=>{window.lastAlert=message;};window.confirm=()=>true;`);
 }
-const assertBrowser=async expression=>{assert.equal(await evaluate(`return !!(${expression});`),true,expression);};
+const assertBrowser=async expression=>{const ok=await evaluate(`return !!(${expression});`);if(!ok) console.error(await evaluate(`return {duration:audioBuffer?.duration,incomplete:lastRecording?.incomplete,hidden:document.getElementById('analyze-btn').hidden,status:document.getElementById('file-status').textContent};`));assert.equal(ok,true,expression);};
 (async()=>{
     await new Promise(r=>server.listen(0,'127.0.0.1',r));
     const base=`http://127.0.0.1:${server.address().port}/`;
@@ -88,7 +89,7 @@ const assertBrowser=async expression=>{assert.equal(await evaluate(`return !!(${
         await startRecording({test:'exam'});
         if(!rec) throw new Error(window.lastAlert || 'Recorder did not start');
         rec.processor.onaudioprocess=null;
-        rec.chunks=[new Float32Array(rec.sr*4).fill(.05)];rec.nSamples=rec.sr*4;
+        rec.chunks=[new Float32Array(rec.sr*4).fill(.05)];rec.nSamples=rec.sr*4;rec.speechStart=0;
         rec.test.segments=[{task:'mpt',start:0,end:rec.sr*2}];rec.test.step=1;rec.test.tries=0;
         await RecordingCache.checkpoint(rec);window.draftId=rec.cache.id;`);
     const draftId=await evaluate('return draftId;');
@@ -101,7 +102,8 @@ const assertBrowser=async expression=>{assert.equal(await evaluate(`return !!(${
     // Continue a real checkpoint; verify incremental chunks after another reload.
     await evaluate(`navigator.mediaDevices.getUserMedia=async()=>{const stream=audioContext.createMediaStreamDestination().stream,track=stream.getAudioTracks()[0];track.getSettings=()=>({deviceId:'fixture-microphone'});return stream;};
         await RecordingCache.resume(draft);if(!rec) throw new Error(window.lastAlert);
-        rec.processor.onaudioprocess=null;rec.chunks.push(new Float32Array(rec.sr).fill(.08));rec.nSamples+=rec.sr;
+        if(document.getElementById('exam-review').open) throw new Error('Paused between attempts opened final review');
+        rec.processor.onaudioprocess=null;rec.paused=false;rec.chunks.push(new Float32Array(rec.sr).fill(.08));rec.nSamples+=rec.sr;
         await RecordingCache.checkpoint(rec);if(rec.cache.savedSamples!==rec.sr*5) throw new Error('Resume lost samples');`);
     // Quota failure must pause recording and expose an independent backup.
     await evaluate(`window.realCache=ExamFiles.cache;ExamFiles.cache=async(action,exam)=>{if(action==='checkpoint')throw new DOMException('No space','QuotaExceededError');return realCache(action,exam);};
@@ -170,6 +172,14 @@ const assertBrowser=async expression=>{assert.equal(await evaluate(`return !!(${
     await assertBrowser(`(await ExamFiles.cache('list')).length===0`);
     owner=1;await cdp('Page.navigate',{url:'about:blank'});await open(base);
     await assertBrowser(`(await ExamFiles.cache('list')).length>=2`);
+    // The merged send flow retains the local identity when selecting chunked transport.
+    await evaluate(`const exam=await ExamFiles.cache('get',{id:'${completeId}'});
+        await restoreExam({...exam,id:'chunked-exam-retry-123456',status:'saved',studyId:undefined,submissionSignature:undefined});
+        ChunkedUpload.config=async()=>({enabled:true});
+        ChunkedUpload.start=async input=>{if(input.clientToken!==lastRecording.id || input.wav!==lastRecording.audio) throw new Error('Chunked transport lost local identity');return {study_id:'AP-chunked'};};
+        await analyzeAudio({backupConfirmed:true});`);
+    await open(base);
+    await assertBrowser(`(await ExamFiles.cache('get',{id:'chunked-exam-retry-123456'})).status==='sent'`);
     await evaluate(`await ExamFiles.cache('delete',{id:'${draftId}'});if((await ExamFiles.cache('chunks',{id:'${draftId}'})).length) throw new Error('Deleted draft leaked chunks');await ExamFiles.cache('clear');`);
     await assertBrowser(`(await ExamFiles.cache('list')).length===0`);
     console.log('recording cache browser: real IndexedDB migration, reload, partial ZIP, resume, quota failure/retry, blocked upload, network retry, lost-response lookup, interrupted send, expired session, owner isolation, chunk deletion: ok');

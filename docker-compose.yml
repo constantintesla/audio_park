@@ -5,8 +5,7 @@ services:
     ports:
       - "${API_PORT:-5000}:5000"
     volumes:
-      # Local results.json stays in the project folder; mount its parent for atomic writes.
-      - ./:/app/local-data
+      - ./results.json:/app/results.json:ro
       - ./results:/app/results
       - ./auth_data:/app/auth
     env_file:
@@ -15,12 +14,29 @@ services:
       - PORT=5000
       - FLASK_ENV=${FLASK_ENV:-development}
       - DEBUG=${DEBUG:-True}
+      - RESULTS_FILE=/app/auth/results.json
       - AUTH_DATA_DIR=/app/auth
-      - RESULTS_FILE=/app/local-data/results.json
       - SESSION_COOKIE_SECURE=${SESSION_COOKIE_SECURE:-false}
     restart: unless-stopped
     networks:
       - parkinson_network
+
+  upload-worker:
+    build: .
+    image: audio_park-api:latest
+    command: ["python", "-m", "app.upload_worker"]
+    env_file:
+      - .env
+    environment:
+      - RESULTS_FILE=/app/auth/results.json
+      - AUTH_DATA_DIR=/app/auth
+      - UPLOAD_DIR=/app/auth/uploads
+    volumes:
+      - ./results.json:/app/results.json:ro
+      - ./results:/app/results
+      - ./auth_data:/app/auth
+    restart: unless-stopped
+    mem_limit: 1536m
 
 networks:
   parkinson_network:

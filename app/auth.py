@@ -298,7 +298,7 @@ def init_auth(app):
         SESSION_COOKIE_SAMESITE="Lax",
         SESSION_COOKIE_SECURE=os.getenv("SESSION_COOKIE_SECURE", "false").lower() == "true",
         PERMANENT_SESSION_LIFETIME=timedelta(hours=12),
-        MAX_CONTENT_LENGTH=50 * 1024 * 1024,
+        MAX_CONTENT_LENGTH=150 * 1024 * 1024,
         PATIENT_HMAC_MASTER_KEY=patient_master.lower(),
     )
     with app.app_context(), connection() as db:
