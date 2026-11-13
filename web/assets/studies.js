@@ -26,7 +26,13 @@ document.addEventListener('DOMContentLoaded', async () => {
                 values.forEach((value, index) => { const cell = document.createElement('td'); cell.textContent = value; if (index === 0) cell.className = 'study-id'; row.append(cell); });
                 const cell = document.createElement('td'); const link = document.createElement('a');
                 link.className = 'btn btn-sm btn-outline-secondary'; link.textContent = 'Открыть';
-                link.href = AudioPark.url('/visualization?study=' + encodeURIComponent(study.study_id)); cell.append(link); row.append(cell); body.append(row);
+                link.href = AudioPark.url('/visualization?study=' + encodeURIComponent(study.study_id)); cell.append(link);
+                const archive = document.createElement('a');
+                archive.className = 'btn btn-sm btn-outline-primary ms-2'; archive.textContent = 'Скачать ZIP';
+                archive.href = AudioPark.url('/api/archive/' + encodeURIComponent(study.study_id || study._index));
+                archive.setAttribute('download', '');
+                archive.title = 'Аудио, калибровка, задания и результаты анализа';
+                cell.append(archive); row.append(cell); body.append(row);
             }
             document.querySelector('#results-count').textContent = `Найдено: ${data.count}`;
             document.querySelector('#empty-results').hidden = data.count !== 0;

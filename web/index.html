@@ -138,6 +138,26 @@
                     <strong>Частота дискретизации:</strong> <span id="audio-sr"></span> Гц
                 </div>
                 
+                <section class="my-3" aria-label="Файлы обследований">
+                    <div id="download-actions" hidden>
+                        <p class="small text-muted">Запись готова. Можно сохранить копию перед отправкой.</p>
+                        <button id="download-wav" class="btn btn-outline-primary" disabled>Скачать запись WAV</button>
+                        <button id="download-exam" class="btn btn-outline-primary" disabled>Сохранить обследование ZIP</button>
+                    </div>
+                    <details class="mt-3"><summary>Загрузить запись из файла</summary>
+                    <label class="d-block mt-3">Загрузить аудио или обследование ZIP
+                        <input id="import-exam" type="file" accept=".zip,.wav,.mp3,.ogg,.oga,.webm,.m4a,.flac,.aac" class="form-control">
+                    </label>
+                    <label>Задание для отдельного аудиофайла <select id="import-task" class="form-select"></select></label>
+                    <label class="d-block"><input id="import-append" type="checkbox"> Добавить аудиофайл как новую попытку в текущее обследование</label>
+                    </details>
+                    <p id="file-status" role="status" class="small"></p>
+                    <audio id="file-preview" controls hidden></audio>
+                    <div id="file-contents" class="small"></div>
+                    <p id="recording-cache-status" role="status" class="small"></p>
+                    <button id="retry-local-save" class="btn btn-outline-primary" hidden>Повторить локальное сохранение</button>
+                    <details id="local-exams-panel"><summary>Неотправленные обследования и локальные копии</summary><p class="small">Копии доступны только в вашей учётной записи и хранятся в этом браузере до ручного удаления. На общем компьютере скачайте ZIP и удалите локальные копии перед выходом.</p><button id="refresh-local-exams" class="btn btn-sm btn-outline-secondary">Обновить список</button> <button id="clear-local-exams" class="btn btn-sm btn-outline-danger">Удалить все мои локальные копии</button><div id="local-exams"></div></details>
+                </section>
                 <div class="analyze-bar">
                     <span class="text-muted small">Исследование сохраняется в вашей учётке после проверки записанных заданий.</span>
                     <button id="analyze-btn" hidden class="btn btn-primary btn-lg" disabled>Анализировать</button>
@@ -193,6 +213,20 @@
                 <button id="exam-disclaimer-start" class="btn btn-primary" disabled>Начать обследование</button>
             </div>
         </dialog>
+<dialog id="before-send" class="app-modal" aria-labelledby="before-send-title">
+    <div class="app-modal-head"><h3 id="before-send-title">Скачать копию перед отправкой?</h3></div>
+    <div class="app-modal-body">
+        <p>Обследование готово. Вы можете сохранить его на компьютер перед анализом.</p>
+        <p class="small text-muted">ZIP содержит аудио, калибровку и разметку заданий для восстановления. WAV содержит только звук. Скачивание необязательно.</p>
+        <button id="before-send-zip" class="btn btn-outline-primary">Скачать ZIP</button>
+        <button id="before-send-wav" class="btn btn-outline-primary">Скачать WAV</button>
+        <p id="before-send-status" role="status" class="small"></p>
+    </div>
+    <div class="app-modal-actions">
+        <button id="before-send-cancel" class="btn btn-outline-secondary">Вернуться к записи</button>
+        <button id="before-send-submit" class="btn btn-primary">Отправить на анализ</button>
+    </div>
+</dialog>
 <dialog id="exam-review" class="app-modal app-modal-wide" aria-labelledby="exam-review-title">
             <div class="app-modal-body">
                 <h3 id="exam-review-title">Обследование записано</h3>
@@ -201,6 +235,7 @@
             </div>
             <div class="app-modal-actions">
                 <button id="exam-review-abort" class="btn btn-outline-secondary">Прервать тест</button>
+                <button id="exam-review-save" class="btn btn-outline-primary">Завершить без отправки</button>
                 <button id="exam-review-submit" class="btn btn-primary">Отправить на анализ</button>
             </div>
         </dialog>
@@ -217,6 +252,9 @@
     <script src="assets/patient-picker.js"></script>
     <script src="assets/exam_tasks.js"></script>
     <script src="assets/speech_protocol.js"></script>
+    <script src="assets/exam-files.js"></script>
+    <script src="assets/exam-file-ui.js"></script>
+    <script src="assets/recording-cache.js"></script>
     
     <script>
         // Global variables
@@ -238,6 +276,7 @@
             initRecordButton();
             initAnalyzeButton();
             initPatientPicker();
+            initExamFiles();
 
 
 
@@ -282,7 +321,7 @@
                     await startRecording({ check: true });
                 } else if (rec && rec.test) {
                     // Пошаговый тест прерывают целиком: незаконченный тест не анализируем
-                    if (!confirm('Прервать тест? Все записанные задания будут удалены.')) return;
+                    if (!confirm('Прервать тест? Сохранённая часть останется в локальных обследованиях.')) return;
                     cleanupRecording();
                 } else {
                     cleanupRecording();
@@ -393,7 +432,7 @@
         }
 
         async function startRecording(options = {}) {
-            if (rec || startingRecording) return;
+            if (rec || startingRecording || analyzeProgress || (typeof fileImportBusy !== 'undefined' && fileImportBusy && !options.draft && !options.restartingDraft)) return;
             startingRecording = true;
             document.getElementById('record-btn').disabled = true;
             document.getElementById('exam-test-btn').disabled = true;
@@ -441,6 +480,13 @@
                     // и границы попыток (в отсчетах)
                     test: options.test ? { ...TESTS[options.test], step: 0, tries: 0, tryStart: null, segments: [] } : null
                 };
+                if(options.draft) {
+                    rec.patientId=options.draft.patientId;
+                    rec.patientUuid=options.draft.patientUuid;
+                }
+                if(options.test && typeof RecordingCache !== 'undefined') {
+                    await RecordingCache.begin(rec,options.draft);
+                }
                 processor.onaudioprocess = (e) => {
                     if (!rec || rec.stopped || rec.paused) return;
                     const data = new Float32Array(e.inputBuffer.getChannelData(0));
@@ -466,14 +512,18 @@
                 rec.startedAt = performance.now();
                 drawLive();
 
-                if (options.check) await checkMicrophone(rec);
+                if(options.draft && rec.speechStart!==null) {
+                    rec.paused=options.draft.recorder.paused;
+                    if(rec.paused) openExamReview(rec); else showTestStep(rec);
+                }
+                else if (options.check) await checkMicrophone(rec);
                 else await runRecordingPhases(rec);
             } catch (e) {
                 acquiredStream?.getTracks().forEach(track => track.stop());
                 micReady = false;
                 cleanupRecording();
                 document.getElementById('mic-check-status').textContent = 'Проверка не завершена: ' + e.message;
-                alert('Ошибка доступа к микрофону: ' + e.message);
+                alert('Не удалось начать запись: ' + e.message);
             } finally {
                 startingRecording = false;
                 document.getElementById('record-btn').disabled = false;
@@ -621,7 +671,7 @@
 
         function onTestTryButton() {
             const state = rec;
-            if (!state || !state.test || state.speechStart === null) return;
+            if (!state || !state.test || state.speechStart === null || state.cache?.failed) return;
             const test = state.test;
             const step = test.steps[test.step];
             if (test.tryStart === null) {
@@ -654,7 +704,7 @@
         }
 
         async function nextTestStep(state) {
-            if (!state || !state.test || state.test.tryStart !== null) return;
+            if (!state || !state.test || state.test.tryStart !== null || state.cache?.failed) return;
             const test = state.test;
             test.pendingReplace = null;
             if (!test.redo) {
@@ -675,6 +725,7 @@
             if (!await waitForSample(state, lastEnd) || rec !== state) return;
             state.paused = true;
             test.redo = false;
+            if(typeof RecordingCache !== 'undefined') RecordingCache.checkpoint(state).catch(showFileError);
             openExamReview(state);
         }
 
@@ -692,6 +743,12 @@
                 if (!isRecording) await startRecording({ test: 'exam' });
             });
 
+            document.getElementById('exam-review-save').addEventListener('click', () => {
+                if (stopRecording()) {
+                    document.getElementById('analyze-btn').hidden = false;
+                    document.getElementById('download-exam').scrollIntoView({block:'center'});
+                }
+            });
             const review = document.getElementById('exam-review');
             // Esc не закрывает список: тест можно только отправить или прервать
             review.addEventListener('cancel', (e) => e.preventDefault());
@@ -700,7 +757,7 @@
                 if (stopRecording()) await analyzeAudio();
             });
             document.getElementById('exam-review-abort').addEventListener('click', () => {
-                if (!confirm('Прервать тест? Все записанные задания будут удалены.')) return;
+                if (!confirm('Прервать тест? Сохранённая часть останется в локальных обследованиях.')) return;
                 closeExamReview();
                 cleanupRecording();
             });
@@ -944,6 +1001,7 @@
         function cleanupRecording() {
             const wasCheck = rec?.check;
             if (rec) {
+                if(typeof RecordingCache !== 'undefined') RecordingCache.detach(rec);
                 rec.stopped = true;
                 if (rec.raf) cancelAnimationFrame(rec.raf);
                 try { rec.processor.disconnect(); } catch (e) {}
@@ -970,6 +1028,7 @@
         function stopRecording() {
             if (!rec) return false;
             const state = rec;
+            if(state.cache) {state.cache.finalizing=true;clearInterval(state.cache.timer);}
             state.stopped = true;
             cleanupRecording();
 
@@ -1006,14 +1065,16 @@
                 // Границы упражнений в секундах от начала отправляемой записи
                 deviceInfo.task = state.test.task;
                 for (const [key, tasks] of Object.entries(state.test.segmentSets)) {
-                    deviceInfo[key] = state.test.segments.filter(seg => tasks.has(seg.task)).map(seg => ({
-                        task: seg.task,
-                        start_sec: round3((seg.start - state.speechStart) / state.sr),
-                        end_sec: round3((Math.min(seg.end, state.nSamples) - state.speechStart) / state.sr)
-                    }));
+                    deviceInfo[key] = recordingSegments(state,tasks);
                 }
             }
             lastRecording = {
+                id:state.cache?.id || crypto.randomUUID(),
+                owner:state.cache?.owner,
+                createdAt:state.cache?.createdAt,
+                cachePending:state.cache?.tail.catch(()=>{}),
+                cacheState:state.cache,
+                status:'saved',incomplete:false,
                 patientId: state.patientId,
                 patientUuid: state.patientUuid,
                 calibration,
@@ -1022,6 +1083,8 @@
                 buffer: audioBuffer
             };
 
+            if(typeof RecordingCache !== 'undefined') RecordingCache.finish(state);
+            if (typeof ExamFiles !== 'undefined') persistCurrentExam().catch(showFileError);
             displayAudioInfo('Запись с микрофона', audioBuffer);
             displayCalibration(calibration);
             initWaveform(audioBuffer);
@@ -1053,6 +1116,21 @@
 
         function round3(x) {
             return Math.round(x * 1000) / 1000;
+        }
+
+        function recordingSegments(state,tasks) {
+            const start=state.speechStart ?? 0;
+            const segments=(state.test?.segments || []).filter(s=>tasks.has(s.task)).map(s=>({task:s.task,
+                start_sec:round3(Math.max(0,s.start-start)/state.sr),
+                end_sec:round3((Math.min(s.end,state.nSamples)-start)/state.sr)
+            })).filter(s=>s.end_sec-s.start_sec>=0.2).sort((a,b)=>a.start_sec-b.start_sec);
+            // Adjacent attempts may share the 300 ms button margin. Split that margin
+            // once so persisted boundaries remain valid even when the next try starts immediately.
+            for(let i=1;i<segments.length;i++) if(segments[i-1].end_sec>segments[i].start_sec) {
+                const boundary=round3((segments[i-1].end_sec+segments[i].start_sec)/2);
+                segments[i-1].end_sec=boundary;segments[i].start_sec=boundary;
+            }
+            return segments;
         }
 
         function round1(x) {
@@ -1352,35 +1430,53 @@
             analyzeProgress = null;
         }
 
-        async function analyzeAudio() {
-            if (!audioBuffer || !lastRecording || lastRecording.deviceInfo.task !== 'exam') return;
+        async function analyzeAudio({backupConfirmed = false} = {}) {
+            if (isRecording || analyzeProgress || !audioBuffer || !lastRecording || (typeof fileImportBusy !== 'undefined' && fileImportBusy)) return;
+            if (lastRecording.imported) {
+                const selectedUuid = document.getElementById('patient-uuid').value.trim();
+                if(!selectedUuid) {alert('Выберите или подтвердите пациента для восстановленной записи');return;}
+                lastRecording.patientId = document.getElementById('patient-id').value.trim();
+                lastRecording.patientUuid = document.getElementById('patient-uuid').value.trim();
+            }
             const patient = lastRecording.patientId;
             if (!patient) { alert('Сначала выберите или создайте пациента'); return; }
+            if (!backupConfirmed) { openBeforeSend(); return; }
             const buttons = ['record-btn','exam-test-btn','analyze-btn'].map(id=>document.getElementById(id));
             buttons.forEach(button=>button.disabled=true);
             showAnalyzeProgress();
+            let exam=null, timer;
             try {
-                const form = new FormData();
-                form.append('file',audioBufferToWav(audioBuffer,audioBuffer.sampleRate),'examination.wav');
-                form.append('patient_id',patient);
-                if (lastRecording.patientUuid) form.append('patient_uuid', lastRecording.patientUuid);
-                form.append('device_info',JSON.stringify(lastRecording.deviceInfo));
-                if (lastRecording.calibration) form.append('calibration',JSON.stringify(lastRecording.calibration));
-                if (lastRecording.calibrationWav) form.append('calibration_file',lastRecording.calibrationWav,'calibration.wav');
+                exam = await submissionExam();
+                await withExamSendLock(exam,async()=>{
+                if (exam.audio.size + (exam.calibrationWav?.size || 0) > 49 * 1024 * 1024) throw new Error('Для отправки запись и калибровка должны занимать менее 49 МиБ. Скачайте ZIP для сохранения');
+                await AudioPark.verifyOwner(exam.owner || (await AudioPark.ready).id);
+                exam=await setExamStatus(exam,'sending',{lastError:''});
+                const form=analysisForm(exam);
+                let result=await checkExamResult(exam,form);
+                if(!result) {
                 setAnalyzeStage('analyze', 'Отправка и анализ обследования. Дождитесь результата…');
                 analyzeProgress.analyzeFrom = performance.now();
                 analyzeProgress.tau = Math.max(30, audioBuffer.duration / 2);
-                const response = await fetch(`${API_URL}/api/analyze`,{method:'POST',body:form});
-                const result = await response.json();
+                const controller=new AbortController();timer=setTimeout(()=>controller.abort(),600000);
+                const response = await fetch(`${API_URL}/api/analyze`,{method:'POST',body:form,signal:controller.signal});
+                result = await response.json();
                 if (!response.ok) throw new Error(result.error || 'Ошибка анализа');
+                }
+                if(!result.study_id) throw new Error('Сервер не подтвердил сохранение обследования');
+                await setExamStatus(exam,'sent',{studyId:result.study_id,lastError:''});
                 finishAnalyzeProgress();
                 location.assign(`${API_URL}/visualization?study=${encodeURIComponent(result.study_id)}`);
+                });
             } catch(error) {
+                if(exam && !error.busy) {
+                    try {await setExamStatus(exam,'error',{lastError:error.message});}
+                    catch(storageError) {showFileError(storageError);}
+                } else showFileError(error);
                 finishAnalyzeProgress(error.message);
                 const retry = document.getElementById('analyze-btn');
                 retry.hidden = false; retry.style.display = ''; retry.textContent = 'Повторить отправку обследования';
             }
-            finally { buttons.forEach(button=>button.disabled=false); document.getElementById('exam-test-btn').disabled = !micReady; }
+            finally { clearTimeout(timer);buttons.forEach(button=>button.disabled=false); document.getElementById('exam-test-btn').disabled = !micReady; }
         }
 
         // Helper: Convert AudioBuffer to WAV for wavesurfer

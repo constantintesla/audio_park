@@ -5,7 +5,8 @@ services:
     ports:
       - "${API_PORT:-5000}:5000"
     volumes:
-      - ./results.json:/app/results.json
+      # Local results.json stays in the project folder; mount its parent for atomic writes.
+      - ./:/app/local-data
       - ./results:/app/results
       - ./auth_data:/app/auth
     env_file:
@@ -15,6 +16,7 @@ services:
       - FLASK_ENV=${FLASK_ENV:-development}
       - DEBUG=${DEBUG:-True}
       - AUTH_DATA_DIR=/app/auth
+      - RESULTS_FILE=/app/local-data/results.json
       - SESSION_COOKIE_SECURE=${SESSION_COOKIE_SECURE:-false}
     restart: unless-stopped
     networks:

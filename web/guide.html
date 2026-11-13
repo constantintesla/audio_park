@@ -27,10 +27,18 @@
         <div>
             <span class="guide-kicker">Памятка врачу · около 10 минут</span>
             <h1>Как провести обследование голоса</h1>
-            <p>Подготовьте пациента, проверьте микрофон, проведите 14 заданий и отправьте запись на анализ.</p>
+            <p>Подготовьте пациента, проведите 14 заданий, сохраните резервную копию и отправьте запись на анализ. При сбое восстановите сохранённую часть обследования.</p>
         </div>
         <a class="btn btn-primary guide-download" href="assets/instrukciya-vracha.pdf" download>Скачать PDF</a>
     </div>
+
+    <nav class="guide-contents" aria-label="Разделы инструкции">
+        <a href="#exam-steps">Провести обследование</a>
+        <a href="#local-copies">Сохранить копию</a>
+        <a href="#restore-recording">Восстановить запись</a>
+        <a href="#import-recording">Загрузить файл</a>
+        <a href="#troubleshooting">Решить проблему</a>
+    </nav>
 
     <section class="guide-callout guide-callout-primary" aria-label="Главное правило">
         <div class="guide-callout-icon">30</div>
@@ -51,17 +59,17 @@
             </div>
             <div class="focus-demo-status">Микрофон включён · устройство не перемещать</div>
             <div class="focus-demo-card">
-                <div class="focus-demo-progress"><b>Задание 4 из 14</b><span>Попытка 1 из 2</span></div>
-                <h3>Протяжный звук «А»</h3>
-                <div class="focus-demo-instruction"><small>ИНСТРУКЦИЯ ВРАЧУ</small><p>Попросите пациента сделать глубокий вдох и тянуть звук ровно, одним выдохом, как можно дольше.</p></div>
-                <div class="focus-demo-say"><small>ЧТО СКАЗАТЬ ПАЦИЕНТУ</small><p>«Сделайте вдох и тяните: А-а-а…»</p></div>
+                <div class="focus-demo-progress"><b>Задание 1 из 14</b><span>Попытка 1 из 3</span></div>
+                <h3>Долгая «а»</h3>
+                <div class="focus-demo-instruction"><small>ИНСТРУКЦИЯ ВРАЧУ</small><p>Попросите пациента сделать нормальный вдох и тянуть звук «а» ровно, на обычной громкости, как можно дольше.</p></div>
+                <div class="focus-demo-say"><small>ЧТО СКАЗАТЬ ПАЦИЕНТУ</small><p>«А-а-а-а-а…» ровно, обычной громкостью</p></div>
                 <div class="focus-demo-actions"><span class="ui-button primary">Начать попытку</span><span class="ui-button">Следующее упражнение</span></div>
             </div>
             <div class="focus-demo-wave"><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i></div>
         </div>
     </section>
 
-    <ol class="guide-steps">
+    <ol class="guide-steps" id="exam-steps">
         <li class="guide-step">
             <div class="guide-step-copy">
                 <span class="guide-step-number">1</span>
@@ -99,7 +107,7 @@
             <div class="guide-step-copy">
                 <span class="guide-step-number">3</span>
                 <h2>Проверьте микрофон</h2>
-                <p>Нажмите <strong>«Проверить микрофон»</strong>. Разрешите браузеру доступ к микрофону и попросите пациента произнести несколько слов. Во время калибровки не говорите и не перемещайте устройство.</p>
+                <p>Нажмите <strong>«Проверить микрофон»</strong>. Разрешите браузеру доступ к микрофону и попросите пациента произнести несколько слов в течение четырёх секунд.</p>
                 <div class="guide-success"><span>✓</span><div><strong>Можно продолжать, когда появится:</strong><br>«Микрофон принимает звук. Можно проводить тестирование».</div></div>
                 <div class="guide-warning"><strong>Если проверка не пройдена:</strong> убедитесь, что выбран нужный микрофон, увеличьте уровень входа и повторите проверку.</div>
             </div>
@@ -121,6 +129,7 @@
                 <span class="guide-step-number">4</span>
                 <h2>Запустите тестирование</h2>
                 <p>После успешной проверки станет доступна кнопка <strong>«Провести тестирование»</strong>. Нажмите её, прочитайте памятку на экране, отметьте подтверждение и выберите <strong>«Начать обследование»</strong>.</p>
+                <p>Если включена калибровка, сначала соблюдайте тишину и дождитесь окончания тестовых сигналов. Начинайте задание по приглашению на экране.</p>
                 <div class="guide-note">С этого момента не меняйте микрофон, громкость и положение устройства.</div>
             </div>
             <div class="guide-illustration ui-shot" role="img" aria-label="Кнопка Провести тестирование и окно подготовки">
@@ -142,7 +151,7 @@
             <div class="guide-step-copy">
                 <span class="guide-step-number">5</span>
                 <h2>Проведите 14 заданий</h2>
-                <p>Читайте пациенту инструкцию с экрана. Для каждого задания нажмите <strong>«Начать попытку»</strong>, дождитесь выполнения и завершите попытку. Затем переходите к следующему упражнению.</p>
+                <p>Читайте пациенту инструкцию с экрана. Для каждого задания нажмите <strong>«Начать попытку»</strong>, дождитесь выполнения и нажмите <strong>«Готово»</strong>. Выполните указанное число попыток и переходите к следующему упражнению.</p>
                 <ul class="guide-checklist">
                     <li>Не подсказывайте во время записи и не говорите одновременно с пациентом.</li>
                     <li>Следите, чтобы индикатор не показывал <strong>«ПЕРЕГРУЗ»</strong>.</li>
@@ -150,12 +159,12 @@
                 </ul>
             </div>
             <div class="guide-illustration ui-shot" role="img" aria-label="Экран задания обследования">
-                <div class="ui-shot-bar"><span></span><span></span><span></span><b>Задание 4 из 14</b></div>
+                <div class="ui-shot-bar"><span></span><span></span><span></span><b>Задание 1 из 14</b></div>
                 <div class="ui-card task-card">
-                    <div class="ui-progress"><span style="width:29%"></span></div>
-                    <div class="ui-row"><small>ЗАДАНИЕ 4 ИЗ 14</small><small>Попытка 1</small></div>
-                    <h3>Протяжный звук «А»</h3>
-                    <p>Сделайте глубокий вдох и тяните звук ровно и как можно дольше.</p>
+                    <div class="ui-progress"><span style="width:7%"></span></div>
+                    <div class="ui-row"><small>ЗАДАНИЕ 1 ИЗ 14</small><small>Попытка 1 из 3</small></div>
+                    <h3>Долгая «а»</h3>
+                    <p>Сделайте нормальный вдох и тяните звук ровно, на обычной громкости, как можно дольше.</p>
                     <div class="say-box">Скажите: «А-а-а…»</div>
                     <span class="ui-button primary">Начать попытку</span>
                     <div class="wave-mini"><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i></div>
@@ -168,36 +177,72 @@
                 <span class="guide-step-number">6</span>
                 <h2>Прослушайте и отправьте</h2>
                 <p>После последнего задания откроется список записей. Прослушайте каждую. Неудачное задание можно перезаписать отдельно — остальные записи сохранятся.</p>
-                <p>Когда всё проверено, нажмите <strong>«Отправить на анализ»</strong>. Дождитесь сообщения о завершении и не закрывайте страницу во время отправки.</p>
+                <p>Когда всё проверено, нажмите <strong>«Отправить на анализ»</strong>. В окне <strong>«Скачать копию перед отправкой?»</strong> можно скачать ZIP или WAV. Затем нажмите <strong>«Отправить на анализ»</strong> и дождитесь результата.</p>
+                <p>Чтобы отправить позже, выберите <strong>«Завершить без отправки»</strong>. Запись появится в списке локальных обследований.</p>
                 <div class="guide-success"><span>✓</span><div><strong>Готово.</strong><br>Результат появится в разделе «Мои исследования».</div></div>
             </div>
             <div class="guide-illustration ui-shot" role="img" aria-label="Проверка записей и кнопка Отправить на анализ">
                 <div class="ui-shot-bar"><span></span><span></span><span></span><b>Обследование записано</b></div>
                 <div class="ui-card review-card">
                     <strong>Прослушайте задания</strong>
-                    <div class="review-row"><span>1</span><div><b>Протяжный звук</b><small>00:12</small></div><i>▶</i><em>Перезаписать</em></div>
-                    <div class="review-row"><span>2</span><div><b>Счёт вслух</b><small>00:18</small></div><i>▶</i><em>Перезаписать</em></div>
-                    <div class="review-row"><span>3</span><div><b>Чтение текста</b><small>00:31</small></div><i>▶</i><em>Перезаписать</em></div>
-                    <div class="ui-actions end"><span class="ui-button">Прервать тест</span><span class="ui-button primary">Отправить на анализ</span></div>
+                    <div class="review-row"><span>1</span><div><b>Долгая «а»</b><small>00:12</small></div><i>▶</i><em>Перезаписать</em></div>
+                    <div class="review-row"><span>2</span><div><b>Голос вверх</b><small>00:04</small></div><i>▶</i><em>Перезаписать</em></div>
+                    <div class="review-row"><span>3</span><div><b>Самый тихий голос</b><small>00:03</small></div><i>▶</i><em>Перезаписать</em></div>
+                    <div class="ui-actions end"><span class="ui-button">Завершить без отправки</span><span class="ui-button primary">Отправить на анализ</span></div>
                 </div>
                 <span class="guide-pointer pointer-send">Финальный шаг</span>
             </div>
         </li>
     </ol>
 
-    <section class="guide-trouble">
-        <h2>Если что-то пошло не так</h2>
+    <section class="guide-step" id="local-copies" aria-labelledby="local-copies-title">
+        <div class="guide-extra-copy">
+            <h2 id="local-copies-title">Автосохранение и резервная копия</h2>
+            <p>Во время записи браузер сохраняет звук примерно каждые две секунды. После сбоя последние секунды могут быть потеряны.</p>
+                <p>Перед отправкой выберите <strong>«Скачать ZIP»</strong>, чтобы сохранить звук, калибровку и разметку заданий. Для прослушивания отдельно от сервиса подойдёт WAV. Можно сразу перейти к анализу.</p>
+                <div class="guide-note">На общем компьютере скачайте нужные ZIP и удалите свои локальные копии. При выходе они остаются в браузере, а при очистке его данных могут исчезнуть.</div>
+        </div>
+        <img class="guide-screen-image" src="assets/guide/local-copies.png" alt="Окно сохранения с кнопками «Скачать ZIP» и «Скачать WAV»" width="1120" height="640" loading="lazy">
+    </section>
+
+    <section class="guide-step guide-step-reverse" id="restore-recording" aria-labelledby="restore-recording-title">
+        <div class="guide-extra-copy">
+            <h2 id="restore-recording-title">Продолжить запись или повторить отправку</h2>
+            <p>Войдите под своей учётной записью в том же браузере. На странице «Обследование» откройте <strong>«Неотправленные обследования и локальные копии»</strong>.</p>
+                <p><strong>Прервалась запись.</strong> Нажмите «Продолжить запись», подключите тот же микрофон и повторите прерванную попытку. Если изменились микрофон или частота записи, сохраните ZIP и начните новое обследование. После прерванной калибровки начните её заново.</p>
+                <p><strong>Прервалась отправка.</strong> Восстановите подключение и нажмите «Проверить / повторить отправку». Если сервер уже сохранил результат, откроется готовое исследование.</p>
+        </div>
+        <img class="guide-screen-image" src="assets/guide/restore-recording.png" alt="Незавершённая запись с кнопкой «Продолжить запись» и запись с ошибкой отправки" width="1120" height="640" loading="lazy">
+    </section>
+
+    <section class="guide-step" id="import-recording" aria-labelledby="import-recording-title">
+        <div class="guide-extra-copy">
+            <h2 id="import-recording-title">Загрузить обследование из файла</h2>
+            <p>На странице «Обследование» раскройте <strong>«Загрузить запись из файла»</strong> и выберите ZIP. Прослушайте попытки, проверьте калибровку и пациента, затем нажмите «Анализировать».</p>
+                <p>Для отдельного аудиофайла укажите задание. Чтобы дополнить открытое обследование, отметьте «Добавить аудиофайл как новую попытку в текущее обследование» перед выбором файла.</p>
+                <div class="guide-note">Незавершённый ZIP можно дополнить файлами недостающих заданий. Для продолжения пошаговой записи откройте локальную копию в браузере.</div>
+                <p class="guide-file-limits">Импорт — до 128 МиБ и 30 минут. Для отправки звук вместе с калибровкой должен занимать менее 49 МиБ.</p>
+        </div>
+        <img class="guide-screen-image" src="assets/guide/import-recording.png" alt="Выбран файл examination.zip, ниже виден выбор задания для отдельного аудиофайла" width="1120" height="640" loading="lazy">
+    </section>
+
+    <section class="guide-trouble" id="troubleshooting" aria-labelledby="troubleshooting-title">
+        <h2 id="troubleshooting-title">Если что-то пошло не так</h2>
         <div class="guide-trouble-grid">
             <article><strong>Браузер не видит микрофон</strong><p>Нажмите значок замка рядом с адресом сайта, разрешите доступ к микрофону и обновите страницу.</p></article>
             <article><strong>Сигнал слишком тихий</strong><p>Подвиньте устройство до 30 см, проверьте выбранный микрофон и уровень входа, затем повторите проверку.</p></article>
             <article><strong>Появляется «ПЕРЕГРУЗ»</strong><p>Немного увеличьте расстояние или уменьшите уровень микрофона. Задание с перегрузом перезапишите.</p></article>
-            <article><strong>Случайно закрыли тест</strong><p>Незавершённое обследование не анализируется. Откройте «Обследование» и начните тест заново.</p></article>
+            <article><strong>Случайно закрыли тест</strong><p>Откройте «Обследование» в том же браузере и аккаунте. Найдите сохранённую часть в локальных обследованиях и нажмите «Продолжить запись».</p></article>
+            <article><strong>Ошибка сохранения или недостаточно места</strong><p>Запись приостанавливается, отправка блокируется. Скачайте ZIP или WAV, освободите место и нажмите «Повторить локальное сохранение». Если браузер запретил хранение, разрешите его для этого сайта.</p></article>
+            <article><strong>Пропал интернет или потерян ответ</strong><p>Откройте сохранённую локальную запись и используйте «Проверить / повторить отправку». Система проверит, был ли анализ уже завершён.</p></article>
+            <article><strong>Сессия истекла</strong><p>Скачайте копию. В другой вкладке войдите в ту же учётную запись, вернитесь к записи и повторите отправку.</p></article>
+            <article><strong>В другой вкладке сменили аккаунт</strong><p>Для отправки этой записи войдите в исходную учётную запись. Локальные обследования разных аккаунтов отображаются отдельно.</p></article>
         </div>
     </section>
 
     <section class="guide-short">
-        <h2>Коротко: весь порядок</h2>
-        <div class="guide-flow"><span>Выбрать пациента</span><b>→</b><span>Проверить микрофон</span><b>→</b><span>Провести тестирование</span><b>→</b><span>14 заданий</span><b>→</b><span>Прослушать</span><b>→</b><span>Отправить</span></div>
+        <h2>Порядок обследования</h2>
+        <div class="guide-flow"><span>Выбрать пациента</span><b>→</b><span>Проверить микрофон</span><b>→</b><span>14 заданий</span><b>→</b><span>Прослушать</span><b>→</b><span>Скачать ZIP</span><b>→</b><span>Отправить</span></div>
     </section>
 
     <div class="footer">Система предназначена для исследовательских целей и не заменяет медицинскую диагностику.</div>

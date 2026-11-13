@@ -43,6 +43,21 @@ Docker-шлюза lab-сервера. При изменении сети про�
 - `data/results.json` и `data/results/` — все результаты и записи. Монтируются в контейнер
   и при выкладке не трогаются.
 
+В production папка `data/` подключается как `/app/data`, а `RESULTS_FILE` указывает
+на `/app/data/results.json`. Подключение родительской папки необходимо для атомарной
+замены JSON через `os.replace`: отдельный bind mount файла вызывает `EBUSY`.
+Путь файла на хосте остаётся `~/audio_park/data/results.json`; перенос данных и ручная
+миграция не нужны. Старые пути `/app/results` и `/app/auth` сохраняются отдельными
+монтированиями, чтобы ранее сохранённые аудиозаписи и учётные записи оставались доступны.
+После обновления нужно пересоздать контейнер с новым compose-файлом; обычный
+`docker restart` не применяет изменения монтирований. Штатная выкладка через
+`docker compose ... up -d --no-build` применяет новую конфигурацию автоматически.
+
+Локальный `docker-compose.yml` также подключает родительскую папку: рабочий каталог
+проекта доступен контейнеру как `/app/local-data`, а JSON остаётся в прежнем
+`./results.json` на хосте. При запуске Python без Docker путь по умолчанию —
+`results.json`; его можно изменить переменной `RESULTS_FILE`.
+
 Наружу сервис отдает общий контейнер nginx (`msr_map_nginx`), который проксирует
 `/audio_park/` на порт 5005. Его конфигурация лежит вне этого репозитория.
 
@@ -64,7 +79,7 @@ git clone https://github.com/constantintesla/audio_park.git
 cd audio_park
 cp env.example .env              # при необходимости поменяйте API_PORT
 mkdir -p data/results
-touch data/results.json
+test -f data/results.json || printf '[]\n' > data/results.json
 docker compose -f docker-compose.prod.yml up -d --build
 curl http://localhost:5000/healthz
 ```

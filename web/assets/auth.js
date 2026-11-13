@@ -16,6 +16,16 @@
             api.user = data.user || null;
             return api.user;
         });
+    api.verifyOwner = async expected => {
+        await api.ready;
+        const response=await nativeFetch(api.url('/api/auth/me'),{credentials:'same-origin',cache:'no-store'});
+        if(response.status===401) throw new Error('Сессия истекла. Скачайте копию и войдите в ту же учётную запись в другой вкладке');
+        if(!response.ok) throw new Error('Не удалось проверить учётную запись. Локальная копия сохранена');
+        const data=await response.json();
+        if(String(data.user?.id)!==String(expected)) throw new Error('В другой вкладке открыта другая учётная запись. Войдите в исходную учётную запись');
+        csrf=data.csrf_token;
+        return data.user;
+    };
     window.fetch = async (input, options = {}) => {
         const url = new URL(typeof input === 'string' ? input : input.url, location.href);
         const local = url.origin === location.origin && url.pathname.startsWith(base + '/api/');
@@ -24,8 +34,12 @@
         const headers = new Headers(options.headers || (input instanceof Request ? input.headers : {}));
         const method = (options.method || (input instanceof Request ? input.method : 'GET')).toUpperCase();
         if (!['GET', 'HEAD', 'OPTIONS'].includes(method)) headers.set('X-CSRF-Token', csrf);
+        if(api.user) headers.set('X-AudioPark-Owner',String(api.user.id));
         const response = await nativeFetch(input, {...options, headers, credentials:'same-origin'});
-        if (response.status === 401 && !isLogin) location.replace(api.url('/login'));
+        if (response.status === 401 && !isLogin) {
+            if(api.onSessionExpired) api.onSessionExpired();
+            else location.replace(api.url('/login'));
+        }
         return response;
     };
     document.addEventListener('DOMContentLoaded', async () => {
@@ -50,6 +64,8 @@
             logout.addEventListener('click', async () => {
                 logout.disabled = true;
                 try {
+                    if(api.beforeLogout && !await api.beforeLogout()) {logout.disabled=false;return;}
+                    if(!confirm('Выйти? Локальные обследования останутся в этом браузере и будут доступны после входа в вашу учётную запись. На общем компьютере сначала скачайте резервные копии и удалите локальные обследования на странице «Обследование».')) {logout.disabled=false;return;}
                     const response = await fetch(api.url('/api/auth/logout'), {method:'POST'});
                     if (!response.ok) throw new Error('Не удалось выйти');
                     location.replace(api.url('/login'));

@@ -35,6 +35,7 @@ jobs:
         env:
           MPLBACKEND: Agg
         run: |
+          "$VENV/bin/python" scripts/test_results_storage.py
           "$VENV/bin/python" scripts/test_access.py
           "$VENV/bin/python" scripts/ci_smoke.py
 
