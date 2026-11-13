@@ -49,6 +49,51 @@ class AccessTest(unittest.TestCase):
         self.assertEqual(response.status_code, 200)
         return client, {'X-CSRF-Token':response.get_json()['csrf_token']}
 
+    def test_delete_study_requires_confirmation_and_ownership(self):
+        client, headers = self.login('expert')
+        self.assertEqual(client.delete('/api/results/AP-own', json={'confirmed': True}).status_code, 403)
+        for body in ({}, {'confirmed': False}, {'confirmed': 'true'}):
+            self.assertEqual(client.delete('/api/results/AP-own', json=body, headers=headers).status_code, 400)
+        self.assertEqual(client.delete('/api/results/AP-other', json={'confirmed': True}, headers=headers).status_code, 404)
+        self.assertEqual(client.delete('/api/results/AP-own', json={'confirmed': True}, headers=headers).status_code, 200)
+        for key in ('AP-own', '0'):
+            for route in ('results', 'audio', 'archive', 'visualization'):
+                self.assertEqual(client.get(f'/api/{route}/{key}').status_code, 404)
+        self.assertEqual(client.get('/api/results').get_json()['count'], 0)
+        self.assertEqual(client.get('/api/stats').get_json()['total_analyses'], 0)
+        self.assertEqual(client.get('/api/export/json').status_code, 404)
+        manager, _ = self.login('moderator')
+        self.assertEqual([r['study_id'] for r in manager.get('/api/results?scope=all').get_json()['results']], ['AP-other'])
+        self.assertEqual(manager.get('/api/results/1').get_json()['study_id'], 'AP-other')
+        self.assertEqual(client.delete('/api/results/AP-own', json={'confirmed': True}, headers=headers).status_code, 404)
+
+    def test_delete_patient_preserves_studies_and_blocks_selection(self):
+        client, headers = self.login('expert')
+        patient = client.post('/api/patients', json={'full_name': 'Тестовый Пациент'}, headers=headers).get_json()['patient']
+        self.records[0]['patient_uuid'] = patient['uuid']
+        api.save_results(self.records)
+        other, other_headers = self.login('other')
+        path = '/api/patients/' + patient['uuid']
+        self.assertEqual(other.delete(path, json={'confirmed': True}, headers=other_headers).status_code, 404)
+        self.assertEqual(client.delete(path, json={}, headers=headers).status_code, 400)
+        self.assertEqual(client.delete(path, json={'confirmed': True}, headers=headers).status_code, 200)
+        self.assertNotIn(patient['uuid'], [p['uuid'] for p in client.get('/api/patients').get_json()['patients']])
+        self.assertEqual(client.get('/api/results/AP-own').status_code, 200)
+        # Archived cards cannot be selected for new examinations.
+        response = client.post('/api/analyze', data={'patient_uuid': patient['uuid'], 'audio': (io.BytesIO(b'audio'), 'test.wav')}, headers=headers)
+        self.assertEqual(response.status_code, 400)
+
+    def test_deleted_study_cannot_be_recovered_by_request_id(self):
+        client, headers = self.login('expert')
+        self.records[0].update(request_id='deletion-request-1234', request_fingerprint='test')
+        api.save_results(self.records)
+        self.assertEqual(client.delete('/api/results/AP-own', json={'confirmed': True}, headers=headers).status_code, 200)
+        self.assertEqual(client.get('/api/analysis-requests/deletion-request-1234').status_code, 410)
+        self.assertEqual(client.post('/api/analyze', data={'request_id': 'deletion-request-1234'}, headers=headers).status_code, 410)
+        self.assertEqual(client.get('/api/results').get_json()['count'], 0)
+        manager, manager_headers = self.login('admin')
+        self.assertEqual(manager.delete('/api/results/AP-other', json={'confirmed': True}, headers=manager_headers).status_code, 200)
+
     def test_guest_has_no_data_access(self):
         client = api.app.test_client()
         for path in ['/api/results', '/api/patients', '/api/stats', '/api/results/AP-own', '/api/audio/AP-own', '/api/visualization/AP-own', '/api/users', '/api/export/csv', '/api/export/html', '/api/export/json']:

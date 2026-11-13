@@ -75,6 +75,22 @@ function renderPatients() {
             const choose = document.createElement('button'); choose.type = 'button'; choose.className = 'btn btn-sm btn-primary'; choose.textContent = 'Выбрать';
             choose.addEventListener('click', () => selectPatient(patient)); actions.append(choose);
         }
+        const remove = document.createElement('button'); remove.type = 'button';
+        remove.className = 'btn btn-sm btn-outline-danger'; remove.textContent = 'Удалить';
+        remove.addEventListener('click', async () => {
+            if (isRecording || patientPickerBusy) return;
+            if (!confirm(`Удалить пациента «${patient.full_name || patient.label}» (карточка №${patient.local_number}) из списка? Его исследования сохранятся в разделе «Мои исследования».`)) return;
+            remove.disabled = true; showPatientError('');
+            try {
+                const response = await fetch(`${API_URL}/api/patients/${encodeURIComponent(patient.uuid)}`, {method: 'DELETE', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({confirmed: true})});
+                const data = await response.json();
+                if (!response.ok) throw new Error(data.error || 'Не удалось удалить пациента');
+                patientRecords = patientRecords.filter(item => item.uuid !== patient.uuid);
+                if (patientElement('patient-uuid').value === patient.uuid) clearPatientSelection();
+                renderPatients();
+            } catch (error) { showPatientError(error.message); remove.disabled = false; }
+        });
+        actions.append(remove);
         row.append(description, actions); list.append(row);
     }
 }
