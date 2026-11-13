@@ -138,25 +138,25 @@
                     <strong>Частота дискретизации:</strong> <span id="audio-sr"></span> Гц
                 </div>
                 
-                <section class="my-3" aria-label="Файлы обследований">
+                <section class="exam-files my-3" aria-label="Файлы обследований">
                     <div id="download-actions" hidden>
                         <p class="small text-muted">Запись готова. Можно сохранить копию перед отправкой.</p>
                         <button id="download-wav" class="btn btn-outline-primary" disabled>Скачать запись WAV</button>
                         <button id="download-exam" class="btn btn-outline-primary" disabled>Сохранить обследование ZIP</button>
                     </div>
-                    <details class="mt-3"><summary>Загрузить запись из файла</summary>
+                    <details class="file-panel"><summary>Загрузить запись из файла</summary><div class="file-panel-body">
                     <label class="d-block mt-3">Загрузить аудио или обследование ZIP
                         <input id="import-exam" type="file" accept=".zip,.wav,.mp3,.ogg,.oga,.webm,.m4a,.flac,.aac" class="form-control">
                     </label>
                     <label>Задание для отдельного аудиофайла <select id="import-task" class="form-select"></select></label>
                     <label class="d-block"><input id="import-append" type="checkbox"> Добавить аудиофайл как новую попытку в текущее обследование</label>
-                    </details>
+                    </div></details>
                     <p id="file-status" role="status" class="small"></p>
                     <audio id="file-preview" controls hidden></audio>
                     <div id="file-contents" class="small"></div>
                     <p id="recording-cache-status" role="status" class="small"></p>
                     <button id="retry-local-save" class="btn btn-outline-primary" hidden>Повторить локальное сохранение</button>
-                    <details id="local-exams-panel"><summary>Неотправленные обследования и локальные копии</summary><p class="small">Копии доступны только в вашей учётной записи и хранятся в этом браузере до ручного удаления. На общем компьютере скачайте ZIP и удалите локальные копии перед выходом.</p><button id="refresh-local-exams" class="btn btn-sm btn-outline-secondary">Обновить список</button> <button id="clear-local-exams" class="btn btn-sm btn-outline-danger">Удалить все мои локальные копии</button><div id="local-exams"></div></details>
+                    <details id="local-exams-panel" class="file-panel"><summary>Неотправленные обследования и локальные копии</summary><div class="file-panel-body"><p class="small">Копии доступны только в вашей учётной записи и хранятся в этом браузере до ручного удаления. На общем компьютере скачайте ZIP и удалите локальные копии перед выходом.</p><button id="refresh-local-exams" class="btn btn-sm btn-outline-secondary">Обновить список</button> <button id="clear-local-exams" class="btn btn-sm btn-outline-danger">Удалить все мои локальные копии</button><div id="local-exams"></div></div></details>
                 </section>
                 <div class="analyze-bar">
                     <span class="text-muted small">Исследование сохраняется в вашей учётке после проверки записанных заданий.</span>

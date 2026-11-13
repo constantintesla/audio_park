@@ -103,6 +103,8 @@ async function refreshLocalExams() {
     for(const exam of exams) {
         const row=document.createElement('div'), label=document.createElement('span');
         label.textContent=`${new Date(exam.createdAt).toLocaleString()} · ${EXAM_STATUS[exam.status] || 'Сохранено'}${exam.lastError?' · '+exam.lastError:''} `;row.append(label);
+        row.className='local-exam-row';
+        const controls=document.createElement('div');controls.className='local-exam-actions';row.append(controls);
         const materialize=()=>exam.recorder?RecordingCache.materialize(exam):Promise.resolve(exam);
         const actions=[['Открыть / прослушать',()=>restoreExam(exam)],
             ['WAV',async()=>downloadFile((await materialize()).audio,'recording.wav')],
@@ -112,7 +114,7 @@ async function refreshLocalExams() {
         else actions.splice(1,0,[exam.status==='sent'?'Проверить результат':'Проверить / повторить отправку',async()=>{
             await restoreExam(exam);fileImportBusy=false;await analyzeAudio();
         }]);
-        for(const [text,action] of actions) {const b=document.createElement('button');b.className='btn btn-sm btn-outline-secondary';b.textContent=text;b.onclick=()=>{if(isRecording || analyzeProgress || fileImportBusy) return;fileImportBusy=true;Promise.resolve().then(action).catch(showFileError).finally(()=>{fileImportBusy=false;});};row.append(b);} list.append(row);
+        for(const [text,action] of actions) {const b=document.createElement('button');b.className='btn btn-sm btn-outline-secondary';b.textContent=text;b.onclick=()=>{if(isRecording || analyzeProgress || fileImportBusy) return;fileImportBusy=true;Promise.resolve().then(action).catch(showFileError).finally(()=>{fileImportBusy=false;});};controls.append(b);} list.append(row);
     }
     if(!exams.length) list.textContent='Локальных обследований нет.';
 }

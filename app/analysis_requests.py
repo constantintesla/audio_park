@@ -42,6 +42,8 @@ def idempotent_analysis(func):
                 results = api.load_results()
             for result in results:
                 if str(result.get('owner_id')) == owner and result.get('request_id') == request_id:
+                    if result.get('deleted_at'):
+                        return jsonify(error='Исследование удалено. Создайте новое обследование'), 410
                     if result.get('request_fingerprint') != fingerprint:
                         return jsonify(error='Данные запроса изменились. Создайте новое обследование'), 409
                     return jsonify(result), 200

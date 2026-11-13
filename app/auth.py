@@ -257,7 +257,8 @@ def visible_results(results):
         info = result.get("user_info", {})
         date = info.get("timestamp", "")[:10]
         haystack = " ".join(str(v) for v in (result.get("study_id", ""), result.get("patient_id", ""), info.get("tg_username", ""))).casefold()
-        return ((not patient or result.get("patient_id") == patient)
+        return (not result.get("deleted_at")
+                and (not patient or result.get("patient_id") == patient)
                 and (not owner or result.get("owner_id") == owner)
                 and (not query or query in haystack)
                 and (not date_from or date >= date_from)

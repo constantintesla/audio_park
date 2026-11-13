@@ -180,7 +180,7 @@ def authorize_result():
     index = next((i for i, result in enumerate(results) if result.get('study_id') == key), None)
     if index is None and key.isdigit() and int(key) < len(results):
         index = int(key)
-    if index is None or not (is_manager() or owns_result(results[index])):
+    if index is None or results[index].get('deleted_at') or not (is_manager() or owns_result(results[index])):
         return jsonify(error="Исследование не найдено"), 404
     g.result_index = index
 
@@ -237,7 +237,7 @@ def sync_legacy_patients(owner_id: int) -> None:
         results = load_results()
         changed = False
         for result in results:
-            if result.get('owner_id') != owner_id or result.get('patient_uuid'):
+            if result.get('deleted_at') or result.get('owner_id') != owner_id or result.get('patient_uuid'):
                 continue
             legacy_id = str(result.get('patient_id') or '').strip()
             if not legacy_id:
@@ -256,7 +256,7 @@ def get_patients():
     results = load_results()
     stats = {}
     for result in results:
-        if result.get('owner_id') != g.user['id'] or not result.get('patient_uuid'):
+        if result.get('deleted_at') or result.get('owner_id') != g.user['id'] or not result.get('patient_uuid'):
             continue
         item = stats.setdefault(result['patient_uuid'], {'study_count': 0, 'last_visit': None})
         item['study_count'] += 1
@@ -303,6 +303,17 @@ def rename_patient(patient_uuid):
     if not patient:
         return jsonify(error="Пациент не найден"), 404
     return jsonify(patient=patient)
+
+
+@app.delete('/api/patients/<patient_uuid>')
+def delete_patient_route(patient_uuid):
+    if (request.get_json(silent=True) or {}).get('confirmed') is not True:
+        return jsonify(error='Подтвердите удаление пациента'), 400
+    # Keep the UUID and studies intact; an archived card cannot be selected again.
+    patient = archive_patient(patient_uuid, g.user['id'])
+    if not patient:
+        return jsonify(error='Пациент не найден'), 404
+    return jsonify(status='deleted')
 
 
 @app.route('/api/patients/identity-key', methods=['GET'])
@@ -437,6 +448,8 @@ def analysis_request_result(request_id):
                    and r.get('request_id') == request_id), None)
     if not result:
         return jsonify(error='Подтверждённый результат пока не найден'), 404
+    if result.get('deleted_at'):
+        return jsonify(error='Исследование удалено'), 410
     fingerprint = request.args.get('fingerprint')
     if fingerprint and fingerprint != result.get('request_fingerprint'):
         return jsonify(error='Данные запроса изменились. Требуется проверка полного запроса'), 409
@@ -477,7 +490,7 @@ def analyze_and_save(temp_file, result_id, patient_id, patient, user, metadata,
             import librosa
             duration = librosa.get_duration(path=temp_file)
         validate_segments(raw_info, duration)
-    history = load_results()
+    history = [r for r in load_results() if not r.get('deleted_at')]
     analyzer = ParkinsonAnalyzer(save_raw_data=True, raw_data_dir=results_dir_abs)
     result = analyzer.analyze_audio_file(temp_file, save_raw=True, result_id=result_id,
                                          device_info=device_info,
@@ -513,9 +526,9 @@ def analyze_and_save(temp_file, result_id, patient_id, patient, user, metadata,
     with RESULTS_LOCK:
         results = load_results()
         if patient:
-            history = [r for r in results if r.get('patient_uuid') == patient['uuid'] and owns_result(r)]
+            history = [r for r in results if r.get('patient_uuid') == patient['uuid'] and owns_result(r) and not r.get('deleted_at')]
         else:
-            history = [r for r in results if r.get('patient_id') == patient_id and owns_result(r)]
+            history = [r for r in results if r.get('patient_id') == patient_id and owns_result(r) and not r.get('deleted_at')]
         result['baseline'] = compare_to_baseline(
             result.get('features', {}), history,
             result['user_info']['tg_user_id'], device_info,
@@ -655,7 +668,8 @@ def recalculate_all():
         logger.info("🔄 Начало пересчета всех результатов...")
         results = load_results()
         
-        if not results:
+        active_count = sum(not result.get('deleted_at') for result in results)
+        if not active_count:
             return jsonify({"status": "success", "message": "Нет результатов для пересчета", "recalculated": 0}), 200
         
         # Используем абсолютный путь для RESULTS_DIR
@@ -666,6 +680,8 @@ def recalculate_all():
         errors = []
         
         for idx, result in enumerate(results):
+            if result.get('deleted_at'):
+                continue
             try:
                 # Получаем путь к оригинальному аудиофайлу
                 raw_data = result.get('raw_data', {})
@@ -684,7 +700,7 @@ def recalculate_all():
                 logger.info(f"🔄 Пересчет результата {idx + 1}/{len(results)}: {audio_path}")
                 # device_info сохраняем, иначе при пересчете теряются калибровки устройства
                 device_info = result.get('device_info') or {}
-                others = results[:idx] + results[idx + 1:]
+                others = [r for r in results[:idx] + results[idx + 1:] if not r.get('deleted_at')]
                 new_result = analyzer.analyze_audio_file(audio_path, save_raw=False, result_id=result_id,
                                                          device_info=device_info,
                                                          model_offset=model_spl_offset(others, device_info))
@@ -721,9 +737,9 @@ def recalculate_all():
         
         response_data = {
             "status": "success",
-            "message": f"Пересчитано {recalculated} из {len(results)} результатов",
+            "message": f"Пересчитано {recalculated} из {active_count} результатов",
             "recalculated": recalculated,
-            "total": len(results),
+            "total": active_count,
             "errors": errors if errors else None
         }
         
@@ -732,6 +748,24 @@ def recalculate_all():
     except Exception as e:
         logger.error(f"Ошибка пересчета всех результатов: {e}", exc_info=True)
         return jsonify({"error": str(e)}), 500
+
+
+@app.delete('/api/results/<result_key>')
+@serialized_analysis
+@locked_results
+def delete_result(result_key):
+    if (request.get_json(silent=True) or {}).get('confirmed') is not True:
+        return jsonify(error='Подтвердите удаление исследования'), 400
+    results = load_results()
+    # Resolve again inside the mutation lock; never trust an earlier array index.
+    result = next((r for r in results if r.get('study_id') == result_key), None)
+    if not result or result.get('deleted_at') or not (is_manager() or owns_result(result)):
+        return jsonify(error='Исследование не найдено'), 404
+    # Preserve a tombstone for idempotent retries and stable legacy array indices.
+    result['deleted_at'] = datetime.now().isoformat()
+    result['deleted_by'] = g.user['id']
+    save_results(results)
+    return jsonify(status='deleted')
 
 
 @app.route('/api/results/<result_key>', methods=['GET'])
