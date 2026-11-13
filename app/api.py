@@ -56,7 +56,7 @@ def locked_results(func):
 # Страницы веб-интерфейса и assets/
 WEB_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 'web')
 
-# Данные хранятся в текущей папке (в контейнере это /app, туда смонтированы тома)
+# JSON defaults to the current folder; production places it inside a directory mount.
 RESULTS_FILE = os.getenv("RESULTS_FILE", "results.json")
 RESULTS_DIR = "results"
 
@@ -205,11 +205,20 @@ def save_results(results: List[Dict]):
         # Очищаем результаты от недопустимых значений перед сохранением
         cleaned_results = clean_json_values(results)
         
-        with open(RESULTS_FILE + '.tmp', 'w', encoding='utf-8') as f:
-            json.dump(cleaned_results, f, ensure_ascii=False, indent=2)
-            f.flush()
-            os.fsync(f.fileno())
-        os.replace(RESULTS_FILE + '.tmp', RESULTS_FILE)
+        # Never expose a half-written result list to a retry after a process crash.
+        import tempfile
+        temporary_path = None
+        try:
+            with tempfile.NamedTemporaryFile(mode='w', encoding='utf-8', dir=os.path.dirname(file_path),
+                                             prefix='.results-', suffix='.tmp', delete=False) as f:
+                temporary_path = f.name
+                json.dump(cleaned_results, f, ensure_ascii=False, indent=2)
+                f.flush()
+                os.fsync(f.fileno())
+            os.replace(temporary_path, file_path)
+        finally:
+            if temporary_path and os.path.exists(temporary_path):
+                os.unlink(temporary_path)
         
         # Проверяем, что файл создан
         if os.path.exists(RESULTS_FILE):
@@ -414,6 +423,26 @@ def save_calibration_audio(file, result: Dict) -> None:
         logger.warning(f"Не удалось сохранить запись калибровки: {e}")
 
 
+from app.analysis_requests import idempotent_analysis
+
+
+@app.get('/api/analysis-requests/<request_id>')
+def analysis_request_result(request_id):
+    """Reconcile a lost response without uploading the audio again."""
+    if not re.fullmatch(r'[A-Za-z0-9-]{16,80}', request_id):
+        return jsonify(error='Некорректный идентификатор запроса'), 400
+    with RESULTS_LOCK:
+        results = load_results()
+    result = next((r for r in results if str(r.get('owner_id')) == str(g.user['id'])
+                   and r.get('request_id') == request_id), None)
+    if not result:
+        return jsonify(error='Подтверждённый результат пока не найден'), 404
+    fingerprint = request.args.get('fingerprint')
+    if fingerprint and fingerprint != result.get('request_fingerprint'):
+        return jsonify(error='Данные запроса изменились. Требуется проверка полного запроса'), 409
+    return jsonify(study_id=result['study_id'], request_id=request_id), 200
+
+
 def serialized_analysis(func):
     @wraps(func)
     def wrapped(*args, **kwargs):
@@ -438,6 +467,16 @@ def analyze_and_save(temp_file, result_id, patient_id, patient, user, metadata,
     results_dir_abs = os.path.abspath(RESULTS_DIR)
     logger.info(f"📁 Сохранение сырых данных в: {results_dir_abs}")
     device_info = parse_device_info(metadata.get('device_info'))
+    if metadata.get('request_id'):
+        from app.exam_archive import validate_segments
+        import soundfile as sf
+        raw_info = json.loads(metadata.get('device_info', '{}'))
+        try:
+            duration = sf.info(temp_file).duration
+        except RuntimeError:
+            import librosa
+            duration = librosa.get_duration(path=temp_file)
+        validate_segments(raw_info, duration)
     history = load_results()
     analyzer = ParkinsonAnalyzer(save_raw_data=True, raw_data_dir=results_dir_abs)
     result = analyzer.analyze_audio_file(temp_file, save_raw=True, result_id=result_id,
@@ -451,6 +490,9 @@ def analyze_and_save(temp_file, result_id, patient_id, patient, user, metadata,
         result['patient_uuid'] = patient['uuid']
         result['patient_local_number'] = patient['local_number']
     result['owner_id'] = g.user['id']
+    if getattr(g, 'analysis_request_id', None):
+        result['request_id'] = g.analysis_request_id
+        result['request_fingerprint'] = g.analysis_fingerprint
     calibration = parse_calibration(metadata.get('calibration'))
     if calibration:
         result['calibration'] = calibration
@@ -489,6 +531,7 @@ def analyze_and_save(temp_file, result_id, patient_id, patient, user, metadata,
 
 
 @app.route('/api/analyze', methods=['POST'])
+@idempotent_analysis
 def analyze_audio():
     """Анализ аудиофайла с сохранением сырых данных"""
     try:
@@ -523,8 +566,11 @@ def analyze_audio():
         file.save(temp_file)
         
         try:
-            result = analyze_and_save(temp_file, result_id, patient_id, patient, g.user,
-                                      request.form, file.filename, request.files.get('calibration_file'))
+            try:
+                result = analyze_and_save(temp_file, result_id, patient_id, patient, g.user,
+                                          request.form, file.filename, request.files.get('calibration_file'))
+            except (ValueError, TypeError, RuntimeError) as error:
+                return jsonify(error=str(error)), 400
             # Проверяем наличие сырых данных в результате
             if 'raw_data' in result:
                 logger.info(f"✅ Сырые данные сохранены для {result_id}: {result['raw_data'].get('data_directory', 'N/A')}")

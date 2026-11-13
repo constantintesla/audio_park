@@ -93,6 +93,7 @@ async function run(code) { return vm.runInContext(code,context); }
         const d=lastRecording.deviceInfo;
         assert.equal(d.dsi_segments.length,7);assert.equal(d.protocol_segments.length,19);
         assert(d.dsi_segments.every(s=>s.end_sec>s.start_sec && s.end_sec<=audioBuffer.duration));
+        assert.deepEqual(d.dsi_segments.filter(s=>s.task==='mpt'),d.protocol_segments.filter(s=>s.task==='mpt'));
         assert.equal(d.noise_floor_dbfs,-80);
         assert.equal(audioBuffer.getChannelData(0).length,28*2300);
         assert(tracks.every(t=>t.readyState==='ended'));assert(!document.body.classList.contains('exam-focus-mode'));`);
@@ -102,6 +103,9 @@ async function run(code) { return vm.runInContext(code,context); }
         assert.equal(header.getUint32(40,true), audioBuffer.getChannelData(0).length * 2);
         assert.equal(bytes.byteLength, 44 + audioBuffer.getChannelData(0).length * 2);
         assert(audioBuffer.duration >= Math.max(...lastRecording.deviceInfo.dsi_segments.map(s=>s.end_sec)));})()`);
+    // Opening the send flow must offer a backup before any upload or progress starts.
+    await run(`let backupPrompts=0;function openBeforeSend(){backupPrompts++;}
+        analyzeAudio().then(()=>{assert.equal(backupPrompts,1);assert.equal(analyzeProgress,null);});`);
     // Browser permission rejection leaves controls usable and no active microphone.
     await run(`document.getElementById('calibrate-check').checked=true;
         const savedSignal=playCalibrationSignal, savedBeep=playBeep;

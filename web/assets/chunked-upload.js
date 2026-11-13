@@ -76,7 +76,7 @@
             files[name] = {format: 'pcm_s16le', channels, sample_rate, samples: header.getUint32(40, true) / (channels * 2), size: blob.size, sha256: await hash(blob), parts};
             blobs[name] = blob;
         }
-        return {patientUuid: input.patientUuid, token: crypto.randomUUID(), manifest, blobs, uploadId: null};
+        return {patientUuid: input.patientUuid, token: input.clientToken || crypto.randomUUID(), manifest, blobs, uploadId: null};
     }
     async function clear() {
         // Do not report cleanup success if sensitive local data could not be removed.
@@ -144,6 +144,7 @@
         config: () => json('/api/uploads/config'),
         async start(input, config, progress) {
             await client.ready;
+            if (draft && input.clientToken && draft.token === input.clientToken) return transmit(progress);
             if (draft) throw new Error('Есть незавершённая отправка. Используйте «Продолжить отправку» или скачайте и отмените её.');
             const size = input.wav.size + (input.calibrationWav?.size || 0);
             if (size > config.max_bytes || input.duration > config.max_seconds) {

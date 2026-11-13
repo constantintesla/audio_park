@@ -6,6 +6,7 @@ device_info['dsi_segments'] и device_info['protocol_segments'] (долгая «
 Здесь из них собирается общий список попыток по порядку записи, к каждой попытке
 подписывается ее измерение, и режутся куски записи для прослушивания и архива.
 """
+import hashlib
 import io
 import json
 import os
@@ -146,17 +147,38 @@ def build_archive(result: Dict) -> bytes:
     files = (result.get('raw_data') or {}).get('files') or {}
     source = source_audio(result)
     buf = io.BytesIO()
+    from app.exam_archive import FORMAT, portable_info
+    checksums = {}
     with zipfile.ZipFile(buf, 'w', zipfile.ZIP_DEFLATED) as zf:
+        def write(name, content):
+            zf.writestr(name, content)
+            checksums[name] = hashlib.sha256(content).hexdigest()
         if source:
-            zf.write(source, 'recording' + os.path.splitext(source)[1])
+            try:
+                audio, sr = sf.read(source)
+            except RuntimeError:
+                import librosa
+                audio, sr = librosa.load(source, sr=None, mono=False)
+                audio = audio.T
+            wav = io.BytesIO()
+            sf.write(wav, audio, sr, format='WAV', subtype='PCM_16')
+            write('recording.wav', wav.getvalue())
         calibration = files.get('calibration_audio')
         if calibration and os.path.exists(calibration):
-            zf.write(calibration, 'calibration.wav')
+            with open(calibration, 'rb') as calibration_file:
+                write('calibration.wav', calibration_file.read())
         if source:
             for item in attempts:
-                zf.writestr('tasks/' + clip_filename(item),
+                write('tasks/' + clip_filename(item),
                             clip_wav(source, item['start_sec'], item['end_sec']))
-        data = {k: v for k, v in result.items() if k not in ('raw_data', 'visuals', '_index')}
+        data = {k: v for k, v in result.items() if k not in ('raw_data', 'visuals', '_index', 'owner_id', 'user_info', 'patient_id', 'patient_uuid', 'patient_local_number', 'request_id', 'request_fingerprint')}
         data['task_recordings'] = [{**item, 'file': 'tasks/' + clip_filename(item)} for item in attempts]
-        zf.writestr('results.json', json.dumps(data, ensure_ascii=False, indent=2))
+        if isinstance(data.get('baseline'), dict):
+            data['baseline'] = {k: v for k, v in data['baseline'].items() if k != 'device_key'}
+        data['device_info'] = portable_info(result.get('device_info') or {})
+        write('results.json', json.dumps(data, ensure_ascii=False, indent=2).encode('utf-8'))
+        manifest = {'format': FORMAT, 'version': 1, 'protocol_version': 1,
+                    'local_id': result.get('study_id'), 'device_info': data['device_info'],
+                    'calibration': result.get('calibration'), 'files': checksums}
+        zf.writestr('manifest.json', json.dumps(manifest, ensure_ascii=False))
     return buf.getvalue()

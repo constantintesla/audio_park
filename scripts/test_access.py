@@ -223,4 +223,7 @@ if __name__ == '__main__':
     try:
         unittest.main()
     finally:
+        # sqlite connection context managers commit, but Windows still needs handles closed.
+        import gc
+        gc.collect()
         TEMP.cleanup()

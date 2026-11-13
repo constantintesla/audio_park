@@ -394,10 +394,14 @@ def main() -> None:
         # api.py пишет results.json и results/ в текущую папку, поэтому запускаем его во временной
         os.chdir(tmp)
         os.environ['AUTH_DATA_DIR'] = os.path.join(tmp, 'auth')
+        os.environ['RESULTS_FILE'] = os.path.join(tmp, 'results.json')
         try:
             check_api(wav_path)
         finally:
             os.chdir(ROOT)
+            # Release sqlite connection cycles before Windows removes the temporary directory.
+            import gc
+            gc.collect()
     print("smoke: ok")
 
 

@@ -1,0 +1,35 @@
+// Portable ZIP interoperability, corruption and boundary checks (no microphone required).
+const fs=require('node:fs'),vm=require('node:vm'),assert=require('node:assert/strict'),path=require('node:path');
+global.window=global;
+vm.runInThisContext(fs.readFileSync(path.join(__dirname,'../web/assets/exam_tasks.js'),'utf8'));
+vm.runInThisContext(fs.readFileSync(path.join(__dirname,'../web/assets/exam-files.js'),'utf8'));
+(async()=>{
+    const context={decodeAudioData:async()=>({duration:14})};
+    const original=new Blob([fs.readFileSync(path.join(process.argv[2],'server.zip'))]);
+    const imported=await ExamFiles.importExam(original,context);
+    assert.equal(imported.deviceInfo.task,'exam');
+    assert.equal(imported.calibrationWav.size>0,true);
+    const exported=await ExamFiles.exportExam(imported), restored=await ExamFiles.importExam(exported,context);
+    assert.deepEqual(restored.deviceInfo,imported.deviceInfo);
+    assert.deepEqual(await restored.audio.arrayBuffer(),await imported.audio.arrayBuffer());
+    assert.notEqual(restored.id,imported.id);
+    const legacy=await ExamFiles.importExam(new Blob([fs.readFileSync(path.join(process.argv[2],'legacy.zip'))]),context);
+    assert.equal(legacy.deviceInfo.task,'exam');
+    const files=await ExamFiles.unzip(exported), manifest=JSON.parse(new TextDecoder().decode(files.get('manifest.json')));
+    manifest.files['recording.wav']='0'.repeat(64);files.set('manifest.json',new TextEncoder().encode(JSON.stringify(manifest)));
+    await assert.rejects(ExamFiles.importExam(ExamFiles.zip(files),context),/повреждён/);
+    const bad=structuredClone(imported.deviceInfo);bad.dsi_segments[0].end_sec=100;
+    assert.throws(()=>ExamFiles.validate(bad,14),/Границы/);
+    assert.throws(()=>ExamFiles.validate({task:'exam'},14),/отсутствует разметка/);
+    const corrupted=new Uint8Array(await exported.arrayBuffer());corrupted[50]^=255;
+    await assert.rejects(ExamFiles.unzip(new Blob([corrupted])));
+    await assert.rejects(ExamFiles.unzip(new Blob([fs.readFileSync(path.join(process.argv[2],'unsafe.zip'))])),/Недопустимое/);
+    const noCalibration={...imported,calibrationWav:null,calibration:null};
+    assert.equal((await ExamFiles.importExam(await ExamFiles.exportExam(noCalibration),context)).calibrationWav,null);
+    fs.writeFileSync(path.join(process.argv[2],'browser.zip'),Buffer.from(await exported.arrayBuffer()));
+    const form=new FormData();
+    for(const [key,value] of Object.entries({request_id:'fingerprint-fixture-12345',patient_uuid:'fixture-uuid',patient_id:'Ёлкин Иван',device_info:JSON.stringify(imported.deviceInfo),calibration:JSON.stringify({noise_floor_dbfs:-70})})) form.append(key,value);
+    form.append('file',imported.audio,'examination.wav');form.append('calibration_file',imported.calibrationWav,'calibration.wav');
+    fs.writeFileSync(path.join(process.argv[2],'fingerprint.json'),JSON.stringify({fields:[...form].filter(([,v])=>typeof v==='string'),hash:await ExamFiles.requestFingerprint(form)}));
+    console.log('archive JS: server/legacy/browser round trip, hashes, corrupt ZIP, unsafe paths, missing calibration, boundaries: ok');
+})().catch(e=>{console.error(e);process.exitCode=1;});

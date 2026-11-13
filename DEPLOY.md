@@ -43,6 +43,16 @@ Docker-шлюза lab-сервера. При изменении сети про�
 - `data/results.json` и `data/results/` — все результаты и записи. Монтируются в контейнер
   и при выкладке не трогаются.
 
+В Docker API и worker используют общий индекс `/app/auth/results.json`
+(на production-хосте `data/auth/results.json`, локально `auth_data/results.json`).
+При первом запуске он автоматически импортируется из прежнего `results.json`,
+подключённого только для чтения. Существующий новый индекс не перезаписывается.
+Папки аудио и учётных записей сохраняют прежние монтирования. Подробности:
+[docs/chunked-upload.md](docs/chunked-upload.md).
+После обновления пересоздайте контейнеры через `docker compose ... up -d --no-build`.
+При запуске Python без Docker путь по умолчанию — `results.json`;
+его можно изменить переменной `RESULTS_FILE`.
+
 Наружу сервис отдает общий контейнер nginx (`msr_map_nginx`), который проксирует
 `/audio_park/` на порт 5005. Его конфигурация лежит вне этого репозитория.
 
@@ -64,7 +74,7 @@ git clone https://github.com/constantintesla/audio_park.git
 cd audio_park
 cp env.example .env              # при необходимости поменяйте API_PORT
 mkdir -p data/results
-touch data/results.json
+test -f data/results.json || printf '[]\n' > data/results.json
 docker compose -f docker-compose.prod.yml up -d --build
 curl http://localhost:5000/healthz
 ```

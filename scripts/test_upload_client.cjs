@@ -52,9 +52,10 @@ vm.runInContext(fs.readFileSync(require('node:path').join(__dirname, '../web/ass
     const header = new ArrayBuffer(44), view = new DataView(header);
     view.setUint16(22, 1, true); view.setUint32(24, 48000, true); view.setUint32(40, 96000, true);
     const wav = new Blob([header, new Uint8Array(96000)]);
-    const input = {wav, duration: 1, patientUuid: 'patient', deviceInfo: {task: 'exam'}};
+    const input = {wav, clientToken: 'exam-retry-123456', duration: 1, patientUuid: 'patient', deviceInfo: {task: 'exam'}};
     const config = {part_bytes: 32768, max_bytes: 1e8, max_seconds: 900};
     const draft = await client.makeDraft(input, config);
+    assert.equal(draft.token,input.clientToken);
     assert.equal(draft.manifest.files.recording.sha256, await client.hash(wav));
     const progress = [];
     const result = await client.start(input, config, (state, text, fraction) => progress.push(fraction));
@@ -74,8 +75,8 @@ vm.runInContext(fs.readFileSync(require('node:path').join(__dirname, '../web/ass
     events.DOMContentLoaded();
     await restored.window.ChunkedUpload.ready;
     assert.equal(elements.get('upload-recovery').hidden, false);
-    await elements.get('upload-resume').click();
-    assert.match(navigated, /AP-test/);
+    const resumed = await restored.window.ChunkedUpload.start(input, config, () => {});
+    assert.equal(resumed.study_id, 'AP-test');
     assert.equal(data.size, 0);
     // A different logged-in user must not receive the first user's draft.
     data.set('1', structuredClone(draft));

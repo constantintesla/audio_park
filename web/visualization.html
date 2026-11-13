@@ -41,6 +41,7 @@
             <div>
                 <h1>Результат исследования</h1>
                 <p id="study-identity" class="study-id"></p>
+                <a id="study-archive" class="btn btn-outline-primary" hidden download>Скачать архив обследования ZIP</a>
                 <p>Параметры голоса и графики, привязанные к аудиозаписи</p>
             </div>
         </div>
@@ -313,6 +314,9 @@
         // Отображение визуализации
         function displayVisualization(result, index) {
             const version = ++visualizationVersion;
+            const archive = document.getElementById('study-archive');
+            archive.href = `${API_URL}/api/archive/${encodeURIComponent(result.study_id || index)}`;
+            archive.hidden = false;
             document.getElementById('content').style.display = 'block';
             document.getElementById('study-identity').textContent = `${result.study_id || ''} · Пациент: ${result.patient_id || '—'} · Специалист: ${result.user_info?.tg_username || '—'}`;
             document.getElementById('study-report').innerHTML = renderStudyReport(result);

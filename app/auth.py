@@ -367,6 +367,9 @@ def init_auth(app):
                 return jsonify(error="Войдите в учётную запись"), 401
             # Relative locations preserve the /audio_park reverse-proxy prefix.
             return redirect("../" * max(0, request.path.count("/") - 1) + "login")
+        expected_owner = request.headers.get('X-AudioPark-Owner')
+        if expected_owner and g.user and expected_owner != str(g.user['id']):
+            return jsonify(error="В другой вкладке открыта другая учётная запись. Войдите в исходную учётную запись"), 409
         if request.method in {"POST", "PUT", "PATCH", "DELETE"}:
             expected = session.get("csrf_token", "")
             supplied = request.headers.get("X-CSRF-Token", "")

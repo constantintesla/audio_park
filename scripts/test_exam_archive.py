@@ -104,7 +104,8 @@ def main(filename):
         with zipfile.ZipFile(io.BytesIO(response.data)) as output:
             assert len([n for n in output.namelist() if n.startswith('tasks/')]) == 27
             saved = json.loads(output.read('results.json'))
-            assert saved['patient_id'] == 'ARCHIVE-TEST'
+            assert 'patient_id' not in saved and 'owner_id' not in saved
+            assert json.loads(output.read('manifest.json'))['version'] == 1
         for role in ['other', 'manager']:
             actor, _ = login(role)
             expected_status = 404 if role == 'other' else 200
