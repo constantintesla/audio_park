@@ -96,6 +96,128 @@ class UploadTest(unittest.TestCase):
     def complete(self, key, manifest):
         return self.client.post(f'/api/uploads/{key}/complete', json=manifest, headers=self.headers)
 
+    @staticmethod
+    def fake_analysis(path, **kwargs):
+        import shutil
+        directory = Path(api.RESULTS_DIR) / kwargs['result_id']
+        directory.mkdir(exist_ok=True)
+        shutil.copyfile(path, directory / 'original.wav')
+        return {'features': {}, 'device_info': kwargs.get('device_info', {}),
+                'raw_data': {'data_directory': str(directory), 'files': {'original_audio': str(directory / 'original.wav')}}}
+
+    def test_transport_switch_returns_original_and_rejects_changed_content(self):
+        token = 'transport-switch-request-123456'
+        key = self.create(client_token=token)
+        data = wav_bytes()
+        self.assertEqual(self.put(key, 0, data).status_code, 200)
+        self.assertEqual(self.put(key, 1, data).status_code, 200)
+        info = {'task': 'dsi', 'dsi_segments': [{'task': 'vowel', 'start_sec': 0, 'end_sec': 1}], 'protocol_segments': []}
+        file = {'format': 'pcm_s16le', 'sample_rate': 48000, 'channels': 1, 'samples': 48000,
+                'size': len(data), 'sha256': sha(data), 'parts': [{'number': 0, 'size': len(data), 'sha256': sha(data)}]}
+        calibration = {'version': 1, 'noise_floor_dbfs': -70}
+        manifest = {'version': 1, 'files': {'recording': file,
+                    'calibration': {**file, 'parts': [{'number': 1, 'size': len(data), 'sha256': sha(data)}]}},
+                    'device_info': info, 'calibration': calibration}
+        def send(audio=data, metadata=info, patient=None, calibration_audio=data):
+            return self.client.post('/api/analyze', headers=self.headers, data={'request_id': token,
+                'patient_uuid': patient or self.patient, 'device_info': json.dumps(metadata),
+                'calibration': json.dumps(calibration), 'calibration_file': (io.BytesIO(calibration_audio), 'calibration.wav'),
+                'file': (io.BytesIO(audio), 'examination.wav')})
+        with patch('app.parkinson_analyzer.ParkinsonAnalyzer.analyze_audio_file', side_effect=self.fake_analysis) as analyzer:
+            self.assertEqual(send().status_code, 409, 'Pending chunks cannot be bypassed via legacy API')
+            self.assertEqual(self.complete(key, manifest).status_code, 202)
+            with api.app.app_context():
+                self.assertTrue(process_one())
+            study = self.client.get('/api/uploads/' + key).json['study_id']
+            lookup = self.client.get('/api/analysis-requests/' + token)
+            self.assertEqual(lookup.json['study_id'], study)
+            self.assertEqual(self.client.get('/api/analysis-requests/' + token + '?fingerprint=' + '0' * 64).status_code, 409)
+            for _ in range(2):
+                response = send()
+                self.assertEqual(response.status_code, 200, response.data)
+                self.assertEqual(response.json['study_id'], study)
+            self.assertEqual(send(audio=data[:-2] + b'\x02\x00').status_code, 409)
+            self.assertEqual(send(calibration_audio=data[:-2] + b'\x02\x00').status_code, 409)
+            self.assertEqual(send(metadata={**info, 'mic_mode': 'changed'}).status_code, 409)
+            other_patient = self.client.post('/api/patients', json={}, headers=self.headers).json['patient']['uuid']
+            self.assertEqual(send(patient=other_patient).status_code, 409)
+            self.assertEqual(analyzer.call_count, 1)
+        self.assertEqual(len(api.load_results()), 1)
+        other, _ = self.login('other')
+        self.assertEqual(other.get('/api/analysis-requests/' + token).status_code, 404)
+        self.assertEqual(self.client.delete('/api/results/' + study, json={'confirmed': True}, headers=self.headers).status_code, 200)
+        self.assertEqual(send().status_code, 410)
+        self.assertEqual(self.client.get('/api/analysis-requests/' + token).status_code, 410)
+
+    def test_legacy_result_prevents_new_chunked_upload_even_concurrently(self):
+        import threading
+        token = 'legacy-then-chunked-request-123456'
+        started, proceed, create_started = threading.Event(), threading.Event(), threading.Event()
+        def analysis(path, **kwargs):
+            started.set()
+            self.assertTrue(proceed.wait(10))
+            return self.fake_analysis(path, **kwargs)
+        def send():
+            client, headers = self.login()
+            return client.post('/api/analyze', headers=headers, data={'request_id': token,
+                'patient_uuid': self.patient, 'device_info': json.dumps({'task': 'vowel'}),
+                'file': (io.BytesIO(wav_bytes()), 'examination.wav')})
+        def create():
+            client, headers = self.login()
+            create_started.set()
+            return client.post('/api/uploads', json={'version': 1, 'patient_uuid': self.patient, 'client_token': token}, headers=headers)
+        with patch('app.parkinson_analyzer.ParkinsonAnalyzer.analyze_audio_file', side_effect=analysis), ThreadPoolExecutor(2) as pool:
+            saving = pool.submit(send)
+            self.assertTrue(started.wait(10))
+            creating = pool.submit(create)
+            self.assertTrue(create_started.wait(10))
+            proceed.set()
+            saved, blocked = saving.result(timeout=15), creating.result(timeout=15)
+        self.assertEqual(saved.status_code, 200, saved.data)
+        self.assertEqual(blocked.status_code, 409, blocked.data)
+        self.assertEqual(len(api.load_results()), 1)
+        self.assertEqual(self.client.delete('/api/results/' + saved.json['study_id'], json={'confirmed': True}, headers=self.headers).status_code, 200)
+        response = self.client.post('/api/uploads', headers=self.headers,
+                                   json={'version': 1, 'patient_uuid': self.patient, 'client_token': token})
+        self.assertEqual(response.status_code, 410)
+
+    def test_import_tolerance_is_accepted_clipped_for_analysis_and_retry_stable(self):
+        from app.exam_archive import validate_segments
+        for sr in (44100, 48000):
+            key, manifest, _ = self.prepare(sr, calibration=True, extra_frames=32)
+            duration = manifest['files']['recording']['samples'] / sr
+            manifest['device_info'] = {'task': 'dsi', 'dsi_segments': [
+                {'task': 'vowel', 'start_sec': 0, 'end_sec': duration + .002}], 'protocol_segments': []}
+            validate_segments(manifest['device_info'], duration)
+            original = json.dumps(manifest, sort_keys=True)
+            self.assertEqual(self.complete(key, manifest).status_code, 202)
+            with api.app.app_context(), patch('app.parkinson_analyzer.ParkinsonAnalyzer.analyze_audio_file', side_effect=self.fake_analysis) as analyzer:
+                self.assertTrue(process_one())
+                self.assertEqual(analyzer.call_args.kwargs['device_info']['dsi_segments'][0]['end_sec'], duration)
+                with database() as db:
+                    self.assertEqual(db.execute('SELECT manifest FROM uploads WHERE id=?', (key,)).fetchone()['manifest'], original)
+            self.assertEqual(self.client.get('/api/uploads/' + key).json['state'], 'completed')
+            self.assertEqual(self.complete(key, manifest).status_code, 202)
+
+    def test_expired_server_parts_can_be_recreated_with_same_local_identity(self):
+        import time
+        from app.uploads import root
+        from scripts.cleanup_uploads import main as cleanup
+        token = 'expired-upload-request-123456'
+        key = self.create(client_token=token)
+        data = wav_bytes()
+        self.assertEqual(self.put(key, 0, data).status_code, 200)
+        with api.app.app_context(), database() as db:
+            db.execute('UPDATE uploads SET updated=? WHERE id=?', (time.time() - 8 * 86400, key))
+        with patch.object(sys, 'argv', ['cleanup_uploads.py', '--delete']):
+            cleanup()
+        self.assertEqual(self.client.get('/api/uploads/' + key).status_code, 404)
+        with api.app.app_context():
+            self.assertFalse((root() / key).exists())
+        restored = self.create(client_token=token)
+        self.assertNotEqual(restored, key)
+        self.assertEqual(self.put(restored, 0, data).status_code, 200)
+
     def test_access_csrf_and_idempotent_creation(self):
         key = self.create(client_token='test-idempotency-token')
         self.assertEqual(key, self.create(client_token='test-idempotency-token'))
@@ -284,7 +406,7 @@ class UploadTest(unittest.TestCase):
     def test_invalid_bounds_keep_specific_error_and_allow_correction(self):
         key, manifest, _ = self.prepare(extra_frames=32)
         duration = manifest['files']['recording']['samples'] / 48000
-        for segment in ({'start_sec': 0, 'end_sec': duration + 0.0006},
+        for segment in ({'start_sec': 0, 'end_sec': duration + 0.0021},
                         {'start_sec': duration, 'end_sec': duration + 0.0001},
                         {'start_sec': -0.001, 'end_sec': 1},
                         {'start_sec': 1, 'end_sec': 1},

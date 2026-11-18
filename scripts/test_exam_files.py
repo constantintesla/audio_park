@@ -47,7 +47,13 @@ def main():
                         legacy.writestr(name, archive.read(name))
         with zipfile.ZipFile(tmp / 'unsafe.zip', 'w') as unsafe:
             unsafe.writestr('../recording.wav', b'bad')
-        subprocess.run(['node', str(ROOT / 'scripts/test_exam_files.cjs'), str(tmp)], check=True)
+        if os.getenv('AUDIO_PARK_NODE_DOCKER') == '1':
+            node = ['docker', 'run', '--rm', '--network', 'none', '--user', f'{os.getuid()}:{os.getgid()}',
+                    '-v', f'{ROOT}:/workspace:ro', '-v', f'{tmp}:{tmp}', '-w', '/workspace',
+                    'node:22-alpine', 'node', 'scripts/test_exam_files.cjs', str(tmp)]
+        else:
+            node = ['node', str(ROOT / 'scripts/test_exam_files.cjs'), str(tmp)]
+        subprocess.run(node, check=True)
         fingerprint = json.loads((tmp / 'fingerprint.json').read_text(encoding='utf-8'))
         fields = dict(fingerprint['fields'])
         fields.pop('patient_id')  # Authorized UUID replaces the mutable patient label.

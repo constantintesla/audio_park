@@ -434,7 +434,7 @@ def save_calibration_audio(file, result: Dict) -> None:
         logger.warning(f"Не удалось сохранить запись калибровки: {e}")
 
 
-from app.analysis_requests import idempotent_analysis
+from app.analysis_requests import idempotent_analysis, completed_request
 
 
 @app.get('/api/analysis-requests/<request_id>')
@@ -444,8 +444,7 @@ def analysis_request_result(request_id):
         return jsonify(error='Некорректный идентификатор запроса'), 400
     with RESULTS_LOCK:
         results = load_results()
-    result = next((r for r in results if str(r.get('owner_id')) == str(g.user['id'])
-                   and r.get('request_id') == request_id), None)
+    result = completed_request(results, g.user['id'], request_id)
     if not result:
         return jsonify(error='Подтверждённый результат пока не найден'), 404
     if result.get('deleted_at'):
@@ -480,8 +479,8 @@ def analyze_and_save(temp_file, result_id, patient_id, patient, user, metadata,
     results_dir_abs = os.path.abspath(RESULTS_DIR)
     logger.info(f"📁 Сохранение сырых данных в: {results_dir_abs}")
     device_info = parse_device_info(metadata.get('device_info'))
-    if metadata.get('request_id'):
-        from app.exam_archive import validate_segments
+    if metadata.get('request_id') or any(device_info.get(key) for key in ('dsi_segments', 'protocol_segments')):
+        from app.exam_archive import validate_segments, clip_segment_ends
         import soundfile as sf
         raw_info = json.loads(metadata.get('device_info', '{}'))
         try:
@@ -489,7 +488,10 @@ def analyze_and_save(temp_file, result_id, patient_id, patient, user, metadata,
         except RuntimeError:
             import librosa
             duration = librosa.get_duration(path=temp_file)
-        validate_segments(raw_info, duration)
+        if metadata.get('request_id'):
+            validate_segments(raw_info, duration)
+        device_info = parse_device_info(json.dumps(clip_segment_ends(raw_info, duration)))
+        device_info = clip_segment_ends(device_info, duration)
     history = [r for r in load_results() if not r.get('deleted_at')]
     analyzer = ParkinsonAnalyzer(save_raw_data=True, raw_data_dir=results_dir_abs)
     result = analyzer.analyze_audio_file(temp_file, save_raw=True, result_id=result_id,

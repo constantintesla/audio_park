@@ -10,12 +10,13 @@ import tempfile
 import time
 import uuid
 import wave
-from contextlib import contextmanager
+from contextlib import contextmanager, nullcontext
 
 from flask import current_app, g, jsonify, request
-from werkzeug.exceptions import BadRequest, Conflict, NotFound, RequestEntityTooLarge
+from werkzeug.exceptions import BadRequest, Conflict, Gone, NotFound, RequestEntityTooLarge
 from app.auth import get_patient
 from app.upload_diagnostics import init_diagnostics, record_event
+from app.exam_archive import SEGMENT_EOF_TOLERANCE
 
 log = logging.getLogger(__name__)
 TERMINAL = ('completed', 'failed', 'cancelled')
@@ -106,9 +107,9 @@ def validate_manifest(data, parts):
     if not isinstance(info, dict) or not isinstance(data.get('calibration', {}), dict):
         raise BadRequest('Некорректные метаданные')
     duration = files['recording']['samples'] / files['recording']['sample_rate']
-    # Older browser drafts round seconds to milliseconds. Keep their manifest
-    # unchanged for idempotent retries, allowing only that rounding error at EOF.
-    max_end = duration + 0.0005 + 1e-9
+    # Match portable ZIP and legacy API validation without rewriting a committed
+    # manifest. Analysis clips tolerated EOF rounding to the actual WAV duration.
+    max_end = duration + SEGMENT_EOF_TOLERANCE + 1e-9
     for field in ('dsi_segments', 'protocol_segments'):
         segments = info.get(field, [])
         if not isinstance(segments, list) or len(segments) > 500:
@@ -174,6 +175,18 @@ def init_uploads(app):
         if token is not None and (not isinstance(token, str) or not re.fullmatch('[a-zA-Z0-9-]{16,64}', token)):
             raise BadRequest('Некорректный ключ повтора')
         key = uuid.uuid4().hex
+        from app.analysis_requests import submission_guard
+        from app import api
+        with submission_guard(g.user['id'], token) if token else nullcontext():
+            existing = next((r for r in api.load_results() if token
+                             and str(r.get('owner_id')) == str(g.user['id']) and r.get('request_id') == token), None)
+            if existing:
+                if existing.get('deleted_at'):
+                    raise Gone('Исследование удалено. Создайте новое обследование')
+                raise Conflict('Исследование с этим идентификатором уже сохранено. Проверьте результат или создайте новое обследование.')
+            return create_owned_upload(key, patient, token)
+
+    def create_owned_upload(key, patient, token):
         with database() as db:
             old = db.execute('SELECT * FROM uploads WHERE owner=? AND client_token=?', (g.user['id'], token)).fetchone() if token else None
             if old:
@@ -293,6 +306,7 @@ def init_uploads(app):
     @app.errorhandler(BadRequest)
     @app.errorhandler(Conflict)
     @app.errorhandler(NotFound)
+    @app.errorhandler(Gone)
     def upload_validation_error(error):
         if not request.path.startswith('/api/uploads'):
             return error

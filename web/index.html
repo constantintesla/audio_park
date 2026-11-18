@@ -1499,7 +1499,7 @@
                 analyzeProgress.analyzeFrom = performance.now();
                 analyzeProgress.tau = Math.max(30, audioBuffer.duration / 2);
                 const config = await ChunkedUpload.config();
-                if (config.enabled) {
+                if (config.enabled || await ChunkedUpload.hasPending(exam.id)) {
                     result = await ChunkedUpload.start({wav: exam.audio, duration: audioBuffer.duration,
                         patientUuid: exam.patientUuid, deviceInfo: exam.deviceInfo,
                         calibration: exam.calibration, calibrationWav: exam.calibrationWav,

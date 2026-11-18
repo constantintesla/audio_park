@@ -64,7 +64,7 @@ const assertBrowser=async expression=>{const ok=await evaluate(`return !!(${expr
 (async()=>{
     await new Promise(r=>server.listen(0,'127.0.0.1',r));
     const base=`http://127.0.0.1:${server.address().port}/`;
-    browser=spawn(chrome,['--headless=new','--disable-gpu','--no-first-run','--no-default-browser-check','--autoplay-policy=no-user-gesture-required','--remote-debugging-port=0','--remote-allow-origins=*',`--user-data-dir=${profile}`,'about:blank'],{windowsHide:true,stdio:['ignore','ignore','pipe']});
+    browser=spawn(chrome,['--headless=new',...(process.env.CI_CHROMIUM_NO_SANDBOX==='1'?['--no-sandbox']:[]),'--disable-gpu','--no-first-run','--no-default-browser-check','--autoplay-policy=no-user-gesture-required','--remote-debugging-port=0','--remote-allow-origins=*',`--user-data-dir=${profile}`,'about:blank'],{windowsHide:true,stdio:['ignore','ignore','pipe']});
     const debug=await new Promise((resolve,reject)=>{
         let stderr='';const timer=setTimeout(()=>reject(new Error('Chromium did not start: '+stderr.slice(-2000))),15000);
         browser.once('error',reject);browser.stderr.on('data',b=>{stderr+=b.toString();const m=stderr.match(/DevTools listening on (ws:\/\/[^\s]+)/);if(m){clearTimeout(timer);resolve(m[1]);}});

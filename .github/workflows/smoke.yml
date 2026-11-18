@@ -41,14 +41,30 @@ jobs:
           if command -v node >/dev/null 2>&1; then
             node scripts/test_recorder.cjs
             node scripts/test_upload_client.cjs
+            node scripts/test_upload_recovery.cjs
+            node scripts/test_exam_file_ui.cjs
             node scripts/test_upload_logs.cjs
             node scripts/test_visualization_player.cjs
           else
             docker run --rm -v "$PWD:/workspace:ro" -w /workspace node:22-alpine \
-              sh -c 'node scripts/test_recorder.cjs && node scripts/test_upload_client.cjs && node scripts/test_upload_logs.cjs && node scripts/test_visualization_player.cjs'
+              sh -c 'node scripts/test_recorder.cjs && node scripts/test_upload_client.cjs && node scripts/test_upload_recovery.cjs && node scripts/test_exam_file_ui.cjs && node scripts/test_upload_logs.cjs && node scripts/test_visualization_player.cjs'
+          fi
+          if command -v node >/dev/null 2>&1; then
+            "$VENV/bin/python" scripts/test_exam_files.py
+          else
+            export AUDIO_PARK_NODE_DOCKER=1
+            "$VENV/bin/python" scripts/test_exam_files.py
           fi
           "$VENV/bin/python" scripts/ci_smoke.py
           "$VENV/bin/python" scripts/test_recording_pauses.py
+
+      - name: Browser recording recovery
+        run: |
+          docker build -t audio_park-browser-tests:latest -f scripts/Dockerfile.browser-tests scripts
+          docker run --rm --network none --cap-drop ALL --security-opt no-new-privileges \
+            --shm-size=256m --user "$(id -u):$(id -g)" -e CI_CHROMIUM_NO_SANDBOX=1 \
+            -v "$PWD:/workspace" -w /workspace audio_park-browser-tests:latest \
+            node scripts/test_recording_cache_browser.cjs
 
   # Выкладка на lab-сервер (https://msr25.ru/audio_park/) после зелёного smoke в main.
   # Данные (results.json, results/) и .env лежат в ~/audio_park и не трогаются.
