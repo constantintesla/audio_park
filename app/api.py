@@ -1467,6 +1467,11 @@ def auth_logs_page():
     return send_from_directory(WEB_DIR, 'auth-logs.html')
 
 
+@app.get('/upload-logs')
+def upload_logs_page():
+    return send_from_directory(WEB_DIR, 'upload-logs.html')
+
+
 @app.get('/assets/<path:path>')
 def serve_assets(path):
     return send_from_directory(os.path.join(WEB_DIR, 'assets'), path)

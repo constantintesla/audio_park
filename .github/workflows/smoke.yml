@@ -41,10 +41,11 @@ jobs:
           if command -v node >/dev/null 2>&1; then
             node scripts/test_recorder.cjs
             node scripts/test_upload_client.cjs
+            node scripts/test_upload_logs.cjs
             node scripts/test_visualization_player.cjs
           else
             docker run --rm -v "$PWD:/workspace:ro" -w /workspace node:22-alpine \
-              sh -c 'node scripts/test_recorder.cjs && node scripts/test_upload_client.cjs && node scripts/test_visualization_player.cjs'
+              sh -c 'node scripts/test_recorder.cjs && node scripts/test_upload_client.cjs && node scripts/test_upload_logs.cjs && node scripts/test_visualization_player.cjs'
           fi
           "$VENV/bin/python" scripts/ci_smoke.py
           "$VENV/bin/python" scripts/test_recording_pauses.py

@@ -44,6 +44,7 @@ class UploadTest(unittest.TestCase):
             create_user('owner', 'upload-test-password', 'expert')
             create_user('other', 'upload-test-password', 'expert')
             create_user('admin', 'upload-test-password', 'admin')
+            create_user('moderator', 'upload-test-password', 'moderator')
 
     def login(self, name='owner'):
         client = api.app.test_client()
@@ -56,6 +57,7 @@ class UploadTest(unittest.TestCase):
         response = self.client.post('/api/patients', json={}, headers=self.headers)
         self.patient = response.json['patient']['uuid']
         with api.app.app_context(), database() as db:
+            db.execute('DELETE FROM upload_events')
             db.execute('DELETE FROM parts')
             db.execute('DELETE FROM uploads')
         api.save_results([])
@@ -117,6 +119,79 @@ class UploadTest(unittest.TestCase):
             self.assertEqual(response.status_code, 400)
         self.assertEqual(self.client.post(f'/api/uploads/{key}/cancel', headers=self.headers).status_code, 200)
         self.assertEqual(self.put(key, 1, b'abc').status_code, 409)
+
+    def test_admin_diagnostics_access_privacy_and_rejected_request(self):
+        headers = {**self.headers, 'User-Agent': 'Android Chrome/130.0 YaBrowser/25.1 private-agent-secret',
+                   'Authorization': 'Bearer private-auth-secret'}
+        response = self.client.post('/api/uploads', headers=headers,
+                                    json={'version': 1, 'patient_uuid': self.patient,
+                                          'client_token': 'private-client-token-123456'})
+        key = response.json['upload_id']
+        self.assertEqual(self.put(key, 0, b'abc').status_code, 200)
+        rejected = self.complete(key, {'version': 999, 'private_metadata': 'never-store-this-payload'})
+        self.assertEqual(rejected.status_code, 400)
+        for role in ('owner', 'other', 'moderator'):
+            client, _ = self.login(role)
+            self.assertEqual(client.get('/upload-logs').status_code, 403)
+            self.assertEqual(client.get('/api/admin/upload-logs').status_code, 403)
+        guest = api.app.test_client()
+        self.assertEqual(guest.get('/api/admin/upload-logs').status_code, 401)
+        admin, _ = self.login('admin')
+        self.assertEqual(admin.get('/upload-logs').status_code, 200)
+        result = admin.get('/api/admin/upload-logs?q=' + key).json
+        self.assertEqual([row['event'] for row in result['events']], ['rejected', 'part_received', 'created'])
+        self.assertEqual(result['events'][0]['message'], 'Неизвестная версия протокола')
+        self.assertEqual(result['events'][0]['stage'], 'validating')
+        self.assertEqual(result['events'][-1]['platform'], 'Android')
+        self.assertEqual(result['events'][-1]['browser'], 'Яндекс 25')
+        self.assertEqual(result['events'][0]['current_state'], 'uploading')
+        self.assertEqual(result['events'][0]['received_bytes'], 3)
+        self.assertTrue(all(row['login'] == 'owner' for row in result['events']))
+        serialized = json.dumps(result)
+        for secret in ('private-client-token', 'private-agent-secret', 'private-auth-secret',
+                       'never-store-this-payload', self.patient, 'session_token', 'password_hash', 'manifest'):
+            self.assertNotIn(secret, serialized)
+        errors = admin.get('/api/admin/upload-logs?errors=1&q=owner').json['events']
+        self.assertEqual([row['event'] for row in errors], ['rejected'])
+        self.assertEqual(admin.get('/api/admin/upload-logs?q=%').json['events'], [])
+
+    def test_diagnostics_pagination_retention_and_cleaned_upload(self):
+        import time
+        from app.upload_diagnostics import record_event
+        key = self.create()
+        with api.app.app_context(), database() as db:
+            user_id = db.execute('SELECT owner FROM uploads WHERE id=?', (key,)).fetchone()['owner']
+            db.execute('UPDATE upload_events SET created_at=?', (time.time() - 91 * 86400,))
+            for _ in range(105):
+                record_event('submitted', key, user_id=user_id, status=202, db=db)
+            self.assertEqual(db.execute('SELECT count(*) FROM upload_events').fetchone()[0], 105)
+            db.execute('DELETE FROM uploads WHERE id=?', (key,))
+        admin, _ = self.login('admin')
+        first = admin.get('/api/admin/upload-logs').json
+        self.assertEqual(len(first['events']), 100)
+        self.assertTrue(first['has_more'])
+        second = admin.get('/api/admin/upload-logs?before=' + str(first['next_before'])).json
+        self.assertEqual(len(second['events']), 5)
+        self.assertFalse(second['has_more'])
+        self.assertFalse({row['id'] for row in first['events']} & {row['id'] for row in second['events']})
+        self.assertTrue(all(row['current_state'] is None for row in first['events']))
+
+    def test_diagnostics_migration_snapshot_is_honest_and_idempotent(self):
+        from flask import Flask
+        from app.upload_diagnostics import init_diagnostics
+        key = self.create()
+        with api.app.app_context(), database() as db:
+            db.execute('DELETE FROM upload_events')
+        for _ in range(2):
+            restarted = Flask('diagnostics-migration')
+            restarted.config.update(api.app.config)
+            init_diagnostics(restarted)
+        with api.app.app_context(), database() as db:
+            rows = db.execute('SELECT * FROM upload_events WHERE upload_id=?', (key,)).fetchall()
+            self.assertEqual(len(rows), 1)
+            self.assertEqual(rows[0]['source'], 'snapshot')
+            self.assertEqual(rows[0]['event'], 'snapshot')
+            self.assertEqual(rows[0]['stage'], 'uploading')
 
     def test_byte_equivalence_and_complete_race(self):
         for sr in (44100, 48000):
@@ -198,6 +273,10 @@ class UploadTest(unittest.TestCase):
                     row = db.execute('SELECT state,manifest FROM uploads WHERE id=?', (key,)).fetchone()
                 self.assertEqual(row['state'], 'completed')
                 self.assertEqual(row['manifest'], encoded)
+                with database() as db:
+                    stages = [r['event'] for r in db.execute('SELECT event FROM upload_events WHERE upload_id=? ORDER BY id', (key,))
+                              if r['event'] in ('assembling', 'queued', 'analyzing', 'completed')]
+                self.assertEqual(stages, ['assembling', 'queued', 'analyzing', 'completed'])
             self.assertEqual(self.complete(key, manifest).status_code, 202)
             manifest['device_info']['protocol_segments'][0]['end_sec'] = duration
             self.assertEqual(self.complete(key, manifest).status_code, 409)
@@ -314,6 +393,11 @@ class UploadTest(unittest.TestCase):
             self.assertTrue(process_one())
             analyzer.assert_not_called()
         self.assertEqual(self.client.get(f'/api/uploads/{key}').json['state'], 'failed')
+        admin, _ = self.login('admin')
+        events = admin.get('/api/admin/upload-logs?q=' + key).json['events']
+        self.assertEqual(events[0]['event'], 'failed')
+        self.assertEqual(events[0]['stage'], 'assembling')
+        self.assertIn('Ошибка обработки записи', events[0]['message'])
 
 
 if __name__ == '__main__':
