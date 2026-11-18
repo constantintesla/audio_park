@@ -1158,9 +1158,10 @@
 
         function recordingSegments(state,tasks) {
             const start=state.speechStart ?? 0;
+            const duration=(state.nSamples-start)/state.sr;
             const segments=(state.test?.segments || []).map(s=>({task:s.task,
                 start_sec:round3(Math.max(0,s.start-start)/state.sr),
-                end_sec:round3((Math.min(s.end,state.nSamples)-start)/state.sr)
+                end_sec:Math.min(duration,round3((Math.min(s.end,state.nSamples)-start)/state.sr))
             })).filter(s=>s.end_sec-s.start_sec>=0.2).sort((a,b)=>a.start_sec-b.start_sec);
             // Adjacent attempts may share the 300 ms button margin. Split that margin
             // once so persisted boundaries remain valid even when the next try starts immediately.

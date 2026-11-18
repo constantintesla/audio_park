@@ -69,18 +69,24 @@ class UploadTest(unittest.TestCase):
         return self.client.put(f'/api/uploads/{key}/parts/{number}', data=data,
                                headers={**self.headers, 'X-Part-Size': str(len(data)), 'X-Part-SHA256': sha(data), **extra})
 
-    def prepare(self, sr=48000, calibration=False):
+    def prepare(self, sr=48000, calibration=False, extra_frames=0):
         key = self.create()
         files, blobs, number = {}, {}, 0
         for name in ['recording'] + (['calibration'] if calibration else []):
             data = wav_bytes(sr)
+            if extra_frames:
+                out = io.BytesIO()
+                with wave.open(out, 'wb') as wav:
+                    wav.setparams((1, 2, sr, 0, 'NONE', 'not compressed'))
+                    wav.writeframes(data[44:] + b'\0\0' * extra_frames)
+                data = out.getvalue()
             parts = []
             for offset in range(0, len(data), 32768):
                 block = data[offset:offset + 32768]
                 parts.append({'number': number, 'size': len(block), 'sha256': sha(block)})
                 blobs[number] = block
                 number += 1
-            files[name] = {'format': 'pcm_s16le', 'sample_rate': sr, 'channels': 1, 'samples': sr, 'size': len(data), 'sha256': sha(data), 'parts': parts}
+            files[name] = {'format': 'pcm_s16le', 'sample_rate': sr, 'channels': 1, 'samples': sr + extra_frames, 'size': len(data), 'sha256': sha(data), 'parts': parts}
         for n in reversed(blobs):
             self.assertEqual(self.put(key, n, blobs[n]).status_code, 200)
         return key, {'version': 1, 'files': files, 'device_info': {'task': 'exam', 'dsi_segments': [{'task': 'mpt', 'start_sec': 0, 'end_sec': 1}], 'protocol_segments': [{'task': 'mpt', 'start_sec': 0, 'end_sec': 1}]}}, blobs
@@ -165,6 +171,55 @@ class UploadTest(unittest.TestCase):
                 self.assertEqual(analyzer.call_count, 1)
             self.assertEqual(len(api.load_results()), 1)
         self.assertEqual(self.client.get(f'/api/uploads/{key}').json['state'], 'completed')
+        self.assertEqual(self.complete(key, manifest).status_code, 202)
+
+    def test_rounded_eof_draft_retries_and_worker(self):
+        for sr in (44100, 48000):
+            key, manifest, _ = self.prepare(sr, calibration=True, extra_frames=32)
+            duration = manifest['files']['recording']['samples'] / sr
+            rounded = round(duration, 3)
+            self.assertGreater(rounded, duration)
+            for field in ('dsi_segments', 'protocol_segments'):
+                manifest['device_info'][field][0]['end_sec'] = rounded
+            encoded = json.dumps(manifest, sort_keys=True)
+            first = self.complete(key, manifest)
+            self.assertEqual(first.status_code, 202, first.data)
+            self.assertEqual(self.complete(key, manifest).json['job_id'], first.json['job_id'])
+            def fake_analysis(path, **kwargs):
+                import shutil
+                directory = Path(api.RESULTS_DIR) / kwargs['result_id']
+                directory.mkdir(exist_ok=True)
+                shutil.copyfile(path, directory / 'original.wav')
+                return {'features': {}, 'raw_data': {'data_directory': str(directory),
+                        'files': {'original_audio': str(directory / 'original.wav')}}}
+            with api.app.app_context(), patch('app.parkinson_analyzer.ParkinsonAnalyzer.analyze_audio_file', side_effect=fake_analysis):
+                self.assertTrue(process_one())
+                with database() as db:
+                    row = db.execute('SELECT state,manifest FROM uploads WHERE id=?', (key,)).fetchone()
+                self.assertEqual(row['state'], 'completed')
+                self.assertEqual(row['manifest'], encoded)
+            self.assertEqual(self.complete(key, manifest).status_code, 202)
+            manifest['device_info']['protocol_segments'][0]['end_sec'] = duration
+            self.assertEqual(self.complete(key, manifest).status_code, 409)
+
+    def test_invalid_bounds_keep_specific_error_and_allow_correction(self):
+        key, manifest, _ = self.prepare(extra_frames=32)
+        duration = manifest['files']['recording']['samples'] / 48000
+        for segment in ({'start_sec': 0, 'end_sec': duration + 0.0006},
+                        {'start_sec': duration, 'end_sec': duration + 0.0001},
+                        {'start_sec': -0.001, 'end_sec': 1},
+                        {'start_sec': 1, 'end_sec': 1},
+                        {'start_sec': True, 'end_sec': 1},
+                        {'start_sec': 0, 'end_sec': float('nan')},
+                        {'start_sec': 0, 'end_sec': float('inf')}):
+            manifest['device_info']['protocol_segments'] = [{'task': 'mpt', **segment}]
+            with self.assertLogs('app.uploads', level='WARNING') as messages:
+                response = self.complete(key, manifest)
+            self.assertEqual(response.status_code, 400)
+            self.assertIn('upload_rejected upload_id=' + key, messages.output[0])
+            self.assertIn(response.json['error'], ('Границы попытки выходят за запись', 'Некорректный манифест'))
+            self.assertEqual(self.client.get(f'/api/uploads/{key}').json['state'], 'uploading')
+        manifest['device_info']['protocol_segments'][0] = {'task': 'mpt', 'start_sec': 0, 'end_sec': round(duration, 3)}
         self.assertEqual(self.complete(key, manifest).status_code, 202)
 
     def test_analysis_recalculation_and_charts_share_one_slot(self):

@@ -105,6 +105,9 @@ def validate_manifest(data, parts):
     if not isinstance(info, dict) or not isinstance(data.get('calibration', {}), dict):
         raise BadRequest('Некорректные метаданные')
     duration = files['recording']['samples'] / files['recording']['sample_rate']
+    # Older browser drafts round seconds to milliseconds. Keep their manifest
+    # unchanged for idempotent retries, allowing only that rounding error at EOF.
+    max_end = duration + 0.0005 + 1e-9
     for field in ('dsi_segments', 'protocol_segments'):
         segments = info.get(field, [])
         if not isinstance(segments, list) or len(segments) > 500:
@@ -112,7 +115,8 @@ def validate_manifest(data, parts):
         for segment in segments:
             try:
                 start, end = segment['start_sec'], segment['end_sec']
-                if type(start) not in (int, float) or type(end) not in (int, float) or not 0 <= start < end <= duration:
+                if (type(start) not in (int, float) or type(end) not in (int, float)
+                        or not (0 <= start < duration and start < end <= max_end)):
                     raise ValueError()
             except (TypeError, KeyError, ValueError):
                 raise BadRequest('Границы попытки выходят за запись')
@@ -274,6 +278,16 @@ def init_uploads(app):
                 raise Conflict('Сборка или анализ уже начались')
             db.execute("UPDATE uploads SET state='cancelled',updated=? WHERE id=?", (time.time(), key))
         return jsonify(state='cancelled')
+
+    @app.errorhandler(BadRequest)
+    @app.errorhandler(Conflict)
+    @app.errorhandler(NotFound)
+    def upload_validation_error(error):
+        if not request.path.startswith('/api/uploads'):
+            return error
+        log.warning('upload_rejected upload_id=%s status=%s reason=%s',
+                    (request.view_args or {}).get('key', '-'), error.code, error.description)
+        return jsonify(error=error.description), error.code
 
     # Upload errors are JSON, including malformed requests and unexpected disk errors.
     @app.after_request
