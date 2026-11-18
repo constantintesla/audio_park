@@ -102,6 +102,10 @@ async function refreshLocalExams() {
     exams.sort((a,b)=>(a.status==='sent')-(b.status==='sent') || String(b.createdAt).localeCompare(String(a.createdAt)));
     for(const exam of exams) {
         const row=document.createElement('div'), label=document.createElement('span');
+        const patient=typeof patientRecords!=='undefined'?patientRecords.find(item=>item.uuid===exam.patientUuid):null;
+        const patientName=document.createElement('strong');
+        patientName.textContent=patient?.full_name || exam.patientId || 'Пациент не указан';
+        row.append(patientName);
         label.textContent=`${new Date(exam.createdAt).toLocaleString()} · ${EXAM_STATUS[exam.status] || 'Сохранено'}${exam.lastError?' · '+exam.lastError:''} `;row.append(label);
         row.className='local-exam-row';
         const controls=document.createElement('div');controls.className='local-exam-actions';row.append(controls);
