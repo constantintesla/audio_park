@@ -52,6 +52,13 @@ async function run(code) { return vm.runInContext(code,context); }
         clearPatientSelection();assert.equal(document.getElementById('patient-picker').hidden,false);
         document.getElementById('patient-id').value='TEST-PATIENT';`);
     await run('audioContext=testAudioContext; initRecordButton();');
+    // A final attempt at EOF must fit its WAV even when milliseconds round up.
+    await run(`for (const [sr,nSamples] of [[48000,9440576],[44100,44132]]) {
+        const state={sr,nSamples,speechStart:0,test:{segments:[{task:'mpt',start:0,end:nSamples}]}};
+        const segments=recordingSegments(state,new Set(['mpt']));
+        assert.equal(segments.length,1);
+        assert.equal(segments[0].end_sec,nSamples/sr);
+    }`);
     let checking=run('startRecording({check:true})');
     await new Promise(r=>setImmediate(r));
     await run('rec.chunks=[new Float32Array(4000).fill(0.05)]; rec.nSamples=4000;');
