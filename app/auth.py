@@ -378,7 +378,7 @@ def init_auth(app):
                 if request.path == "/api/auth/login":
                     audit_auth("login_failed", reason="csrf_invalid")
                 return jsonify(error="Сессия устарела. Обновите страницу"), 403
-        if request.path in {"/auth-logs", "/api/admin/auth-logs"} and g.user["role"] != "admin":
+        if (request.path in {"/auth-logs", "/upload-logs"} or request.path.startswith('/api/admin/')) and g.user["role"] != "admin":
             return jsonify(error="Недостаточно прав"), 403
         manager_routes = {"/all-results", "/users", "/api/users", "/api/recalculate-all"}
         if request.path in manager_routes and not is_manager():

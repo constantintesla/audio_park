@@ -1,0 +1,36 @@
+<!doctype html>
+<html lang="ru">
+<head>
+    <meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Диагностика загрузок — Анализ голоса</title>
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="assets/theme.css">
+    <script src="assets/auth.js"></script><script src="assets/upload-logs.js" defer></script>
+</head>
+<body>
+<header class="app-nav"><div class="container app-nav-inner">
+    <a class="brand" href="./"><span class="brand-mark"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" aria-hidden="true"><path d="M3 12h2M7 8v8M11 4v16M15 7v10M19 10v4M21 12h0"/></svg></span>
+        <span class="brand-text"><strong>Анализ голоса</strong><small>Скрининг признаков болезни Паркинсона</small></span></a>
+    <nav class="app-links" aria-label="Разделы"></nav>
+</div></header>
+<main class="container upload-diagnostics">
+    <h1>Диагностика загрузок</h1>
+    <p class="text-muted">Путь записи от отправки до результата. Журнал хранится 90 дней; время показано в вашем часовом поясе.</p>
+    <p id="upload-counts" class="diagnostic-counts" aria-label="Текущее состояние загрузок"></p>
+    <form id="log-filters" class="diagnostic-filters">
+        <div><label for="log-query" class="form-label">Учётная запись или номер загрузки / исследования</label>
+            <input id="log-query" class="form-control" type="search" maxlength="200" placeholder="Email, ID загрузки или AP-…"></div>
+        <label class="diagnostic-checkbox"><input id="log-errors" type="checkbox"> Только ошибки</label>
+        <button type="submit" class="btn btn-primary" id="log-refresh">Обновить</button>
+        <button type="button" class="btn btn-outline-secondary" id="log-copy" disabled>Скопировать журнал</button>
+    </form>
+    <p id="log-status" role="status" aria-live="polite"></p>
+    <div class="table-wrap"><table class="table diagnostic-table">
+        <caption>События загрузки. Старые загрузки показаны как снимок состояния без выдуманной истории.</caption>
+        <thead><tr><th scope="col">Время и устройство</th><th scope="col">Учётная запись</th><th scope="col">Загрузка</th><th scope="col">Событие и причина</th></tr></thead>
+        <tbody id="log-events"></tbody>
+    </table></div>
+    <button id="log-more" type="button" class="btn btn-outline-secondary" hidden>Показать более ранние</button>
+</main>
+</body></html>

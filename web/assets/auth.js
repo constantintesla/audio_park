@@ -51,7 +51,7 @@
             const links = [['/', 'Обследование'], ['/results', 'Мои исследования'], ['/guide', 'Инструкция']];
             if (['moderator', 'admin'].includes(user.role)) links.push(['/all-results', 'Все исследования'], ['/users', 'Учётные записи']);
             const nav = document.querySelector('.app-links');
-            if (user.role === 'admin') links.push(['/auth-logs', 'Журнал входов']);
+            if (user.role === 'admin') links.push(['/auth-logs', 'Журнал входов'], ['/upload-logs', 'Диагностика загрузок']);
             nav.replaceChildren();
             for (const [path, label] of links) {
                 const link = document.createElement('a'); link.href = api.url(path); link.textContent = label;

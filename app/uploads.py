@@ -15,6 +15,7 @@ from contextlib import contextmanager
 from flask import current_app, g, jsonify, request
 from werkzeug.exceptions import BadRequest, Conflict, NotFound, RequestEntityTooLarge
 from app.auth import get_patient
+from app.upload_diagnostics import init_diagnostics, record_event
 
 log = logging.getLogger(__name__)
 TERMINAL = ('completed', 'failed', 'cancelled')
@@ -145,6 +146,8 @@ def init_uploads(app):
             db.execute('ALTER TABLE uploads ADD COLUMN client_token TEXT')
         db.execute('CREATE UNIQUE INDEX IF NOT EXISTS upload_client_token ON uploads(owner,client_token)')
 
+    init_diagnostics(app)
+
     @app.get('/api/uploads/config')
     def upload_config():
         allowed = os.getenv('CHUNKED_UPLOAD_USERS', '').split(',')
@@ -176,12 +179,15 @@ def init_uploads(app):
             if old:
                 if old['patient'] != patient['uuid']:
                     raise Conflict('Ключ повтора уже использован')
+                record_event('created', old['id'], stage=old['state'], status=200,
+                             message='Повтор создания: использована существующая загрузка', db=db)
                 return jsonify(upload_id=old['id']), 200
             active = db.execute("SELECT count(*) FROM uploads WHERE owner=? AND state NOT IN ('completed','failed','cancelled')", (g.user['id'],)).fetchone()[0]
             if active >= app.config['UPLOAD_MAX_ACTIVE']:
                 raise Conflict('Слишком много незавершённых загрузок')
             db.execute('INSERT INTO uploads VALUES (?,?,?,?,?,?,?,?,?)',
                        (key, g.user['id'], patient['uuid'], 'uploading', 'AP-' + uuid.uuid4().hex, None, None, time.time(), token))
+            record_event('created', key, stage='uploading', status=201, db=db)
         log.info('upload_created upload_id=%s', key)
         return jsonify(upload_id=key), 201
 
@@ -240,6 +246,8 @@ def init_uploads(app):
                     os.replace(tmp, directory / str(number))
                     db.execute('INSERT INTO parts VALUES (?,?,?,?)', (key, number, size, expected_hash))
                 db.execute('UPDATE uploads SET updated=? WHERE id=?', (time.time(), key))
+                record_event('part_received', key, stage='uploading', status=200, part=number,
+                             byte_count=size, message='Повтор уже принятой части' if old else 'Часть сохранена', db=db)
             log.info('upload_part upload_id=%s number=%s bytes=%s duplicate=%s', key, number, size, bool(old))
             return jsonify(number=number, size=size, sha256=expected_hash)
         finally:
@@ -266,6 +274,8 @@ def init_uploads(app):
                 parts = db.execute('SELECT * FROM parts WHERE upload_id=?', (key,)).fetchall()
                 validate_manifest(manifest, parts)
                 db.execute("UPDATE uploads SET manifest=?,state='assembling',updated=? WHERE id=?", (encoded, time.time(), key))
+            record_event('submitted', key, stage=row['state'] if row['manifest'] else 'assembling', status=202,
+                         message='Повтор подтверждения' if row['manifest'] else 'Запись передана в обработку', db=db)
             return jsonify(upload_id=key, job_id=row['result_id']), 202
 
     @app.post('/api/uploads/<key>/cancel')
@@ -277,6 +287,7 @@ def init_uploads(app):
             if row['state'] not in ('uploading', 'cancelled', 'failed'):
                 raise Conflict('Сборка или анализ уже начались')
             db.execute("UPDATE uploads SET state='cancelled',updated=? WHERE id=?", (time.time(), key))
+            record_event('cancelled', key, stage='cancelled', status=200, db=db)
         return jsonify(state='cancelled')
 
     @app.errorhandler(BadRequest)
@@ -297,6 +308,13 @@ def init_uploads(app):
                         409: 'Конфликт загрузки: проверьте принятые части', 500: 'Не удалось сохранить запись. Повторите позже.'}
             response.set_data(json.dumps({'error': messages.get(response.status_code, 'Ошибка загрузки')}, ensure_ascii=False))
             response.content_type = 'application/json'
+        if (request.path.startswith('/api/uploads') and response.status_code >= 400
+                and request.endpoint in {'create_upload', 'put_part', 'complete_upload', 'cancel_upload', 'upload_status'}):
+            stage = {'create_upload': 'creating', 'put_part': 'uploading', 'complete_upload': 'validating',
+                     'cancel_upload': 'cancelling', 'upload_status': 'status'}[request.endpoint]
+            data = response.get_json(silent=True) or {}
+            record_event('rejected', (request.view_args or {}).get('key'), stage=stage,
+                         status=response.status_code, message=data.get('error', 'Ошибка загрузки'))
         return response
 
 

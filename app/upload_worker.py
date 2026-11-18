@@ -14,6 +14,7 @@ from app import api
 from app.auth import connection, get_patient, public_user
 from app.storage_lock import file_lock
 from app.uploads import assemble, database, digest, root
+from app.upload_diagnostics import record_event, worker_error
 from flask import g
 from werkzeug.datastructures import FileStorage
 
@@ -26,6 +27,7 @@ def process_one():
     if not row:
         return False
     key, began = row['id'], time.monotonic()
+    stage = row['state']
     try:
         manifest = json.loads(row['manifest'])
         with connection() as db:
@@ -42,10 +44,14 @@ def process_one():
         if existing:
             result = existing
         else:
+            stage = 'assembling'
+            record_event('assembling', key, user_id=row['owner'], stage='assembling')
             directory = assemble(key, manifest)
             for state in ('queued', 'analyzing'):
+                stage = state
                 with database() as db:
                     db.execute('UPDATE uploads SET state=?,updated=? WHERE id=?', (state, time.time(), key))
+                    record_event(state, key, user_id=row['owner'], stage=state, db=db)
             metadata = {field: json.dumps(manifest.get(field, {})) for field in ('device_info', 'calibration')}
             calibration = None
             try:
@@ -57,23 +63,28 @@ def process_one():
             finally:
                 if calibration:
                     calibration.close()
+        stage = 'verifying'
         files = result.get('raw_data', {}).get('files', {})
         for name, field in [('recording', 'original_audio'), ('calibration', 'calibration_audio')]:
             if name in manifest['files'] and (not files.get(field) or digest(files[field]) != manifest['files'][name]['sha256']):
                 raise ValueError('Не подтверждено сохранение исходного WAV')
         with database() as db:
             db.execute("UPDATE uploads SET state='completed',error=NULL,updated=? WHERE id=?", (time.time(), key))
+            record_event('completed', key, user_id=row['owner'], stage='completed',
+                         elapsed=round(time.monotonic() - began, 3), db=db)
         # Success cleanup only after verifying saved WAVs and committing status.
         try:
             cleanup_completed(key)
         except OSError:
             log.warning('upload_cleanup_deferred upload_id=%s', key)
         log.info('upload_completed upload_id=%s seconds=%.2f', key, time.monotonic() - began)
-    except Exception:
+    except Exception as error:
         log.exception('upload_failed upload_id=%s', key)
         with database() as db:
             db.execute("UPDATE uploads SET state='failed',error=?,updated=? WHERE id=?",
                        ('Не удалось собрать или проанализировать запись. Исходная запись сохранена локально; обратитесь к администратору.', time.time(), key))
+            record_event('failed', key, user_id=row['owner'], stage=stage, message=worker_error(error),
+                         elapsed=round(time.monotonic() - began, 3), db=db)
     finally:
         if api._malloc_trim:
             import gc

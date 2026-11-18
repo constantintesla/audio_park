@@ -96,7 +96,7 @@ class AccessTest(unittest.TestCase):
 
     def test_guest_has_no_data_access(self):
         client = api.app.test_client()
-        for path in ['/api/results', '/api/patients', '/api/stats', '/api/results/AP-own', '/api/audio/AP-own', '/api/visualization/AP-own', '/api/users', '/api/export/csv', '/api/export/html', '/api/export/json']:
+        for path in ['/api/results', '/api/patients', '/api/stats', '/api/results/AP-own', '/api/audio/AP-own', '/api/visualization/AP-own', '/api/users', '/api/export/csv', '/api/export/html', '/api/export/json', '/api/admin/upload-logs']:
             self.assertEqual(client.get(path).status_code, 401, path)
         self.assertEqual(client.get('/').status_code, 302)
         self.assertEqual(client.get('/healthz').get_json(), {'status':'ok'})
