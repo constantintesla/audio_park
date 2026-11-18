@@ -84,17 +84,32 @@
         catch (error) { if (localAvailable) throw error; }
         draft = null; render();
     }
+    async function createServerUpload() {
+        const created = await json('/api/uploads', {method: 'POST', headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({version: 1, patient_uuid: draft.patientUuid, client_token: draft.token})});
+        draft.uploadId = created.upload_id;
+        await persist();
+    }
     async function transmit(progress) {
         busy = true; render();
         try {
             await AudioPark.refreshAuth();
             if (!draft.uploadId) {
-                const created = await json('/api/uploads', {method: 'POST', headers: {'Content-Type': 'application/json'},
-                    body: JSON.stringify({version: 1, patient_uuid: draft.patientUuid, client_token: draft.token})});
-                draft.uploadId = created.upload_id; await persist();
+                await createServerUpload();
             }
-            const path = `/api/uploads/${draft.uploadId}`;
-            let status = await json(path);
+            let path = `/api/uploads/${draft.uploadId}`, status;
+            try { status = await json(path); }
+            catch (error) {
+                if (error.status !== 404) throw error;
+                // Cleanup may remove an old server draft. Reuse exactly the local
+                // patient, token, manifest and Blobs; the server rechecks ownership.
+                const previous = draft.uploadId;
+                await createServerUpload();
+                if (draft.uploadId === previous) throw error;
+                path = `/api/uploads/${draft.uploadId}`;
+                status = await json(path);
+                progress('uploading', 'Отправка восстановлена из локальной копии', 0);
+            }
             if (status.state === 'cancelled') throw new Error('Загрузка отменена. Скачайте запись или начните новое обследование.');
             if (status.state === 'uploading') {
                 const accepted = new Map(status.parts.map(part => [part.number, part]));
@@ -141,6 +156,7 @@
         } finally { busy = false; render(); }
     }
     const client = window.ChunkedUpload = {json, hash, makeDraft,
+        async hasPending(token) { await client.ready; return !!draft && draft.token === token; },
         config: () => json('/api/uploads/config'),
         async start(input, config, progress) {
             await client.ready;
@@ -177,7 +193,11 @@
         document.getElementById('upload-cancel').addEventListener('click', async () => {
             if (busy || !draft || !confirm('Отменить загрузку и удалить локальную копию записи?')) return;
             try {
-                if (draft.uploadId) await json(`/api/uploads/${draft.uploadId}/cancel`, {method: 'POST'});
+                await AudioPark.refreshAuth();
+                if (draft.uploadId) {
+                    try { await json(`/api/uploads/${draft.uploadId}/cancel`, {method: 'POST'}); }
+                    catch (error) { if (error.status !== 404) throw error; }
+                }
                 await clear();
             } catch (error) { document.getElementById('upload-message').textContent = error.message; }
         });

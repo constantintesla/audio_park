@@ -21,6 +21,14 @@ vm.runInThisContext(fs.readFileSync(path.join(__dirname,'../web/assets/exam-file
     const bad=structuredClone(imported.deviceInfo);bad.dsi_segments[0].end_sec=100;
     assert.throws(()=>ExamFiles.validate(bad,14),/Границы/);
     assert.throws(()=>ExamFiles.validate({task:'exam'},14),/отсутствует разметка/);
+    const rounded={...imported,deviceInfo:structuredClone(imported.deviceInfo)};
+    rounded.deviceInfo.protocol_segments.at(-1).end_sec=14.001;
+    const bounded=await ExamFiles.importExam(await ExamFiles.exportExam(rounded),context);
+    assert.equal(bounded.deviceInfo.protocol_segments.at(-1).end_sec,14);
+    assert.equal(rounded.deviceInfo.protocol_segments.at(-1).end_sec,14.001,'Export source must not be changed');
+    assert.deepEqual(await bounded.audio.arrayBuffer(),await imported.audio.arrayBuffer());
+    const invalid=structuredClone(rounded.deviceInfo);invalid.protocol_segments.at(-1).end_sec=14.0021;
+    assert.throws(()=>ExamFiles.validate(invalid,14),/Границы/);
     const corrupted=new Uint8Array(await exported.arrayBuffer());corrupted[50]^=255;
     await assert.rejects(ExamFiles.unzip(new Blob([corrupted])));
     await assert.rejects(ExamFiles.unzip(new Blob([fs.readFileSync(path.join(process.argv[2],'unsafe.zip'))])),/Недопустимое/);

@@ -1,6 +1,7 @@
 /* Portable examination format v1. ZIP writer uses STORE; reader accepts STORE/DEFLATE. */
 (() => {
     const MAX = 128 * 1024 * 1024, TOTAL = 256 * 1024 * 1024, COUNT = 256;
+    const SEGMENT_EOF_TOLERANCE = .002;
     const enc = new TextEncoder(), dec = new TextDecoder('utf-8', {fatal:true});
     const fail = message => { throw new Error(message); };
     const safe = name => /^[a-zA-Z0-9_./-]+$/.test(name) && !name.startsWith('/') && !name.split('/').some(p => !p || p === '.' || p === '..');
@@ -63,7 +64,7 @@
             if(!Array.isArray(segments) || segments.length>(key==='dsi_segments'?20:40)) fail('Недопустимая разметка заданий');
             let previous=0;
             for(const s of segments) {
-                if(!s || !(key==='dsi_segments'?['mpt','glide','soft','vowel'].includes(s.task):tasks.has(s.task) && !['glide','soft','vowel'].includes(s.task)) || !Number.isFinite(s.start_sec) || !Number.isFinite(s.end_sec) || s.start_sec<previous || s.end_sec-s.start_sec<0.2 || s.end_sec>duration+0.002) fail('Границы заданий не согласованы с аудио');
+                if(!s || !(key==='dsi_segments'?['mpt','glide','soft','vowel'].includes(s.task):tasks.has(s.task) && !['glide','soft','vowel'].includes(s.task)) || !Number.isFinite(s.start_sec) || !Number.isFinite(s.end_sec) || s.start_sec<previous || s.end_sec-s.start_sec<0.2 || s.end_sec>duration+SEGMENT_EOF_TOLERANCE+1e-9) fail('Границы заданий не согласованы с аудио');
                 previous=s.end_sec;
             }
         }
@@ -102,6 +103,9 @@
         if(!name) fail('В архиве нет основной записи');
         const audio=new Blob([files.get(name)],{type:name.endsWith('.wav')?'audio/wav':'application/octet-stream'}), buffer=await context.decodeAudioData(await audio.arrayBuffer());
         const info=cleanInfo(manifest.device_info); validate(info,buffer.duration,{incomplete:manifest.incomplete===true});
+        for(const key of ['dsi_segments','protocol_segments']) if(Array.isArray(info[key])) {
+            info[key]=info[key].map(segment=>({...segment,end_sec:Math.min(segment.end_sec,buffer.duration)}));
+        }
         if(files.has('calibration.wav')) await context.decodeAudioData(files.get('calibration.wav').slice().buffer);
         return {id:crypto.randomUUID(),audio,buffer,incomplete:manifest.incomplete===true,deviceInfo:info,calibration:manifest.calibration || null,calibrationWav:files.has('calibration.wav')?new Blob([files.get('calibration.wav')],{type:'audio/wav'}):null};
     }
